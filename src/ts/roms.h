@@ -21,7 +21,9 @@ public:
     static constexpr uint32_t kSampleRamWords = 0x100000;
     bool load(const RomSet&, std::string& err);  // err names the file: "u45: expected 2097152 bytes, got ..."
     uint16_t read(int bank, uint32_t addr21) override;
-    uint16_t& sampleRam(uint32_t word) { return ram_[word]; }  // the CPU host window (Task 4 maps it)
+    // The CPU host window; the word index wraps at kSampleRamWords (the machine bounds it first, T4).
+    uint16_t& sampleRam(uint32_t word) { return ram_[word & (kSampleRamWords - 1)]; }
+    uint16_t sampleRam(uint32_t word) const { return ram_[word & (kSampleRamWords - 1)]; }
 
 private:
     std::vector<uint8_t> u41_, u43_, u45_, u46_;

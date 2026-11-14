@@ -684,10 +684,10 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## T4: Sample RAM
 - Options: 2 MB (one 1M x 8 pair), 4 MB, none.
-- Choice: 2 MB: OTTO bank 2 words 0-0xFFFFF; the rest of bank 2 and bank 3 read 0 (no DRAM). The CPU host window base and the SIMM probe behaviour come from the running firmware (Task 4).
-- Evidence: design section 4; service manual SIMM text.
-- Confidence: Medium.
-- Status: Storage implemented in `WaveMemory::sampleRam` (Task 1); CPU mapping in Task 4. Test: ts_sample_ram_bank2.
+- Choice: 2 MB: OTTO bank 2 words 0-0xFFFFF; the rest of bank 2 and bank 3 read 0 and ignore writes (empty sockets). The CPU sees banks 2-3 at 0x400000-0xBFFFFF, word (a - 0x400000) / 2 (CPU A22..A1); a byte access reads or writes one half of the word. `WaveMemory::sampleRam` wraps its index; the machine bounds it first, so an empty socket never aliases the installed pair.
+- Evidence: design section 4; service manual SIMM text; the OS's socket probe at boot (words written at 0x400000, 0x600000, 0x800000, 0xA00000 and read back: steps of one 1M x 8 pair). None, 2 MB, 2 MB aliased over the window, and empty sockets reading 0xFFFF all boot with the same event sequence and no "WRONG SOCKETS" text (docs/ts-hardware-interface.md, "Memory map").
+- Confidence: Medium for the window base; low for the installed size and empty-socket reads (the boot cannot tell).
+- Status: Storage in `WaveMemory::sampleRam` (Task 1); window in `Machine::hostWord` and `Machine::write8` (Task 4). Tests: ts_sample_ram_bank2, ts_ram_alias_and_sample_window.
 
 ## T11: Audio routing
 - Options: how the 20-bit OTTO values enter the 16-bit ESP ports; which channels feed what; ESP instructions per frame.
@@ -698,16 +698,16 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## T1: Clocks and scheduling
 - Options: the CPU/OTTO crystal (the schematic's digit is unreadable); how the CPU, OTTO, DUART and ESP share time.
-- Choice: CPU = OTTO = 15 238 090 Hz (30.47618 MHz / 2, the KS-32's crystal), so a 32-voice frame is 512 CPU clocks (29 761.9 Hz). DUART X1 4 MHz, its serial clock 500 kHz on IP3/IP4. ESP 9 216 000 Hz (103 instructions per frame, T11). Per voice slot the CPU runs 16 clocks less the carried overshoot (a carry of 16 or more skips the CPU), then `Otto::stepVoice`, then the DUART by the exact rational accumulator `acc += 16 * 4 000 000; x1 = acc / 15 238 090`. `Machine::cycles()` is the raw CPU total (the time base of `BusEvent.cycle`): 40 reset clocks + 16 per slot, plus up to one instruction's overshoot still carried.
-- Evidence: schematic sheet 1 (crystals); notes §4 (16 CLKs per voice); the KS-32 scheduler.
-- Confidence: Low-medium for the CPU clock until the firmware's own timing checks pass (Task 4); the scheduling is exact.
-- Status: implemented in `ens::ts::Machine::slot` (Plan 3 Task 3). Test: ts_frame_cadence.
+- Choice: CPU = OTTO = 15 238 090 Hz (30.47618 MHz / 2, the KS-32's crystal), so a 32-voice frame is 512 CPU clocks (29 761.9 Hz). DUART X1 4 MHz; 16x serial clocks 500 kHz on IP3/IP4 (channel A, 31 250 baud) and 1 MHz on IP5/IP6 (channel B, 62 500 baud). The board's 2681 takes RxCB from IP6, the core (68681) from IP2, so the 1 MHz RxCB clock is set on the core's IP2 clock input; the IP2 level (DENS) stays a separate input. ESP 9 216 000 Hz (103 instructions per frame, T11). Per voice slot the CPU runs 16 clocks less the carried overshoot (a carry of 16 or more skips the CPU), then `Otto::stepVoice`, then the DUART by the exact rational accumulator `acc += 16 * 4 000 000; x1 = acc / 15 238 090`. `Machine::cycles()` is the raw CPU total (the time base of `BusEvent.cycle`): 40 reset clocks + 16 per slot, plus up to one instruction's overshoot still carried.
+- Evidence: schematic sheet 1 (crystals); notes §4 (16 CLKs per voice); the KS-32 scheduler. Task 4: the OS writes CSRA = CSRB = 0xEE; without a clock on channel B it never sends (it polls TxRDYB). Its boot clock check (a 10 ms DUART timer, then a read of a running OTTO voice's ACCUM) passes; the boot is unchanged for X1 rates from 3.7 to 4.7 MHz relative to the CPU and stalls at 3.4 MHz, so the check pins the CPU clock only loosely.
+- Confidence: Low-medium for the CPU clock (the firmware's check is loose); medium for the serial clocks; the scheduling is exact.
+- Status: implemented in `ens::ts::Machine::slot` and `Machine::create` (Plan 3 Tasks 3-4). Test: ts_frame_cadence.
 
 ## T7: DUART wiring
 - Options: which DUART pins carry which board signal.
 - Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (immediate conversion); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. Panel (OP4, OP5, OP7) and the rest are used from Task 5 on.
 - Evidence: schematic sheet 1 (DUART U10 pin list); the core's `outputPins()` returns the pin level, the inverse of OPR.
-- Confidence: High for the signals; the OP6 polarity is carried from the KS-32 (K15) and checked in Task 4.
+- Confidence: High for the signals. Medium for the OP6 polarity: with it the OS halts the ESP at 1.3 ms, downloads to it while halted and releases it at 8.06 s; the reverse polarity runs the ESP during the downloads and leaves it halted after the boot (Task 4).
 - Status: implemented in `Machine::updateLines` (Plan 3 Task 3).
 
 ## T14: RESET instruction
@@ -716,3 +716,52 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Evidence: schematic sheet 1.
 - Confidence: Medium.
 - Status: implemented in `Machine::resetPeripherals` (Plan 3 Task 3).
+
+## T13: Address map and RAM
+- Options: RAM size (128 KB, 256 KB, 512 KB) and windows; whether the top window (reset SSP 0xFF80A0) is the RAM at 0 or a separate RAM; the reset overlay; where the I/O1 and I/O2 devices sit; the ROM mirror.
+- Choice: OSRAM 256 KB at 0x000000-0x03FFFF and again at 0xFC0000-0xFFFFFF (one RAM); reads of 0-7 come from the ROM until the first write into 0-7 (the KS-32 K1 rule). SEQEXP (U1/U2, the SQX-70 kit) not fitted. I/O1 at 0x200000 + 0x40000 n (n = 0 DUART, 1 SCSI, 2 FDC, 3 IEXP), I/O2 at 0x300000 (OTTO) and 0x380000 (ESP); each device decoded over its whole block. ROM 0xC00000-0xC7FFFF, mirrored to 0xCFFFFF. The battery image (Task 8) is OSRAM only.
+- Evidence: the OS's first accesses land in exactly these blocks, in the schematic's U7 decoder order, with 0 unmapped accesses in the boot. 512 KB at 0 with the top aliasing offset 0 crashes at 203 ms ("SYSTEM ERROR 12"). 128 KB, and a separate top RAM, also boot (only a one-word probe at 0x038000 differs); the stack and the vectors must both live in RAM every TS has, and U1/U2 come only with the SQX-70 (service manual p59), so both windows are OSRAM. The ROM mirror is unobserved. Details: docs/ts-hardware-interface.md, "Memory map".
+- Confidence: High for the device windows and the low RAM window; medium for the top window and the RAM size; SEQEXP's address is unknown.
+- Status: implemented in `Machine::decode` (Plan 3 Task 4). Tests: ts_boot_is_fully_mapped, ts_ram_alias_and_sample_window.
+
+## T5: Interrupt levels
+- Options: DUART, OTTO and the disk line on levels 1-3 in any order; vectored or autovectored.
+- Choice: OTTO level 1, DUART level 3, every level autovectored (AVEC); level 2 (DISKIRQ/, pull-up only) has no source.
+- Evidence: schematic (IPL2 tied high, AVEC from U67). Booting each placement: DUART on 3 boots (all acknowledges level 3, vector 27); DUART on 1 gives "SYSTEM ERROR 17" (unexpected OTTO interrupt) at its first interrupt, DUART on 2 gives "SYSTEM ERROR 139". The OTTO never asserts IRQB in the boot, so its level comes from the OS's level-1 handler. The OS writes IVR = 0x1B (27, the level-3 autovector), which AVEC ignores.
+- Confidence: High for the DUART; medium-high for the OTTO.
+- Status: implemented in `Machine::updateLines` and `interruptAcknowledge` (Plan 3 Task 4); `setIrqLevels` keeps the levels switchable for experiments. Tests: ts_boot_takes_no_fault_vectors.
+
+## T6: Wait states
+- Options: model the DTACK delays (I/O1 +3 clocks, OTTO +2) or not.
+- Choice: not modelled.
+- Evidence: no firmware timing check fails without them: the boot's clock check passes and the boot reaches its steady state with no error text.
+- Confidence: Low (nothing in the boot needs them; a later timing-sensitive path might).
+- Status: Plan 3 Task 4: nothing implemented.
+
+## T8: Analog inputs (provisional)
+- Options: the resting raw value of each mux input.
+- Choice: until Task 6: the reference (Y7, select 7) reads 800, every other input 0.
+- Evidence: with the reference at 0 the OS divides by the PAR reading (vector 5, "SYSTEM ERROR 130") at about 8.08 s; 1, 200, 800 and 1023 all boot. 800 is 200 in the top 8 bits, the middle of the service manual's 180-220.
+- Confidence: Placeholder.
+- Status: `kReferenceRest` in `Machine::create` (Plan 3 Task 4); Task 6 settles all resting values.
+
+## T9: IEXP port (provisional)
+- Options: the value read at 0x2C0001 with nothing pressed.
+- Choice: 0xFF until Task 6 (D0-D3 high = nothing pressed, active low; upper bits high).
+- Evidence: schematic (D0-D3 active low); the OS reads it once per 1 ms tick from about 1 s.
+- Confidence: Low for the upper bits.
+- Status: `Machine::ioRead` (Plan 3 Task 4); Task 6 settles it.
+
+## T10: Floppy controller (provisional)
+- Options: no FDC (status 0), a static status, a uPD765 command/result handshake.
+- Choice: until Task 6: `ens::ts::Fdc`, RQM always, DIO/CB while result bytes wait, uPD765 command lengths, empty-drive results (Sense Interrupt Status ST0 0x80, Sense Drive Status ST3 = drive bits only, reads "not ready"); writes to A0 = 0 ignored. No index pulse on IP0 (empty drive).
+- Evidence: status 0 makes the OS time out after 34 ms; a static 0x80 makes it wait about 0.9 s for a result; with the handshake the OS reads its results and then waits about 0.9 s for an IP0..IP3 change in IPCR (toggling IP0 ends it at once). The OS's two ILLEGAL instructions come in every variant (docs/ts-hardware-interface.md, "Floppy controller").
+- Confidence: Low.
+- Status: `src/ts/fdc.h` (Plan 3 Task 4); Task 6 settles the empty drive.
+
+## T12: SCSI and unmapped space
+- Options: reads of the SCSI block (no board) and of unmapped space return 0 or open-bus 0xFF.
+- Choice: 0; writes ignored; every access traced (SCSI as `Device::Scsi`, the rest as `Device::Unmapped`).
+- Evidence: the OS's SCSI probe at 110 ms (write 0x02 to 0x240001, write and read 0x240003) reads 0, then writes 0x55 and reads 0, and goes on; with 0xFF it stops after the first read. Both boot the same way after that: neither reads as a SCSI board. Nothing unmapped is read in the boot.
+- Confidence: Medium.
+- Status: implemented in `Machine::ioRead` (Plan 3 Task 4).

@@ -12,6 +12,7 @@
 #include "duart/duart.h"
 #include "m68k/m68k.h"
 #include "ts/board.h"
+#include "ts/fdc.h"
 #include "ts/roms.h"
 
 namespace ens::ts {
@@ -28,6 +29,7 @@ struct BusEvent {
 };
 
 constexpr uint32_t kCpuHz = 15'238'090, kDuartHz = 4'000'000;  // DECISION T1
+constexpr uint32_t kBootMs = 12'200;                           // firmware tests: boot end (8076 ms) + 50 %
 constexpr int kSlotClocks = 16;                                // OTTO: 16 CLKs per voice (notes §4)
 constexpr int kPanelChannel = 1;                               // DECISION T7: DUART B is the display/keyboard link
 constexpr int kMidiChannel = 0;                                // DECISION T7: DUART A is MIDI
@@ -40,13 +42,13 @@ public:
     Machine& operator=(const Machine&) = delete;
     void runFrame(Audio& out);                              // one OTTO frame (ACTV + 1 slots)
     uint64_t cycles() const { return cpu_.totalCycles(); }  // CPU clocks since the machine was created (T1)
-    uint16_t peek16(uint32_t addr) const;                   // ROM and RAM only, devices read 0, no side effects
+    uint16_t peek16(uint32_t addr) const;                   // memory only (devices read 0), no side effects
     std::function<void(const BusEvent&)> onBusEvent;        // the bus trace; off when empty
     m68k::Cpu& cpu() { return cpu_; }
     Board& board() { return board_; }
     duart::Duart& duart() { return duart_; }
-    // DECISION T5: interrupt level (1-3, 0 = not connected) of each source; Task 4 finds the real ones.
-    // The default is a placeholder: DUART 3, OTTO 2, disk 1 (the disk line has no source).
+    // DECISION T5: interrupt level (1-3, 0 = not connected) of each source: OTTO 1, DUART 3 (the disk
+    // line, level 2, has no source). Settable for experiments.
     void setIrqLevels(int otto, int duart) {
         ottoLevel_ = otto;
         duartLevel_ = duart;
@@ -63,7 +65,14 @@ public:
 private:
     Machine() = default;
     void powerOn();
-    uint8_t memByte(uint32_t a, bool& mapped) const;  // ROM and RAM
+    enum class Region : uint8_t { None, Rom, Ram, Host, Duart, Scsi, Fdc, Iexp, Otto, Esp };
+    static Region decode(uint32_t a);
+    static Device deviceOf(Region r);
+    uint8_t romByte(uint32_t off) const;
+    uint16_t hostWord(uint32_t a) const;
+    uint8_t memByte(uint32_t a, bool& mapped) const;  // ROM, RAM and the sample-RAM window
+    uint8_t ioRead(Region r, uint32_t a);
+    void ioWrite(Region r, uint32_t a, uint8_t v);
     void trace(uint32_t addr, uint16_t value, uint8_t size, bool write, Device dev);
     void updateLines();  // IPL, the ESP's HALT pin, the OTTO pot
     void slot(int i, int n);
@@ -71,13 +80,15 @@ private:
     WaveMemory waves_;  // before board_: the OTTO holds a reference
     Board board_{waves_};
     duart::Duart duart_{kDuartHz};
+    Fdc fdc_;
     m68k::Cpu cpu_{*this};
     std::vector<uint16_t> os_;  // 256K words, T2
-    // DECISION T13 (provisional until Task 4): 64 KB RAM at 0xFF0000.
-    std::vector<uint8_t> ram_ = std::vector<uint8_t>(0x10000, 0);
-    // The POT multiplexer's inputs by select (DUART OP2..OP0); resting values come in Task 6.
+    static constexpr uint32_t kRamBytes = 0x40000;  // DECISION T13: OSRAM 256 KB (SEQEXP, the SQX-70, not fitted)
+    std::vector<uint8_t> ram_ = std::vector<uint8_t>(kRamBytes, 0);
+    bool overlay_ = true;  // reads of 0-7 come from the ROM until the first write there
+    // The POT multiplexer's inputs by select (DUART OP2..OP0); only the reference is set (T8), Task 6 does the rest.
     std::array<uint16_t, 8> mux_{};
-    int ottoLevel_ = 2, duartLevel_ = 3;
+    int ottoLevel_ = 1, duartLevel_ = 3;
     int carry_ = 0;  // CPU cycles run past the end of the last slot
     uint32_t duartAcc_ = 0;
 };

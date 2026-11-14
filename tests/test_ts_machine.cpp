@@ -62,7 +62,7 @@ TEST(ts_ram_write_reads_back) {
 }
 
 TEST(ts_unmapped_access_is_traced) {
-    auto m = machineWith({0x33FC, 0x1234, 0x0050, 0x0000, kBraSelf});
+    auto m = machineWith({0x33FC, 0x1234, 0x0010, 0x0000, kBraSelf});  // nothing at 0x100000 (T13)
     std::vector<BusEvent> ev;
     m->onBusEvent = [&](const BusEvent& e) { ev.push_back(e); };
     Audio a;
@@ -70,7 +70,7 @@ TEST(ts_unmapped_access_is_traced) {
     CHECK_EQ(ev.size(), 1u);
     if (ev.size() == 1) {
         CHECK(ev[0].dev == Device::Unmapped);
-        CHECK_EQ(ev[0].addr, 0x500000u);
+        CHECK_EQ(ev[0].addr, 0x100000u);
         CHECK_EQ(ev[0].value, 0x1234);
         CHECK_EQ(ev[0].size, 2);
         CHECK(ev[0].write);
@@ -100,6 +100,21 @@ TEST(ts_peek_has_no_side_effects) {
     CHECK_EQ(m->peek16(0xC00100), kBraSelf);
     CHECK_EQ(m->peek16(0xC80100), kBraSelf);  // mirrored over 0xC00000-0xCFFFFF
     CHECK_EQ(m->peek16(0x000002), 0x8000);    // the reset vector is readable at 0
-    CHECK_EQ(m->peek16(0x500000), 0);
+    CHECK_EQ(m->peek16(0x100000), 0);
     CHECK_EQ(events, 0);
+}
+
+// T13: OSRAM is seen at 0 and again at 0xFC0000; T4: the host window reaches OTTO bank 2 and stops at the
+// installed 1M words (an empty socket reads 0 and does not alias the installed pair).
+TEST(ts_ram_alias_and_sample_window) {
+    auto m = machineWith({0x33FC, 0x1234, 0x00FF, 0x1000,   // MOVE.W #$1234,$FF1000
+                          0x33FC, 0x5678, 0x0040, 0x0002,   // MOVE.W #$5678,$400002
+                          0x33FC, 0x9ABC, 0x0060, 0x0002,   // MOVE.W #$9ABC,$600002 (empty socket)
+                          kBraSelf});
+    Audio a;
+    m->runFrame(a);
+    CHECK_EQ(m->peek16(0x031000), 0x1234);
+    CHECK_EQ(m->peek16(0x400002), 0x5678);
+    CHECK_EQ(m->peek16(0x600002), 0);
+    CHECK_EQ(m->peek16(0x400002), 0x5678);
 }

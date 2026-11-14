@@ -80,7 +80,7 @@ std::vector<uint8_t> load(const std::string& dir, const std::string& name) {
 }
 
 void printBytes(const std::vector<uint8_t>& b) {
-    const size_t n = b.size() < 64 ? b.size() : 64;
+    const size_t n = b.size() < 512 ? b.size() : 512;
     std::printf("    hex:");
     for (size_t i = 0; i < n; ++i) std::printf(" %02x", b[i]);
     std::printf("\n    txt: ");

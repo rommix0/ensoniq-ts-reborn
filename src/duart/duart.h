@@ -33,6 +33,7 @@ public:
     uint32_t overruns(int ch) const { return ch_[ch & 1].overruns; }  // lost to overrun since reset
     uint32_t unsupportedWrites() const { return unsupported_; }        // D3
     uint32_t x1Hz() const { return x1Hz_; }
+    bool rxEnabled(int ch) const { return ch_[ch & 1].rxEnabled; }
 
 private:
     // A character in flight, counted in 16x ticks; `phase` is the X1 clocks already spent on
