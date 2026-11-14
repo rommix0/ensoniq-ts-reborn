@@ -1,14 +1,22 @@
 // tsemu: runs the emulated TS-10 (OS v3.10 on the 68000 with the DUART and the OTTO/ESP board).
 //   tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] [--last <n>]
+//              [--display-only] [--press <ms>:<name>[+<name>...]]...
 // --trace takes a comma list of otto,esp,duart,fdc,iexp,scsi,unmapped,iack; matching bus events are
 // printed as "<cycle> <DEV> <R|W><size> <addr> <value>". --last <n> prints the last n instruction
 // addresses disassembled, to see where a run stops (the disassembler is a debugging aid).
 // The summary lists exceptions per vector, unmapped address runs, DUART register writes, OTTO active
 // voices, ESP halted and the bytes sent on DUART channels A and B. File I/O lives here; src/ts stays pure.
+// The panel display is printed as "<ms> |<row>|" lines each time it changes (bytes outside 0x20-0x7E as
+// \xNN; a line below marks underlined columns '_' and flashing ones '*'), the LEDs as "<ms> LEDs ..."
+// each time they change; --display-only leaves out the summary.
+// --press presses the named buttons (kButtons names, e.g. SYSTEM, BANK5, SOFT1) in order at <ms> from
+// power-on, holds them 100 ms and releases them in reverse order; it may be repeated.
 // Errors print "error: <msg>" and exit 2.
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <map>
 #include <set>
@@ -32,6 +40,8 @@ struct Options {
     std::string roms = "roms", trace;
     uint64_t ms = 1000, from = 0, count = UINT64_MAX;
     uint32_t last = 0;
+    bool displayOnly = false;
+    std::vector<std::pair<uint64_t, std::vector<Button>>> presses;  // --press: ms, buttons
 };
 
 uint64_t parseNum(const std::string& opt, const std::string& v) {
@@ -39,6 +49,63 @@ uint64_t parseNum(const std::string& opt, const std::string& v) {
     const unsigned long long n = std::strtoull(v.c_str(), &end, 10);
     if (v.empty() || *end != '\0') fail("bad value '" + v + "' for " + opt);
     return n;
+}
+
+// "<name>[+<name>...]", names as in kButtons (case-insensitive).
+std::vector<Button> parseButtons(const std::string& v) {
+    std::vector<Button> out;
+    for (size_t q = 0;;) {
+        const size_t next = v.find('+', q);
+        std::string name = v.substr(q, next == std::string::npos ? std::string::npos : next - q);
+        for (char& c : name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        const ButtonName* hit = nullptr;
+        for (const ButtonName& b : kButtons)
+            if (name == b.name) hit = &b;
+        if (!hit) fail("unknown button '" + name + "'");
+        out.push_back(hit->button);
+        if (next == std::string::npos) return out;
+        q = next + 1;
+    }
+}
+
+// "<ms>:<name>[+<name>...]"
+std::pair<uint64_t, std::vector<Button>> parsePress(const std::string& v) {
+    const size_t colon = v.find(':');
+    if (colon == std::string::npos) fail("bad value '" + v + "' for --press (<ms>:<name>[+<name>...])");
+    return {parseNum("--press", v.substr(0, colon)), parseButtons(v.substr(colon + 1))};
+}
+
+// One display row, bytes outside 0x20-0x7E as \xNN.
+std::string rowString(const PanelState& p, int row) {
+    std::string s;
+    for (char c : rowText(p, row)) {
+        const auto u = static_cast<unsigned char>(c);
+        if (u >= 0x20 && u < 0x7F) {
+            s += c;
+        } else {
+            char b[8];
+            std::snprintf(b, sizeof b, "\\x%02X", u);
+            s += b;
+        }
+    }
+    return s;
+}
+
+// A row's attributes as '*' (flashing), '_' (underlined) or ' ' per column; "" when it has none.
+std::string marks(const PanelState& p, int row) {
+    if (!p.underline[row] && !p.blink[row]) return "";
+    std::string s(kPanelCols, ' ');
+    for (int c = 0; c < kPanelCols; ++c)
+        s[c] = (p.blink[row] >> c & 1) ? '*' : (p.underline[row] >> c & 1) ? '_' : ' ';
+    return s;
+}
+
+// "LEDs 0 9 14*": the lit LED numbers, * = flashing; "LEDs off" when none is lit.
+std::string ledString(uint32_t leds) {
+    std::string s = "LEDs";
+    for (int n = 0; n < kPanelLeds; ++n)
+        if (leds >> n & 1) s += " " + std::to_string(n) + ((leds >> (16 + n) & 1) ? "*" : "");
+    return s == "LEDs" ? "LEDs off" : s;
 }
 
 constexpr struct {
@@ -126,13 +193,39 @@ int boot(const Options& o) {
     const uint64_t target = o.ms * kCpuHz / 1000;
     uint64_t frames = 0;
     std::vector<uint8_t> tx[2];  // DUART channels A (MIDI) and B (display link)
+    m->onPanelByte = [&tx](uint8_t b) { tx[kPanelChannel].push_back(b); };
+    // Button events by ms: (button, down), in insertion order for equal times.
+    std::multimap<uint64_t, std::pair<Button, bool>> events;
+    for (const auto& [at, buttons] : o.presses) {
+        for (const Button b : buttons) events.emplace(at, std::make_pair(b, true));
+        for (auto it = buttons.rbegin(); it != buttons.rend(); ++it)
+            events.emplace(at + 100, std::make_pair(*it, false));
+    }
+    PanelState panelShown{};
+    bool firstFrame = true;
     Audio audio;
     while (m->cycles() < target) {
+        for (const uint64_t now = m->cycles() * 1000 / kCpuHz; !events.empty() && events.begin()->first <= now;
+             events.erase(events.begin()))
+            m->button(events.begin()->second.first, events.begin()->second.second);
         m->runFrame(audio);
         ++frames;
-        for (int ch = 0; ch < 2; ++ch)
-            for (uint8_t b = 0; m->duart().popTransmitted(ch, b);) tx[ch].push_back(b);
+        for (uint8_t b = 0; m->duart().popTransmitted(kMidiChannel, b);) tx[kMidiChannel].push_back(b);
+        const PanelState& p = m->panel();
+        const std::string t = std::to_string(m->cycles() * 1000 / kCpuHz);
+        for (int r = 0; r < kPanelRows; ++r) {
+            if (!firstFrame && std::memcmp(p.text[r], panelShown.text[r], kPanelCols) == 0 &&
+                p.underline[r] == panelShown.underline[r] && p.blink[r] == panelShown.blink[r])
+                continue;
+            std::printf("%s |%s|\n", t.c_str(), rowString(p, r).c_str());
+            const std::string a = marks(p, r);
+            if (!a.empty()) std::printf("%s |%s|\n", std::string(t.size(), ' ').c_str(), a.c_str());
+        }
+        if (firstFrame || p.leds != panelShown.leds) std::printf("%s %s\n", t.c_str(), ledString(p.leds).c_str());
+        panelShown = p;
+        firstFrame = false;
     }
+    if (o.displayOnly) return 0;
 
     std::printf("ran %llu frames (%llu ms), %llu CPU cycles%s\n", static_cast<unsigned long long>(frames),
                 static_cast<unsigned long long>(o.ms), static_cast<unsigned long long>(m->cycles()),
@@ -170,6 +263,7 @@ int boot(const Options& o) {
     std::printf("DUART B transmitted: %zu bytes\n", tx[1].size());
     if (!tx[1].empty()) printBytes(tx[1]);
     std::printf("DUART unsupported writes: %u\n", m->duart().unsupportedWrites());
+    std::printf("panel bytes not decoded: %u\n", m->panel().unknown);
 
     if (o.last) {
         std::printf("last %zu instructions:\n", ring.size());
@@ -186,11 +280,15 @@ int main(int argc, char** argv) {
     try {
         if (argc < 2 || std::string(argv[1]) != "boot")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
-                 "[--last <n>]");
+                 "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]...");
         Options o;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
             if (a.compare(0, 2, "--") != 0) fail("unexpected argument '" + a + "'");
+            if (a == "--display-only") {
+                o.displayOnly = true;
+                continue;
+            }
             if (i + 1 >= argc) fail("option " + a + " needs a value");
             const std::string v = argv[++i];
             if (a == "--roms") o.roms = v;
@@ -199,6 +297,7 @@ int main(int argc, char** argv) {
             else if (a == "--from") o.from = parseNum(a, v);
             else if (a == "--count") o.count = parseNum(a, v);
             else if (a == "--last") o.last = static_cast<uint32_t>(parseNum(a, v));
+            else if (a == "--press") o.presses.push_back(parsePress(v));
             else fail("unknown option " + a);
         }
         return boot(o);
