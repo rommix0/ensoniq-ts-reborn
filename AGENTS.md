@@ -57,7 +57,7 @@ The app (Plan 4) and release-folder (Plan 5) commands are added by those plans.
 |---|---|---|
 | Core suite | `build\ens_tests.exe`, `build-msvc\Release\ens_tests.exe` | Must pass on **both** toolchains. |
 | 68000 suite | `ctest --test-dir build -R m68k_suite` | Needs Tom Harte's tests (`testdata/`, ignored; see `docs/m68k.md`). `-DENS_M68K_TESTS_DIR=` can point at the KS-32 repo's local copy. |
-| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image): see the comment at the top of `tools/tsemu/main.cpp`. |
+| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image), `--sqx70`: see the comment at the top of `tools/tsemu/main.cpp`. |
 | TS render | `build\tsemu.exe render tests/data/player_smoke.mid out.wav` | Boots, plays the MIDI file, writes Main as a WAV and prints `pcm hash <16 hex>`. |
 | Speed | `build-msvc\Release\tsemu.exe bench` | Realtime factor of a 20 s chord load after the boot; must stay at x2 or more on MSVC. |
 
@@ -67,7 +67,7 @@ purpose, record the new value here and in the current verification report.
 
 | Hash | Printed by | Value (Plan 3) |
 |---|---|---|
-| Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `ebf5f9eb5c643976` |
+| Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `3bfc7336098a6def` |
 | Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `4a751109deae8b89` |
 | Render | `tsemu render tests/data/full_chord.mid` | `524fcc64af78f175` |
 | Render | `tsemu render tests/data/filtered_patch.mid` | `01e3c8622cc8c8be` |

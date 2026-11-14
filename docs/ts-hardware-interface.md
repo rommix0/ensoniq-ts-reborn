@@ -34,7 +34,7 @@ the confidence and the decision entry in `docs/decisions.md`.
 | Addresses | What |
 |---|---|
 | 0x000000–0x037FFF and 0xFC0000–0xFFFFFF | OSRAM, 256 KB (U3/U4). The top window aliases all of it; the OS uses only its top 32 KB there (0xFF8000–0xFFFFFF, the stack), which the low window does not reach. Reads of 0–7 come from the ROM until the first write into 0–7 |
-| 0x038000–0x077FFF | SEQEXP, 256 KB (U1/U2, the SQX-70 kit), fitted (Task 8) |
+| 0x038000–0x077FFF | SEQEXP, 256 KB (U1/U2, the SQX-70 kit). Default: not fitted (a stock TS; reads 0, writes lost); `create(..., sqx70 = true)` fits it (Task 8) |
 | 0x200000 + 0x40000 n | I/O1: n = 0 DUART, 1 SCSI, 2 FDC, 3 IEXP (A19:A18 into U7/A) |
 | 0x300000–0x37FFFF | OTTO (odd bytes, HA5..HA0 = A6..A1) |
 | 0x380000–0x3FFFFF | ESP (odd bytes, host register = A8..A1) |
@@ -96,10 +96,13 @@ So sequencer memory ends at 0x038000 on a stock TS and at 0x078000 with the SQX-
 would report the SQX-70), and the 32 KB that 0x038000–0x03FFFF would be in OSRAM are its top 32 KB,
 seen at 0xFF8000. SEQEXP is the 256 KB from 0x038000.
 
-The machine fits SEQEXP: the user gets the SQX-70's memory, and the battery image holds it. A stock TS
-(SEQEXP/ decoded, no chips: the probe reads open bus) is not modelled. Before Task 8 the low OSRAM window
-reached 0x03FFFF: the probe passed, the OS reported FREE=97311, and a kept sequence went to unmapped
-space at 0x068000 up and was lost (ts_sequence_is_kept_in_seqexp fails on that map).
+The default machine is a stock TS-10 (design section 4 lists the SQX-70 as a non-goal): SEQEXP/ is
+decoded but the sockets are empty, modelled as reads of 0 and lost writes, untraced (the board would
+give open bus; 0 is enough for the probe to fail). The OS then shows FREE=31775 and keeps sequences in
+OSRAM (ts_stock_sequence_is_kept_in_osram). `Machine::create(roms, err, true)` or `tsemu --sqx70` fits
+the expander: FREE=97311 and sequences from 0x077FFF down (ts_sqx70_sequence_is_kept_in_seqexp). Before
+Task 8 the low OSRAM window reached 0x03FFFF: the probe passed, the OS reported FREE=97311, and a kept
+sequence went to unmapped space at 0x068000 up and was lost.
 
 **Confidence.** High for the device windows (each is the first place the OS goes, in the schematic's
 decoder order, and nothing is unmapped). High for the OSRAM low window and overlay. Medium-high for
@@ -112,13 +115,14 @@ sample-RAM window base (a probe pattern); low for the installed size and empty-s
 ## Battery RAM (T13)
 
 **Fact.**
-- The battery holds OSRAM and SEQEXP. `Machine::ramImage()` returns both as raw bytes, 512 KB: OSRAM
+- The battery holds OSRAM and SEQEXP. `Machine::ramImage()` returns both as raw bytes, 512 KB, with or
+  without the expander (the SEQEXP half is unused on a stock TS, so the file format does not change): OSRAM
   in CPU order (offset n is address n for n < 0x38000, and 0xFF8000 + (n − 0x38000) above), then SEQEXP
   in CPU order (offset 0x40000 + n is address 0x038000 + n).
 - `Machine::loadRamImage(img, err)` takes exactly 524 288 bytes. A wrong size fails with "RAM image:
   expected 524288 bytes, got n" and changes nothing.
 - Loading an image is a power cycle with the battery connected: the CPU, the OTTO, the ESP, the DUART,
-  the FDC and the panel are reset, the 0–7 overlay comes back, the sample DRAM (no battery) is cleared,
+  the FDC and the panel are reset, the 0–7 overlay comes back, the sample DRAM and the ESP delay DRAM (no battery) are cleared,
   and the analog and IEXP inputs keep their values (they are the player's controls). The next
   `runFrame` boots from the loaded RAM. A cold start is blank RAM, which is what `Machine::create` gives.
 - **A boot from saved RAM is a warm start.** Master Tune set to +02 (System, Up twice) still reads
@@ -127,16 +131,19 @@ sample-RAM window base (a probe pattern); low for the installed size and empty-s
   cold.
 - **Garbage RAM is a cold start.** 512 KB of pseudo-random bytes give exactly the cold boot's display
   sequence, ending at 3491 ms on the play screen, and no fault vector: the OS rebuilds its RAM.
+- A power cycle on a running machine (after a note left a tail in the ESP's DRAM) gives the same audio
+  from power-on as a fresh machine loaded with the same image, and keeps the settings.
 - `tsemu boot|render --ram <file>` loads the file at power-on if it exists and writes the RAM back at
   the end.
 
-**How found.** ts_ram_image_keeps_settings, ts_garbage_ram_boots, and `tsemu boot --ram` runs compared
+**How found.** ts_ram_image_keeps_settings, ts_garbage_ram_boots, ts_power_cycle_on_the_same_machine,
+and `tsemu boot --ram` runs compared
 with cold boots (display sequence, exception counts). The same runs give byte-identical image files
 from the MinGW and MSVC builds.
 
 **Alternatives.** OSRAM only (Task 4): loses the sequencer's SQX-70 memory, see "Memory map". Keeping the
-sample DRAM over a power cycle: not what the hardware does, and it would make a load depend on the
-machine's earlier state.
+sample DRAM or the ESP delay DRAM over a power cycle: not what the hardware does, and it would make a
+load depend on the machine's earlier state.
 
 **Confidence.** High for the warm and garbage behaviour (observed); the image layout is a choice (T13).
 

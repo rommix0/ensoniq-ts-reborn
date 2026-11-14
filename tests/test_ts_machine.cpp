@@ -32,9 +32,9 @@ RomSet romWith(std::map<uint32_t, std::vector<uint16_t>> words) {
     return r;
 }
 
-std::unique_ptr<Machine> machineWith(const std::vector<uint16_t>& code) {
+std::unique_ptr<Machine> machineWith(const std::vector<uint16_t>& code, bool sqx70 = false) {
     std::string err;
-    auto m = Machine::create(romWith({{0xC00100, code}}), err);
+    auto m = Machine::create(romWith({{0xC00100, code}}), err, sqx70);
     CHECK(m != nullptr);
     return m;
 }
@@ -119,11 +119,11 @@ TEST(ts_ram_alias_and_sample_window) {
     CHECK_EQ(m->peek16(0x400002), 0x5678);
 }
 
-// T13: SEQEXP (the SQX-70 RAM) at 0x038000-0x077FFF, apart from OSRAM's top 32 KB (0xFF8000); nothing
+// T13, SQX-70 fitted: SEQEXP at 0x038000-0x077FFF, apart from OSRAM's top 32 KB (0xFF8000); nothing
 // above it. The battery image is OSRAM (256 KB, CPU order, 0xFF8000 at 0x38000) then SEQEXP; loading it
 // keeps the RAM and brings the 0-7 overlay back. A wrong size changes nothing.
 TEST(ts_seqexp_window_and_ram_image) {
-    auto m = machineWith({kBraSelf});
+    auto m = machineWith({kBraSelf}, true);
     m->write16(0x000000, 0xAAAA);
     m->write16(0x038000, 0x1111);
     m->write16(0xFF8000, 0x2222);
@@ -148,6 +148,33 @@ TEST(ts_seqexp_window_and_ram_image) {
     CHECK(m->loadRamImage(img, err));
     CHECK_EQ(m->peek16(0x038000), 0x5511);
     CHECK_EQ(m->peek16(0x000000), 0x00FF);  // the ROM's reset SSP again, until the OS writes 0-7
+}
+
+// T13: a load is a power cycle: the sample DRAM (T4) and the ESP's delay DRAM have no battery and are
+// cleared.
+TEST(ts_ram_image_load_clears_volatile_memory) {
+    auto m = machineWith({kBraSelf});
+    m->write16(0x400000, 0x1234);
+    m->board().write(false, 5, 0xBEEF);
+    std::string err;
+    CHECK(m->loadRamImage(m->ramImage(), err));
+    CHECK_EQ(m->peek16(0x400000), 0);
+    CHECK_EQ(m->board().read(false, 5), 0);
+}
+
+// T13, stock TS (the default): SEQEXP's sockets are empty: 0x038000-0x077FFF reads 0, writes are lost,
+// and nothing is traced (SEQEXP/ is decoded). OSRAM's top 32 KB stays at 0xFF8000.
+TEST(ts_stock_has_no_seqexp) {
+    auto m = machineWith({kBraSelf});
+    uint32_t traced = 0;
+    m->onBusEvent = [&traced](const BusEvent&) { ++traced; };
+    m->write16(0x038000, 0x1111);
+    m->write16(0xFF8000, 0x2222);
+    CHECK_EQ(m->read16(0x038000), 0);
+    CHECK_EQ(m->peek16(0xFF8000), 0x2222);
+    CHECK_EQ(traced, 0u);
+    CHECK_EQ(m->ramImage().size(), 0x80000u);
+    CHECK_EQ(m->ramImage()[0x40000], 0);
 }
 
 // IEXP (T9): D0 FSW3B/, D1 FSW4B/, D2 PSRB/, D3 PSLB/, active low; the upper bits read high.

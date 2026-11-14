@@ -17,12 +17,13 @@ Both builds were made in empty build folders from the commit that holds this rep
 
 | Toolchain | Configure | Result |
 |---|---|---|
-| MinGW-w64 g++ 14.2.0, i686, Ninja, Release | `cmake -S . -B build-v3 -G Ninja -DCMAKE_BUILD_TYPE=Release` | `build-v3\ens_tests.exe`: **287 passed, 0 failed**, 35 s; 0 warnings (`-Wall -Wextra`) |
-| MSVC 19.44.35227 (Visual Studio 2022 Build Tools), x64, Release | `cmake -S . -B build-msvc-v3 -G "Visual Studio 17 2022" -A x64` | `build-msvc-v3\Release\ens_tests.exe`: **287 passed, 0 failed**, 33 s; 0 warnings (`/W4`) |
+| MinGW-w64 g++ 14.2.0, i686, Ninja, Release | `cmake -S . -B build-v3 -G Ninja -DCMAKE_BUILD_TYPE=Release` | `build-v3\ens_tests.exe`: **291 passed, 0 failed**; 0 warnings (`-Wall -Wextra`) |
+| MSVC 19.44.35227 (Visual Studio 2022 Build Tools), x64, Release | `cmake -S . -B build-msvc-v3 -G "Visual Studio 17 2022" -A x64` | `build-msvc-v3\Release\ens_tests.exe`: **291 passed, 0 failed**; 0 warnings (`/W4`) |
 | Linux GCC x64 | not run | No Linux toolchain on this machine. User to run (see the last section). |
 
-The same 287 names pass on both (the order of registration differs between the two linkers). Plan 2
-ended at 238; Plan 3 added 49 `ts_` tests in `tests/test_ts_roms.cpp`, `test_ts_board.cpp`,
+The same 291 names pass on both (the order of registration differs between the two linkers); the
+suite takes about 40 s. The folders were built empty for Task 8 and rebuilt in place for its review fix.
+Plan 2 ended at 238; Plan 3 added 53 `ts_` tests in `tests/test_ts_roms.cpp`, `test_ts_board.cpp`,
 `test_ts_machine.cpp`, `test_ts_panel.cpp` and `test_ts_firmware.cpp`. The 68000 per-instruction suite
 (`m68k_harte` on the KS-32 repo's copy of Tom Harte's tests) passes 1 000 060 of 1 000 060 on both
 builds; the 68000 core is unchanged since Plan 1.
@@ -33,7 +34,7 @@ Printed, not asserted. Identical on both builds:
 
 | Hash | Printed by | MinGW i686 | MSVC x64 |
 |---|---|---|---|
-| Boot trace (FNV-1a over every bus event of the 5300 ms boot: cycle, address, value, size, direction, device) | `ts_boot_is_deterministic` | `ebf5f9eb5c643976` | `ebf5f9eb5c643976` |
+| Boot trace (FNV-1a over every bus event of the 5300 ms boot: cycle, address, value, size, direction, device) | `ts_boot_is_deterministic` | `3bfc7336098a6def` | `3bfc7336098a6def` |
 | Render (boot, `tests/data/player_smoke.mid`, 2 s tail; FNV-1a of Main) | `ts_render_is_deterministic` | `4a751109deae8b89` | `4a751109deae8b89` |
 | `tsemu render tests/data/player_smoke.mid out.wav --roms roms` | `pcm hash` | `4a751109deae8b89` | `4a751109deae8b89` |
 | `tsemu render tests/data/full_chord.mid` | `pcm hash` | `524fcc64af78f175` | `524fcc64af78f175` |
@@ -43,8 +44,10 @@ Printed, not asserted. Identical on both builds:
 The full SHA-256 is `5d9dfb63f8b8a6182ad3780b4fb71eb1512cbbb83230d20398b55da3c3509636`. The battery RAM
 images written by the same `tsemu boot --ram` runs on the two builds are byte-identical too.
 
-Task 8's memory map change (SEQEXP at 0x038000, T13) changed none of these: RAM accesses are not bus
-events, and the OS takes the same path in the boot (its SQX-70 probe passed before too).
+The boot trace hash was `ebf5f9eb5c643976` until Task 8's review fix made the default machine a stock
+TS (T13): the OS's SQX-70 probe at 0x038000 now fails, and the OS's different path through the boot
+shifts the cycle of later bus events. The display, the boot end (3491 ms) and every render hash are
+unchanged.
 
 ## Speed (`tsemu bench`)
 
@@ -55,6 +58,7 @@ events, and the OS takes the same path in the boot (its SQX-70 probe passed befo
 | Build | Chord loop, 20 s emulated | Boot, 5.3 s emulated |
 |---|---|---|
 | MSVC x64 Release | host 5.15 to 5.29 s, **realtime x3.78 to x3.88** | host 0.89 to 0.91 s, x5.80 to x5.95 |
+| MSVC x64 Release, after the review fix (one run) | host 5.16 s, realtime x3.88 | host 0.92 s, x5.79 |
 | MinGW i686 Release | host 5.38 s, **realtime x3.72** | host 0.94 s, x5.63 to x5.65 |
 
 Every run printed peak 21789. The plan asked for x2 or more on MSVC: it is about x3.8.
@@ -79,7 +83,7 @@ Confidence is the entry's own after the last task that touched it.
 | T10 | Empty drive: no index pulse; the FDC handshake | High for the empty-drive behaviour; low for ST0/ST3 and IP1/IP2 |
 | T11 | Audio routing: OTTO ch0-2 to the ESP, ch3 to Aux, `sat16(v20 >> 4)`, 103 ESP instructions a frame | Medium-low for the bit alignment (by ear in Plan 4) |
 | T12 | SCSI and unmapped space read 0 | Medium |
-| T13 | Address map; OSRAM 256 KB at 0-0x37FFF and its top 32 KB at 0xFF8000; SEQEXP (the SQX-70) fitted at 0x038000-0x077FFF; the battery image OSRAM then SEQEXP | High for the device windows and the low RAM window; medium for the top window; medium-high for SEQEXP |
+| T13 | Address map; OSRAM 256 KB at 0-0x37FFF and its top 32 KB at 0xFF8000; SEQEXP (the SQX-70) at 0x038000-0x077FFF, not fitted by default (design section 4), `sqx70` fits it; the battery image OSRAM then SEQEXP either way; a load clears both DRAMs | High for the device windows and the low RAM window; medium for the top window; medium-high for SEQEXP's window; low for an empty socket's read |
 | T14 | RESET resets the OTTO only | Medium |
 | T15 | LED states: bit 7 lit, bit 6 flashing; LED numbering | High for lit and the numbering; medium for flashing |
 | T16 | Button codes and forms | High; medium for Compare and the foot switch naming |
@@ -108,8 +112,10 @@ fault vectors, and no "SYSTEM ERROR n" text.
   accesses in the boot. The sample-RAM window from the OS's socket probe at 107.5 ms.
 - **SEQEXP** (T13, Task 8): the boot's one probe at 0x038000; the Sequencer Control page's FREE
   (97 311 with RAM there, 31 775 without, the manual's 97 000 and 30 000 notes); and where a kept
-  sequence is written (from 0x077FFF down with the probe answered, 0x037FFF without).
-- **Battery RAM** (T13, Task 8): Master Tune survives a power cycle from the image; garbage RAM is a
+  sequence is written (from 0x077FFF down with the probe answered, 0x037FFF without). The default
+  machine is a stock TS (no SQX-70); the expander is an option at `create`.
+- **Battery RAM** (T13, Task 8): Master Tune survives a power cycle from the image, on a fresh machine
+  and on the running one (whose audio from power-on then matches a fresh machine's); garbage RAM is a
   cold start (identical display sequence to the cold boot, no fault).
 - **Interrupts** (T5): every placement booted; the DUART on 1 or 2 gives SYSTEM ERROR 17 or 139.
 - **Clocks** (T1): the OS's boot clock check; CSRA = CSRB = 0xEE needs the external serial clocks.
@@ -156,6 +162,8 @@ From the plan's ledger, with the cost if wrong:
 | 5 | `setAnalog` added early with Task 6's interface; `PanelState` carries `underline[2]` | Plan 4 snapshot size |
 | 7 | OT9 HP feedback = 0.5 + K/131072, i.e. `((k12 + 4096) * y1) >> 13` | HP timbre off; every render hash changes again |
 | 8 | No merge by the implementer; the controller merges after the final review | None |
+| 8 | The design is binding: the default machine is a stock TS-10 (SQX-70 a non-goal); the SQX-70 is an option at `create`, tested both ways; the image stays 512 KB either way | Users wanting 97 000 notes must pass the option |
+| 8 | A load clears the ESP delay DRAM too (no battery), tested on the same machine | None |
 
 ## Left for Plan 4 (the engine and the app)
 
@@ -166,10 +174,11 @@ From the plan's ledger, with the cost if wrong:
 - **MIDI in bursts over 1024 bytes** (a large sysex) are dropped beyond DUART A's wire queue and
   counted in `duart().rxDropped`, but nothing surfaces them. The engine must pace MIDI in or report it.
 - The battery RAM: the app keeps the image (`ramImage`, `loadRamImage`) in its state and on disk.
-  Loading clears the sample DRAM, as a power cycle does.
+  Loading clears the sample DRAM and the ESP delay DRAM, as a power cycle does.
+- Whether the app offers the SQX-70 (`create(..., sqx70)`) is a Plan 4 choice; the default is stock.
 - Disk: the drive is empty; FDC register writes (A0 = 0, the 72069's own registers) are not modelled.
   SCSI is absent.
-- A stock TS (no SQX-70: open bus at 0x038000) is not modelled; the machine always has the SQX-70.
+- An empty SEQEXP socket reads 0, not the board's open bus.
 - Display attributes `E7` and `7F` (effect unknown); SACK/'s role (low confidence); wait states (T6)
   if a timing-sensitive path shows up; the CPU clock (T1) is loosely pinned.
 - Levels: the bit alignment of the OTTO-to-ESP and Aux paths (T11) is a guess until heard.

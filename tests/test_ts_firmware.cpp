@@ -180,8 +180,8 @@ TEST(ts_boot_shows_play_screen) {
 namespace {
 
 // A machine booted for kBootMs on its own, for tests that press buttons or keys; nullptr without ROMs.
-std::unique_ptr<Machine> bootFresh() {
-    auto m = loadTs();
+std::unique_ptr<Machine> bootFresh(bool sqx70 = false) {
+    auto m = loadTs(sqx70);
     if (m) runMs(*m, kBootMs);
     return m;
 }
@@ -618,7 +618,7 @@ namespace {
 
 // Counts into bad each vector-4 exception taken at an opcode other than ILLEGAL (see bootedTs).
 void watchIllegal(Machine& mc, uint32_t& bad) {
-    uint32_t last = 0, seen = 0;
+    uint32_t last = 0, seen = mc.cpu().exceptionCount(4);  // counts survive a power cycle
     mc.cpu().onInstruction = [&mc, &bad, last, seen](uint32_t pc) mutable {
         const uint32_t n = mc.cpu().exceptionCount(4);
         if (n != seen) {
@@ -689,44 +689,119 @@ TEST(ts_garbage_ram_boots) {
     CHECK(rowText(m->panel(), 0) == "U0-0 BABY-GRAND   FULL-BODY   BRITE-PNO ");
 }
 
-// T13: the OS finds SEQEXP (the SQX-70) by its probe at 0x038000, offers 97 311 free events (the manual's
-// "over 97,000 notes") and stores a kept sequence from the top of SEQEXP (0x077FFF) down, so it lands in
-// the battery image. Twenty notes are recorded on SEQUENCE-01 (Record with Play) and kept (YES).
-TEST(ts_sequence_is_kept_in_seqexp) {
+namespace {
+
+// What recording twenty notes on SEQUENCE-01 (Record with Play) and keeping them (YES) did: the FREE
+// count on the third Sequencer Control page before and after, the prompt at Stop, and the battery image
+// before and after.
+struct Kept {
+    int freeBefore = 0, freeAfter = 0;
+    std::string ask;
+    std::vector<uint8_t> before, after;
+};
+
+int freeEvents(Machine& m) {
+    for (int i = 0; i < 3; ++i) tap(m, Button::SequencerControl);
+    const std::string r = rowText(m.panel(), 0);
+    const size_t at = r.find("FREE=");
+    return at == std::string::npos ? -1 : std::atoi(r.c_str() + at + 5);
+}
+
+Kept recordAndKeep(Machine& m) {
+    Kept k;
+    k.freeBefore = freeEvents(m);
+    k.before = m.ramImage();
+    tap(m, Button::SeqsSongs);
+    tap(m, Button::Soft2);  // SEQUENCE-01
+    chord(m, Button::Record, Button::Play);
+    runMs(m, 3000);
+    for (int n = 0; n < 20; ++n) {
+        m.key(48 + n, true, 80);
+        runMs(m, 20);
+        m.key(48 + n, false, 0);
+        runMs(m, 20);
+    }
+    tap(m, Button::StopContinue);
+    k.ask = rowText(m.panel(), 0);
+    tap(m, Button::Soft3);  // *YES*
+    runMs(m, 2000);
+    k.freeAfter = freeEvents(m);
+    k.after = m.ramImage();
+    return k;
+}
+
+int nonzero(const std::vector<uint8_t>& img, size_t from, size_t to) {
+    return static_cast<int>(std::count_if(img.begin() + from, img.begin() + to, [](uint8_t b) { return b != 0; }));
+}
+
+}  // namespace
+
+// T13, stock TS (the default, design section 4): SEQEXP's sockets are empty, the OS's probe at 0x038000
+// fails, it offers 31 775 free events (the manual's 30,000 notes) and stores a kept sequence from the top
+// of its OSRAM sequencer memory (0x037FFF) down. The image's SEQEXP half stays zero.
+TEST(ts_stock_sequence_is_kept_in_osram) {
     auto m = bootFresh();
     if (!m) return;
-    const auto freeEvents = [&m] {
-        for (int i = 0; i < 3; ++i) tap(*m, Button::SequencerControl);  // the third sub-page shows FREE
-        const std::string r = rowText(m->panel(), 0);
-        const size_t at = r.find("FREE=");
-        return at == std::string::npos ? -1 : std::atoi(r.c_str() + at + 5);
-    };
-    const int before = freeEvents();
-    const auto seqExpUsed = [&m] {
-        const std::vector<uint8_t>& img = m->ramImage();
-        return std::count_if(img.begin() + 0x7F000, img.end(), [](uint8_t b) { return b != 0; });  // 0x77000-0x77FFF
-    };
-    const auto usedBefore = seqExpUsed();
-    tap(*m, Button::SeqsSongs);
-    tap(*m, Button::Soft2);  // SEQUENCE-01
-    chord(*m, Button::Record, Button::Play);
-    runMs(*m, 3000);
-    for (int k = 0; k < 20; ++k) {
-        m->key(48 + k, true, 80);
-        runMs(*m, 20);
-        m->key(48 + k, false, 0);
-        runMs(*m, 20);
-    }
-    tap(*m, Button::StopContinue);
-    const std::string ask = rowText(m->panel(), 0);
-    tap(*m, Button::Soft3);  // *YES*
-    runMs(*m, 2000);
-    const int after = freeEvents();
-    const auto usedAfter = seqExpUsed();
-    std::printf("  FREE %d -> %d; |%s|; nonzero bytes at 0x77000-0x77FFF %d -> %d\n", before, after, ask.c_str(),
-                static_cast<int>(usedBefore), static_cast<int>(usedAfter));
-    CHECK_EQ(before, 97311);
-    CHECK(ask.compare(0, 18, "KEEP FIRST TRACK ?") == 0);
-    CHECK(after > 0 && after < before);
-    CHECK(usedAfter > usedBefore);
+    const Kept k = recordAndKeep(*m);
+    std::printf("  FREE %d -> %d; |%s|; nonzero at 0x37000-0x37FFF %d -> %d, in SEQEXP %d\n", k.freeBefore,
+                k.freeAfter, k.ask.c_str(), nonzero(k.before, 0x37000, 0x38000), nonzero(k.after, 0x37000, 0x38000),
+                nonzero(k.after, 0x40000, 0x80000));
+    CHECK_EQ(k.freeBefore, 31775);
+    CHECK(k.ask.compare(0, 18, "KEEP FIRST TRACK ?") == 0);
+    CHECK(k.freeAfter > 0 && k.freeAfter < k.freeBefore);
+    CHECK(nonzero(k.after, 0x37000, 0x38000) > nonzero(k.before, 0x37000, 0x38000));
+    CHECK_EQ(nonzero(k.after, 0x40000, 0x80000), 0);
+}
+
+// T13, SQX-70 fitted: the OS finds SEQEXP by its probe at 0x038000, offers 97 311 free events (the
+// manual's "over 97,000 notes") and stores a kept sequence from the top of SEQEXP (0x077FFF) down, so it
+// lands in the image's SEQEXP half (0x77000-0x77FFF at 0x7F000).
+TEST(ts_sqx70_sequence_is_kept_in_seqexp) {
+    auto m = bootFresh(true);
+    if (!m) return;
+    const Kept k = recordAndKeep(*m);
+    std::printf("  FREE %d -> %d; |%s|; nonzero at 0x77000-0x77FFF %d -> %d\n", k.freeBefore, k.freeAfter,
+                k.ask.c_str(), nonzero(k.before, 0x7F000, 0x80000), nonzero(k.after, 0x7F000, 0x80000));
+    CHECK_EQ(k.freeBefore, 97311);
+    CHECK(k.ask.compare(0, 18, "KEEP FIRST TRACK ?") == 0);
+    CHECK(k.freeAfter > 0 && k.freeAfter < k.freeBefore);
+    CHECK(nonzero(k.after, 0x7F000, 0x80000) > nonzero(k.before, 0x7F000, 0x80000));
+}
+
+// T13: loadRamImage on a running machine is the whole power cycle. A note leaves a tail in the ESP's
+// delay DRAM, Master Tune is set to +02, and the machine is powered on again from its own image: it
+// boots with no fault vector or bad text, keeps TUNE=+02, and its audio from power-on matches a fresh
+// machine loaded with the same image (nothing volatile survives).
+TEST(ts_power_cycle_on_the_same_machine) {
+    auto a = bootFresh();
+    if (!a) return;
+    tap(*a, Button::System);
+    tap(*a, Button::Up);
+    tap(*a, Button::Up);
+    a->key(60, true, 127);
+    runMs(*a, 300);
+    a->key(60, false, 0);
+    runMs(*a, 100);
+    const std::vector<uint8_t> img = a->ramImage();
+    uint32_t faults[256];
+    for (int v = 0; v < 256; ++v) faults[v] = a->cpu().exceptionCount(v);
+    std::string err;
+    CHECK(a->loadRamImage(img, err));
+    uint32_t badIllegal = 0;
+    watchIllegal(*a, badIllegal);
+    const std::vector<int16_t> pcmA = renderMidi(*a, {}, kBootMs).main;
+    a->cpu().onInstruction = nullptr;
+    for (int v : {2, 3, 5, 6, 7, 8, 11, 14, 15, 24}) CHECK_EQ(a->cpu().exceptionCount(v), faults[v]);
+    CHECK_EQ(badIllegal, 0u);
+    CHECK(badText(a->panel()) == nullptr);
+    tap(*a, Button::System);
+    const std::string tune = rowText(a->panel(), 0);
+
+    auto b = loadTs();
+    CHECK(b->loadRamImage(img, err));
+    const std::vector<int16_t> pcmB = renderMidi(*b, {}, kBootMs).main;
+    std::printf("  |%s|; boot pcm %016llx vs fresh %016llx\n", tune.c_str(),
+                static_cast<unsigned long long>(pcmHash(pcmA)), static_cast<unsigned long long>(pcmHash(pcmB)));
+    CHECK(tune.compare(0, 16, "SYSTEM  TUNE=+02") == 0);
+    CHECK(pcmA == pcmB);
 }

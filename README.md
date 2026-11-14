@@ -8,8 +8,8 @@ a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It f
 [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
 **Status:** Plan 3: the TS-10 machine runs the unmodified OS v3.10 headless. It boots to the play
-screen and plays from the keys, the panel and MIDI; the battery RAM (with the SQX-70 sequencer
-expansion) can be saved and loaded. `tsemu` boots it, renders a MIDI file to WAV and measures its speed.
+screen and plays from the keys, the panel and MIDI; the battery RAM can be saved and loaded. `tsemu`
+boots it, renders a MIDI file to WAV and measures its speed.
 No plugin or app yet (Plan 4); nothing has been checked by ear.
 The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).
 

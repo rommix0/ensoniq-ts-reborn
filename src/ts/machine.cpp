@@ -29,8 +29,9 @@ Machine::Region Machine::decode(uint32_t a) {
     return Region::None;
 }
 
-std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err) {
+std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, bool sqx70) {
     std::unique_ptr<Machine> m(new Machine());
+    m->sqx70_ = sqx70;
     if (!buildOsImage(roms, m->os_, err) || !m->waves_.load(roms, err)) return nullptr;
     // DECISION T1: 500 kHz on IP3/IP4 (channel A, MIDI); 1 MHz on IP5 (TxCB) and IP6 (RxCB). The board's
     // 2681 takes RxCB from IP6, the core (a 68681) from IP2: the 1 MHz clock goes on the core's IP2
@@ -79,12 +80,16 @@ void Machine::patchSelect(int side, bool down) {
 }
 
 // DECISION T13: OSRAM is ram_[0, 0x40000) in CPU order (0xFF8000 at 0x38000), SEQEXP ram_[0x40000, 0x80000).
-uint32_t Machine::ramIndex(uint32_t a) {
+// On a stock TS SEQEXP/ is decoded but its sockets are empty: reads 0, writes are lost (as T4's empty
+// sample-RAM sockets), so the OS's probe at 0x038000 fails.
+uint32_t Machine::ramIndex(uint32_t a) const {
     if (a >= kRamHighBase) return a & (kOsRamBytes - 1);
-    return a < kSeqExpBase ? a : kOsRamBytes + (a - kSeqExpBase);
+    if (a < kSeqExpBase) return a;
+    return sqx70_ ? kOsRamBytes + (a - kSeqExpBase) : kNoRam;
 }
 
-// DECISION T13: a power cycle keeping the battery RAM. The sample DRAM (T4) has no battery and is cleared.
+// DECISION T13: a power cycle keeping the battery RAM. The sample DRAM (T4) and the ESP delay DRAM have no
+// battery and are cleared, so what follows does not depend on the machine's history.
 bool Machine::loadRamImage(const std::vector<uint8_t>& img, std::string& err) {
     if (img.size() != ram_.size()) {
         err = "RAM image: expected " + std::to_string(ram_.size()) + " bytes, got " + std::to_string(img.size());
@@ -92,6 +97,7 @@ bool Machine::loadRamImage(const std::vector<uint8_t>& img, std::string& err) {
     }
     ram_ = img;
     for (uint32_t w = 0; w < WaveMemory::kSampleRamWords; ++w) waves_.sampleRam(w) = 0;
+    board_.clearDram();
     powerOn();
     return true;
 }
@@ -107,6 +113,7 @@ uint8_t Machine::memByte(uint32_t a, bool& mapped) const {
     case Region::Rom: return romByte(a);
     case Region::Ram: {
         const uint32_t i = ramIndex(a);  // DECISION T13: 0-7 read the ROM until the first write there
+        if (i == kNoRam) return 0;
         return (overlay_ && i < 8) ? romByte(i) : ram_[i];
     }
     case Region::Host: {
@@ -238,6 +245,7 @@ void Machine::write8(uint32_t a, uint8_t v) {
     }
     if (r == Region::Ram) {
         const uint32_t i = ramIndex(a);
+        if (i == kNoRam) return;
         if (i < 8) overlay_ = false;
         ram_[i] = v;
         return;

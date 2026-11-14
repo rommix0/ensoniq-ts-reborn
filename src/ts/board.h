@@ -1,6 +1,7 @@
 #pragma once
 // TS-10 board: the OTTO, the ESP and the ESP delay DRAM (64K x 16), wired as DECISION T11.
 // No file I/O, no OS calls; route() does not allocate.
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -25,6 +26,7 @@ public:
 
     Otto& otto() { return otto_; }
     Esp& esp() { return esp_; }
+    void clearDram() { std::fill(dram_.begin(), dram_.end(), uint16_t{0}); }  // power off: no battery
 
     // One frame of routing; espSlots = 0 while the ESP is halted.
     Audio route(const OttoFrame& f, int espSlots);
