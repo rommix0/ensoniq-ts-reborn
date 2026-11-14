@@ -88,6 +88,21 @@ top window being the same RAM (argued from the service manual, not observable). 
 sample-RAM window base (a probe pattern); low for the installed size and empty-socket reads.
 **MAME.** Not compared.
 
+## OTTO voice count
+
+**Fact.** The OS sets the OTTO to 32 voices: it writes 0x1F to ACTV (location 0x58, byte 3, bus address
+0x30005F) with PAGE 0x00, twice: at 0.216 ms and again at 1027.6 ms, right after its DUART timer clock
+check. Each time it first writes 0x11 to the same address under PAGE 0x20 (W_END there). ACTV stays
+0x1F to the end of the boot.
+
+**How found.** The bus trace of the OTTO's PAGE (0x30007F) and location 0x58 writes. The boot test
+records the ACTV writes (location 0x58 byte 3 while PAGE is below 0x20) and checks the last value.
+ACTV also resets to 0x1F, so `activeVoices() == 32` alone would not show that the OS wrote it.
+
+**Alternatives.** None: this is observed, not chosen.
+
+**Confidence.** High.
+
 ## Interrupts (T5)
 
 **Fact.** OTTO on level 1, DUART on level 3, all autovectored (AVEC). Level 2 (the disk line) has no

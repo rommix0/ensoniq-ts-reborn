@@ -11,14 +11,19 @@ using namespace ens::ts;
 
 namespace {
 
-// The ACTV the firmware writes at boot (page 0, location 0x58 = 0x1F; docs/ts-hardware-interface.md, "OTTO").
-constexpr int kBootVoices = 32;
+// The ACTV the firmware writes at boot: 0x1F (32 voices) to location 0x58 byte 3 (0x30005F) with PAGE
+// below 0x20 (docs/ts-hardware-interface.md, "OTTO voice count"). ACTV also resets to 0x1F, so the
+// write itself is checked, not only the end state.
+constexpr uint8_t kBootActv = 0x1F;
+constexpr int kBootVoices = kBootActv + 1;
 constexpr uint16_t kIllegalOpcode = 0x4AFC;  // ILLEGAL
 
 // What the shared boot did, besides the machine's own counters.
 struct BootSeen {
     uint32_t txBytes[2] = {0, 0};   // characters sent on DUART channels A and B
     uint32_t badIllegal = 0;        // vector 4 taken at an opcode other than ILLEGAL
+    uint32_t actvWrites = 0;        // byte-3 writes to ACTV (location 0x58 while PAGE < 0x20)
+    int lastActv = -1;              // the last value written there
 };
 BootSeen bootSeen;
 
@@ -39,6 +44,18 @@ Machine* bootedTs() {
             }
             last = pc;
         };
+        // OTTO host address HA5..HA0 = A6..A1 (T13). PAGE is location 0x78 (HA 0x3C-0x3F), ACTV location
+        // 0x58 (HA 0x2C-0x2F) in pages 0x00-0x1F; a byte-3 write commits the register (notes §1, OT1).
+        uint8_t page = 0;
+        mc.onBusEvent = [&page](const BusEvent& e) {
+            if (e.dev != Device::Otto || !e.write || e.size != 1 || !(e.addr & 1)) return;
+            const unsigned ha = (e.addr >> 1) & 0x3F;
+            if (ha == 0x3F) page = static_cast<uint8_t>(e.value);
+            if (ha == 0x2F && (page & 0x7F) < 0x20) {
+                ++bootSeen.actvWrites;
+                bootSeen.lastActv = e.value;
+            }
+        };
         const uint64_t end = mc.cycles() + static_cast<uint64_t>(kBootMs) * kCpuHz / 1000;
         Audio a;
         while (mc.cycles() < end) {
@@ -47,6 +64,7 @@ Machine* bootedTs() {
                 for (uint8_t byte; mc.duart().popTransmitted(ch, byte);) ++bootSeen.txBytes[ch];
         }
         mc.cpu().onInstruction = nullptr;
+        mc.onBusEvent = nullptr;
         return b;
     }();
     return m.get();
@@ -102,6 +120,9 @@ TEST(ts_boot_runs_the_chips) {
     Machine* m = bootedTs();
     if (!m) return;
     CHECK(!m->board().esp().halted());
+    std::printf("  ACTV written %u times, last 0x%02x\n", bootSeen.actvWrites, bootSeen.lastActv);
+    CHECK(bootSeen.actvWrites > 0);
+    CHECK_EQ(bootSeen.lastActv, kBootActv);
     CHECK_EQ(m->board().otto().activeVoices(), kBootVoices);
     for (int ch = 0; ch < 2; ++ch) {
         CHECK(m->duart().rxEnabled(ch));
