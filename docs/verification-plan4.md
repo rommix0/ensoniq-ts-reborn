@@ -174,6 +174,12 @@ attributes `E7` and `7F`, SACK/, wait states, the CPU clock, the levels.
   one in `ts-hardware-interface.md`); a debug `printf` in the bus test. Tests: NaN and infinity in
   `analogRaw` are untested; the LED-to-button tolerance lets adjacent bank LEDs swap; the Erase check cannot
   tell zeros from the old file.
+- From the final review, deferred: the VST3 looks for `roms/` beside the host's program and would store
+  that folder in the shared settings (limit it to the Standalone, store only a good folder); in Project
+  mode, "Change…" on the memory file restarts the instance without asking; saving a project waits up to
+  300 ms per instance when the host is not running audio; `setStateInformation` stores the start image
+  before a restart that may fail; the tracker's program-change dedup (A105) has no note of its limit; the
+  RT test has no oversize render or Aux-off path; `feq` in the app tests treats NaN as equal.
 
 ## User to run
 
