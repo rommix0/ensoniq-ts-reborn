@@ -145,7 +145,8 @@ void Machine::trace(uint32_t addr, uint16_t value, uint8_t size, bool write, Dev
 
 // DECISION T5: the IPL is the highest level among the asserting devices (OTTO 1, DUART 3; all autovectored).
 // DECISION T7: DUART OP6 is ESPHALT, active high (the pin is high while OPR bit 6 is 0); OP2..OP0 select
-// the analog mux input on the OTTO POT pin, the conversion being immediate.
+// the analog mux input on the OTTO POT pin: the mux switches at once, the OTTO conversion (OT16) samples it
+// when it ends.
 void Machine::updateLines() {
     int level = 0;
     if (ottoLevel_ && board_.otto().irqAsserted()) level = std::max(level, ottoLevel_);

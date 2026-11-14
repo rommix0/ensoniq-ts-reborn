@@ -705,7 +705,7 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## T7: DUART wiring
 - Options: which DUART pins carry which board signal.
-- Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (immediate conversion); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. OP3 is SEQLED/, the Seqs/Songs LED (T15); OP4 KRES, OP5 DRES and OP7 SACK/ go to the panel (T19).
+- Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (the mux switches at once; the OTTO conversion, OT16, samples it when it ends); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. OP3 is SEQLED/, the Seqs/Songs LED (T15); OP4 KRES, OP5 DRES and OP7 SACK/ go to the panel (T19).
 - Evidence: schematic sheet 1 (DUART U10 pin list); the core's `outputPins()` returns the pin level, the inverse of OPR.
 - Confidence: High for the signals. Medium for the OP6 polarity: with it the OS halts the ESP at 1.3 ms, downloads to it while halted and releases it at 1819 ms (halted again from 3301 to 3376 ms, then running; Task 6 measurement); the reverse polarity runs the ESP during the downloads and leaves it halted after the boot (Task 4).
 - Status: implemented in `Machine::updateLines` (Plan 3 Task 3).

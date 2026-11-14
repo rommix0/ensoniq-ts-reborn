@@ -61,11 +61,11 @@ The devices are decoded over their whole block (a DUART register is A4..A1 anywh
   (0x0000, 0x1111, 0x2222, 0x3333 at +2) and reads them back from the top down: a socket probe in
   steps of 2 MB, one 1M x 8 SIMM pair (1M words). Four steps of 2 MB from 0x400000 end at the ROM:
   the 8 MB window of CPU A22..A1.
-- **OSRAM in two windows.** (Task 4; the 0x038000 probe is SEQEXP's, below.) The reset SSP is 0xFF80A0. RAM use in the boot by 32 KB block: 0x0000–
-  0x7FFF and 0xFF8000–0xFFFFFF heavily (from 0.2 ms), 0x8000–0x17FFF cleared at about 1.1 s,
+- **OSRAM in two windows.** (Task 4; the 0x038000 probe is SEQEXP's, below.) The reset SSP is 0xFF80A0.
+  RAM use in the boot by 32 KB block: 0x0000–0x7FFF and 0xFF8000–0xFFFFFF heavily (from 0.2 ms), 0x8000–0x17FFF cleared at about 1.1 s,
   0x18000–0x1FFFF used from 1.27 s, and one word written and read back at 0x038000 at 1274.7 ms.
-  0xFF8000–0xFF806D is never touched in the boot, so the 0x038000 probe does not disturb anything in
-  the alias.
+  0xFF8000–0xFF806D is never touched in the boot. (Task 4 took the 0x038000 probe for OSRAM; Task 8
+  showed it is SEQEXP's, see below.)
 
 **Alternatives.**
 
@@ -73,8 +73,8 @@ The devices are decoded over their whole block (a DUART register is A4..A1 anywh
 |---|---|
 | Task 3 map (64 KB at 0xFF0000, ROM readable at 0) | Rejected: stuck in the RAM loop at reset |
 | 512 KB at 0, 0xFF0000 aliasing offset 0 | Rejected: at 203 ms a long read of 0x15001C (unmapped), a jump to 0, a run of illegal instructions, "SYSTEM ERROR 12" |
-| 256 KB at 0, alias at 0xFC0000 | Chosen: boots |
-| 128 KB at 0 (0x20000–0x3FFFF empty) | Also boots. The 0x038000 probe is then unmapped (reads 0); everything else is the same (event kinds and order identical, timing differs by a few µs) |
+| 256 KB: 0–0x37FFF plus the 0xFC0000 alias (SEQEXP split off in Task 8) | Chosen: boots, see "Where SEQEXP is" |
+| 128 KB at 0 (0x20000–0x3FFFF empty) | Also boots (event kinds and order identical, timing differs by a few µs). Its unmapped 0x038000 is what a stock TS does, but the alias is then not the same RAM (Task 4 view, superseded by Task 8) |
 | 0xFC0000–0xFFFFFF a separate 256 KB | Also boots, with an identical event sequence. Rejected because the stack (0xFF80A0) and the vectors (0) must both be in RAM every TS has: U1/U2 (SEQEXP) are fitted only by the SQX-70 kit (service manual p59), so both windows are OSRAM |
 | ROM only at 0xC00000–0xC7FFFF (no mirror) | Boots the same; the mirror is unobserved |
 | Sample RAM: none, 2 MB, 2 MB aliased over the whole window, empty sockets reading 0xFFFF | All four boot with an identical event sequence; no "WRONG SOCKETS" text. The probe's result is not visible in the boot |
