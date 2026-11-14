@@ -1,6 +1,8 @@
 // ES5506 OTTO core (Plan 2). Section numbers cite docs/reference/es5506-otto-datasheet-notes.md.
 #include "otto/otto.h"
 
+#include "common/bits.h"
+
 #include <cstring>
 
 namespace ens {
@@ -12,7 +14,34 @@ constexpr uint32_t kTest = 0x40;  // PAGE bit 6
 constexpr uint32_t kStop0 = 0x1, kStop1 = 0x2, kLei = 0x4, kLpe = 0x8, kBle = 0x10, kIrqe = 0x20, kDir = 0x40,
                    kIrq = 0x80;
 
+uint32_t store18(int32_t v) { return static_cast<uint32_t>(v) & 0x3FFFF; }
+
 }  // namespace
+
+// DECISION OT6: the datasheet gives only the encoder; the decoder restores the stripped sign as the
+// inverse of mantissa bit 12 (exp >= 1) and shifts right by 7 - exp; exp 0 keeps the sign in place.
+int16_t otto_decompress(uint16_t word) {
+    const int e = word >> 13;
+    const uint32_t m = word & 0x1FFF;
+    const uint32_t raw = e >= 1 ? ((((m >> 12) & 1) ^ 1) << 15) | (m << 2) : (m << 3);
+    return static_cast<int16_t>(static_cast<int16_t>(raw & 0xFFFF) >> (e >= 1 ? 7 - e : 7));
+}
+
+// DECISION OT8: f9 = fraction bits F10..F2; the result keeps one fraction bit (half-LSB units, the
+// filter registers' FDF0) and rounds down.
+int32_t otto_interp(int16_t s1, int16_t s2, uint32_t f9) {
+    return (int32_t(s1) * 2) + ((int32_t(s2 - s1) * int32_t(f9 & 0x1FF)) >> 8);
+}
+
+// DECISION OT9: K is the 12 MSBs over 4096; each pole saturates to 18 bits; the HP pole adds the
+// datasheet's 0.5 to K (gain above 1 for K above 0x7FF0).
+int32_t otto_lp(int32_t x, int32_t y1, uint16_t k12) {
+    return sat(int64_t(y1) + ((int64_t(k12) * (x - y1)) >> 12), 18);
+}
+
+int32_t otto_hp(int32_t x, int32_t x1, int32_t y1, uint16_t k12) {
+    return sat(int64_t(x) - x1 + (((int64_t(k12) + 2048) * y1) >> 12), 18);
+}
 
 Otto::Otto(OttoMemory& mem) : mem_(mem) { reset(); }
 
@@ -56,6 +85,8 @@ void Otto::stepVoice() {
     const uint32_t a = v.accum >> 11;
     s1_ = mem_.read(bank, a);
     s2_ = mem_.read(bank, (a + 1) & 0x1FFFFF);
+    const int32_t x16 = filterVoice(v);
+    (void)x16;  // volume and channels: Task 4
     if (!(v.cr & (kStop0 | kStop1))) updateAddress(v);
     serviceIrq(vi, v);
     if (++slot_ > actv_) {
@@ -73,6 +104,31 @@ OttoFrame Otto::runFrame() {
     do stepVoice();
     while (!ready_);
     return takeFrame();
+}
+
+int32_t Otto::filterVoice(Voice& v) {
+    const bool cmpd = v.cr & 0x2000;
+    const auto s1 = cmpd ? otto_decompress(s1_) : static_cast<int16_t>(s1_);
+    const auto s2 = cmpd ? otto_decompress(s2_) : static_cast<int16_t>(s2_);
+    const int32_t x = otto_interp(s1, s2, (v.accum >> 2) & 0x1FF);
+    const auto k1 = static_cast<uint16_t>(v.k1 >> 4), k2 = static_cast<uint16_t>(v.k2 >> 4);
+    // DECISION OT10: poles 1-2 LP K1; pole 3 by the p9 table (00 HP K2, 01 LP K1, 10 LP K2,
+    // 11 LP K1), HP taking Xn-1 = O2(n-2); pole 4 LP K2 or HP K2 with Xn-1 = O3(n-2).
+    const int32_t y1 = otto_lp(x, sext(v.o1_1, 18), k1);
+    const int32_t y2 = otto_lp(y1, sext(v.o2_1, 18), k1);
+    v.o2_2 = v.o2_1;
+    v.o2_1 = store18(y2);
+    const bool lp3 = v.cr & 0x100, lp4 = v.cr & 0x200;
+    const int32_t o3 = sext(v.o3_1, 18);
+    const int32_t y3 = lp3 ? otto_lp(y2, o3, k1) : lp4 ? otto_lp(y2, o3, k2) : otto_hp(y2, sext(v.o2_2, 18), o3, k2);
+    v.o3_2 = v.o3_1;
+    v.o3_1 = store18(y3);
+    const int32_t o4 = sext(v.o4_1, 18);
+    const int32_t y4 = lp4 ? otto_lp(y3, o4, k2) : otto_hp(y3, sext(v.o3_2, 18), o4, k2);
+    v.o1_1 = store18(y1);
+    v.o4_1 = store18(y4);
+    // DECISION OT11: the pan stage gets the 16-bit integer part of pole 4.
+    return sat(y4 >> 1, 16);
 }
 
 // DECISION OT4: FC added once; strict compares (n > END fwd, n < START rev); DIR=0 is forward;

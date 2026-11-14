@@ -582,6 +582,41 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Confidence: Medium.
 - Status: implemented (Plan 2 Task 2); tests otto_irq_sequence, otto_forced_irq, otto_irqv_read_without_pending_is_harmless.
 
+## OT6: Compressed sample decoder
+- Options: the datasheet gives only the encoder.
+- Choice: e = word >> 13, m = word & 0x1FFF. e >= 1: v = (int16)(((m >> 12 ^ 1) << 15) | (m << 2)) >> (7 - e). e = 0: v = (int16)(m << 3) >> 7. Unused low bits are whatever the memory returns (the board forces them to 0).
+- Evidence: notes §3; reproduces the p31 examples (7FFF->FF, 8000->E0, FFF0->1F, 00FF->0F) and re-encodes to the same code for all 65536 words.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3); tests otto_decompress_examples, otto_decompress_roundtrip.
+
+## OT8: Interpolation
+- Options: which 9 of the 11 fraction bits; rounding; output units.
+- Choice: f9 = ACCUM bits 10:2 (F10..F2). otto_interp = (s1 << 1) + (((s2 - s1) * f9) >> 8), rounding down; the result is in half-LSB units (one fraction bit, as the filter registers' FDF0).
+- Evidence: notes §3, §9.5.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3).
+
+## OT9: Filter arithmetic
+- Options: K scaling; the HP "+0.5"; saturation.
+- Choice: k12 = K >> 4. LP: sat18(y1 + ((k12 * (x - y1)) >> 12)). HP: sat18(x - x1 + (((k12 + 2048) * y1) >> 12)). sat18 clamps to [-131072, 131071]; floor rounding (a decaying HP can rest at -1).
+- Evidence: notes §3, §9.7. LP medium. The HP scale is the datasheet's formula read literally: gain above 1 for K above 0x7FF0, which the coefficient formula never produces.
+- Confidence: LP medium; HP low.
+- Status: implemented (Plan 2 Task 3); revisit by ear in Plan 3/4.
+
+## OT10: Filter routing
+- Options: the p9 table and the p34 diagram disagree on pole 3's coefficient in modes 10 and 11.
+- Choice: the p9 table: pole 3 = 00 HP K2, 01 LP K1, 10 LP K2, 11 LP K1; pole 4 LP K2 (LP4=1) or HP K2. Poles 1-2 LP K1. HP poles take Xn-1 from O2(n-2) (pole 3) and O3(n-2) (pole 4), which hold the previous output of the pole before.
+- Evidence: notes §3; the ES5505 datasheet's table is identical to p9.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3); test otto_filter_mode_routing.
+
+## OT11: Filter output to the pan stage
+- Options: which 16 of the 18 bits.
+- Choice: x16 = sat16(O4 >> 1): the integer part, dropping the fraction bit.
+- Evidence: notes §3, §9.7.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3).
+
 ## TS machine
 
 (None yet.)

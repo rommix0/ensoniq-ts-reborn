@@ -11,6 +11,12 @@ struct OttoMemory {
     virtual uint16_t read(int bank, uint32_t addr21) = 0;  // bank 0-3, 21-bit word address
 };
 
+// Pure signal-path helpers (exposed for testing). Filter values are 18-bit signed in half-LSB units.
+int16_t otto_decompress(uint16_t word);                            // OT6: CMPD sample word
+int32_t otto_interp(int16_t s1, int16_t s2, uint32_t f9);          // OT8
+int32_t otto_lp(int32_t x, int32_t y1, uint16_t k12);              // OT9: low-pass pole
+int32_t otto_hp(int32_t x, int32_t x1, int32_t y1, uint16_t k12);  // OT9: high-pass pole
+
 struct OttoFrame {
     int32_t ch[6][2];  // 20-bit signed, [channel][0=L,1=R]
 };
@@ -49,6 +55,7 @@ private:
 
     uint32_t readReg(uint8_t reg);  // the 32-bit read a byte-0 access performs (with side effects)
     void writeReg(uint8_t reg, uint32_t v);
+    int32_t filterVoice(Voice& v);      // OT8-OT11: interpolate and filter; returns the 16-bit output
     void updateAddress(Voice& v);       // OT4
     void serviceIrq(int vi, Voice& v);  // OT14
     uint32_t* voiceReg(uint8_t reg, uint32_t& mask);  // the current page's voice register, or nullptr
