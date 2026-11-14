@@ -14,8 +14,10 @@
 // --analog sets an analog input to a raw 10-bit value (0-1023) from power-on instead of its resting
 // value (kAnalogRest): PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF; it may be repeated.
 // --ram <file> is the battery RAM (Machine::ramImage, 512 KB raw: OSRAM then SEQEXP, T13): loaded at
-// power-on if the file exists (otherwise the RAM starts blank, a cold start) and written back when boot or
-// render ends without an error. --sqx70 fits the SQX-70 sequence expander (SEQEXP); the default is a stock
+// power-on if the file exists (otherwise a line says so and the RAM starts blank, a cold start) and written
+// back when boot or render ends without an error and the run covered at least kBootMs of emulated time (render
+// always does); a shorter boot --ms prints a line and leaves the file alone, so a diagnostic run cannot
+// replace a good settings image with a half-initialised one. --sqx70 fits the SQX-70 sequence expander (SEQEXP); the default is a stock
 // TS-10 (T13). Both use the same image layout.
 //   tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] [--analog <name>=<raw>]...
 //                [--ram <file>] [--sqx70]
@@ -217,16 +219,26 @@ std::unique_ptr<Machine> makeMachine(const Options& o) {
     auto m = Machine::create(roms, err, o.sqx70);
     if (!m) fail(err);
     for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
-    if (!o.ram.empty() && std::filesystem::exists(o.ram)) {
-        std::vector<uint8_t> img;
-        if (!readFile(o.ram, img, err) || !m->loadRamImage(img, err)) fail(err + " '" + o.ram + "'");
+    if (!o.ram.empty()) {
+        if (std::filesystem::exists(o.ram)) {
+            std::vector<uint8_t> img;
+            if (!readFile(o.ram, img, err) || !m->loadRamImage(img, err)) fail(err + " '" + o.ram + "'");
+        } else {
+            std::printf("RAM file '%s' not found: cold start (it is written at the end of a full run)\n", o.ram.c_str());
+        }
     }
     return m;
 }
 
-// --ram: the RAM back to the file.
-void saveRam(const Machine& m, const std::string& path) {
+// --ram: the RAM back to the file, but only after a run of at least kBootMs of emulated time: a shorter run
+// (a diagnostic stopped mid-boot) holds a half-initialised RAM that would replace a good settings image.
+void saveRam(const Machine& m, const std::string& path, uint64_t emulatedMs) {
     std::string err;
+    if (!path.empty() && emulatedMs < kBootMs) {
+        std::printf("RAM file '%s' not written: the run (%llu ms) is shorter than the %u ms boot\n", path.c_str(),
+                    static_cast<unsigned long long>(emulatedMs), static_cast<unsigned>(kBootMs));
+        return;
+    }
     if (!path.empty() && !writeFile(path, m.ramImage(), err)) fail(err + " '" + path + "'");
 }
 
@@ -291,7 +303,7 @@ int boot(const Options& o) {
         panelShown = p;
         firstFrame = false;
     }
-    saveRam(*m, o.ram);
+    saveRam(*m, o.ram, o.ms);
     if (o.displayOnly) return 0;
 
     std::printf("ran %llu frames (%llu ms), %llu CPU cycles%s\n", static_cast<unsigned long long>(frames),
@@ -357,7 +369,7 @@ int render(const Options& o) {
     const Rendered r = renderMidi(*m, midi, o.tailMs);
     writeWav(o.positional[1], r.main);
     if (!o.aux.empty()) writeWav(o.aux, r.aux);
-    saveRam(*m, o.ram);
+    saveRam(*m, o.ram, kBootMs);  // render booted for kBootMs first
     const size_t frames = r.main.size() / 2;
     std::printf("%zu MIDI events, %zu frames (%.3f s at %u Hz), peak %d, MIDI out %zu bytes\n", midi.size(), frames,
                 static_cast<double>(frames) / kWavRate, kWavRate, r.peak, r.midiOut);
