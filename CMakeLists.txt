@@ -41,6 +41,10 @@ target_link_libraries(ens_otto PUBLIC ens_common)
 add_library(ens_duart STATIC src/duart/duart.cpp)
 target_link_libraries(ens_duart PUBLIC ens_common)
 
+# TS machine (Plan 3): ROM set, wave memory; the machine itself joins in later tasks.
+add_library(ens_ts STATIC src/ts/roms.cpp)
+target_link_libraries(ens_ts PUBLIC ens_otto ens_esp ens_m68k ens_duart)
+
 # Tom Harte's per-instruction tests (.m68t reader and runner); the data itself is not in the repo.
 add_library(ens_m68k_harte STATIC src/m68k/harte_format.cpp)
 target_link_libraries(ens_m68k_harte PUBLIC ens_m68k)

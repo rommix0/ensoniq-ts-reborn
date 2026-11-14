@@ -668,4 +668,23 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## TS machine
 
-(None yet.)
+## T2: OS ROM image
+- Options: (a) even bytes from h, odd bytes from the first 256 KB of l, a 512 KB image; (b) treat the l upper half as mapped (A18 tied high, as the schematic shows).
+- Choice: (a). A 256 KB l file (v1.20, v2.02) is used whole.
+- Evidence: in every 512 KB l dump the reset vector (SSP 0xFF80A0, PC 0xC0073E) and all version differences are in the lower half; the upper half is identical in TS-10 3.05/3.10 and TS-12 3.05/3.10 and 69 % 0xFF. The dumps win over the schematic.
+- Confidence: Medium-high.
+- Status: Implemented in `ens::ts::buildOsImage` (Plan 3 Task 1). Tests: ts_os_image_interleaves_lower_half, ts_roms_wrong_size_named.
+
+## T3: Wave memory layout
+- Options: bank 0 and bank 1 layouts from the schematic; word byte order of U45/U46 either way.
+- Choice: bank 0 word = `u41[a] << 8 | nib << 4`, `nib = (a & 0x100000) ? u43[a & 0xFFFFF] >> 4 : u43[a & 0xFFFFF] & 0xF`, `a` = 21-bit address. Bank 1: `a < 0x100000` is U45 word `a`; `0x100000 <= a < 0x180000` is U46 word `a - 0x100000`; above is 0 (empty socket). U45/U46 words are read with the first file byte as the high byte.
+- Evidence: schematic sheet 2 for the layout. Byte order measured on the files (mean |s[i+1]-s[i]| over 16-bit signed words): U45 first-byte-high 1387.7, first-byte-low 21351.7; U46 first-byte-high 1431.8, first-byte-low 21464.8 (factor 15). Test: ts_word_rom_byte_order.
+- Confidence: Medium (layout), high (byte order).
+- Status: Implemented in `ens::ts::WaveMemory` (Plan 3 Task 1). Tests: ts_bank0_builds_12_bit_samples, ts_bank1_regions.
+
+## T4: Sample RAM
+- Options: 2 MB (one 1M x 8 pair), 4 MB, none.
+- Choice: 2 MB: OTTO bank 2 words 0-0xFFFFF; the rest of bank 2 and bank 3 read 0 (no DRAM). The CPU host window base and the SIMM probe behaviour come from the running firmware (Task 4).
+- Evidence: design section 4; service manual SIMM text.
+- Confidence: Medium.
+- Status: Storage implemented in `WaveMemory::sampleRam` (Task 1); CPU mapping in Task 4. Test: ts_sample_ram_bank2.

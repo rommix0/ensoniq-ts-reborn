@@ -1,8 +1,8 @@
 Ensoniq TS-10 / TS-12 ROMs. CRC32 in brackets.
 
 os/    OS EPROMs, 68000-class CPU, 16-bit bus: h = even bytes (D8-15), l = odd bytes (D0-7).
-       Board sockets U5/U6 are 27C4001 (512 KB). 256 KB images come from 27C020 parts, which ignore
-       A18 in that socket, so they mirror into the upper half.
+       Board sockets U5/U6 are 27C4001 (512 KB). The 512 KB l dumps keep everything in the lower
+       256 KB, so the emulator uses only that half (decision T2).
        ts10_120 h/l   [3ae66382 / 047a0aaa]
        ts10_202 h/l   [509f1c46 / cacedb2c]  own dump. The old MAME-style ts10.zip had h and l swapped.
        ts10_305 h/l   [77d547e7 / 3df39031]
