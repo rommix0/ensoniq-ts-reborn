@@ -688,3 +688,10 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Evidence: design section 4; service manual SIMM text.
 - Confidence: Medium.
 - Status: Storage implemented in `WaveMemory::sampleRam` (Task 1); CPU mapping in Task 4. Test: ts_sample_ram_bank2.
+
+## T11: Audio routing
+- Options: how the 20-bit OTTO values enter the 16-bit ESP ports; which channels feed what; ESP instructions per frame.
+- Choice: OTTO ch0-2 to ESP SER0, SER2, SER3 as `sat16(v20 >> 4)`. Main L/R = ESP SER1. Aux L/R = OTTO ch3 as `sat16(v20 >> 4)`. ch4/5 dropped. `Esp::advance(103)` per frame (9 216 000 / 3 / 29 761.9 = 103.2, E30's 3 clocks per instruction); 0 while the ESP is halted.
+- Evidence: schematic sheets 1 and 3 (SER0-2 re-clocked to ESP SER0, SER2, SER3; SER3 to the analog board).
+- Confidence: Bit alignment medium-low (check levels by ear in Plan 4).
+- Status: implemented in `ens::ts::Board::route` (Plan 3 Task 2). Tests: tests/test_ts_board.cpp.
