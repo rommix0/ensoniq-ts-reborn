@@ -646,6 +646,77 @@ void bankRestores(const juce::File& dir, const juce::MemoryBlock& s) {
     CHECK(rowStarts(b, 0, "U0-0") && b.engine()->snapshot().programsSent == 0);
 }
 
+// data_entry_restored (A106): a project left with Data Entry away from rest (0.9; rest is raw 0x14E) on
+// R2-2 comes back as left: after the boot and 500 ms row 0 starts R2-2, the running select is the saved
+// one, and System's TUNE is still +02. Data Entry reaching the machine at the boot's end is a slider move
+// to the OS, which must not edit the restored play screen.
+void dataEntryRestored(const juce::File& dir, const juce::MemoryBlock& r2) {
+    if (r2.isEmpty() || !realRoms(dir)) return;
+    juce::MemoryBlock s;
+    {
+        TsProcessor a;  // r2 with dataEntry 0.9: a state taken before the boot carries r2's RAM and select
+        a.setStateInformation(r2.getData(), static_cast<int>(r2.getSize()));
+        a.params().getParameter("dataEntry")->setValueNotifyingHost(0.9f);
+        s = stateOf(a);
+    }
+    CHECK(selectOf(s).equalsIgnoreCase(selectOf(r2)) && ramOf(s) == ramOf(r2));
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    p.setStateInformation(s.getData(), static_cast<int>(s.getSize()));
+    CHECK(feq(p.params().getParameter("dataEntry")->getValue(), 0.9f));
+    run(p, kRestored + 500);
+    std::printf("  data entry restore: [%s], select %s\n", ens::ts::rowText(p.engine()->snapshot().panel, 0).c_str(),
+                selectOf(stateOf(p)).toRawUTF8());
+    CHECK(rowStarts(p, 0, "R2-2") && selectOf(stateOf(p)).equalsIgnoreCase(selectOf(r2)));
+    using ens::ts::Analog;
+    CHECK(p.engine()->machine().analog(Analog::DataEntry) == ens::app::analogRaw(Analog::DataEntry, 0.9f));
+    press(p, ens::ts::Button::System);
+    CHECK(rowStarts(p, 0, "SYSTEM  TUNE=+02"));
+    // The input is live: the same slider moved on the TUNE page edits it, so the checks above can fail.
+    p.params().getParameter("dataEntry")->setValueNotifyingHost(0.1f);
+    run(p, 300);
+    std::printf("  data entry on TUNE: [%s]\n", ens::ts::rowText(p.engine()->snapshot().panel, 0).c_str());
+    CHECK(rowStarts(p, 0, "SYSTEM  TUNE=") && !rowStarts(p, 0, "SYSTEM  TUNE=+02"));
+}
+
+// zero_length_block / bypassed_block (A109): a 0-sample block with Aux off still takes its messages (the
+// VST3 wrapper makes such blocks when the host passes outputs), and so does a host-bypassed block, whose
+// output is silent. Either way a note-off is not lost and no note stays held.
+void zeroAndBypassedBlocks(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    CHECK(p.disableNonMainBuses() && p.getTotalNumOutputChannels() == 2);
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    const auto held = [&] { return (p.engine()->snapshot().notes[0] >> 60) & 1; };
+    const auto msg = [](uint8_t a, uint8_t b, uint8_t c) {
+        juce::MidiBuffer m;
+        const uint8_t d[] = {a, b, c};
+        m.addEvent(d, 3, 0);
+        return m;
+    };
+    juce::AudioBuffer<float> buf(2, 480);
+    juce::MidiBuffer none;
+    for (int i = 0; i < kBoot / 10; ++i) p.processBlock(buf, none);
+    auto on = msg(0x90, 0x3C, 0x64);
+    p.processBlock(buf, on);
+    CHECK(held() == 1);
+    juce::AudioBuffer<float> empty(2, 0);
+    auto off = msg(0x80, 0x3C, 0x00);
+    p.processBlock(empty, off);
+    CHECK(held() == 0);
+
+    on = msg(0x90, 0x3C, 0x64);
+    p.processBlock(buf, on);
+    for (int i = 0; i < 20; ++i) p.processBlock(buf, none);  // 200 ms: the note sounds
+    CHECK(held() == 1 && buf.getMagnitude(0, 480) > 0.001f);
+    off = msg(0x80, 0x3C, 0x00);
+    p.processBlockBypassed(buf, off);
+    CHECK(held() == 0 && feq(buf.getMagnitude(0, 480), 0.0f));
+    std::printf("  zero-length and bypassed blocks: note 60 held %d\n", static_cast<int>(held()));
+}
+
 // standalone_state_before_boot (A117, as KS-32 A23): a File processor given a Project state (R2-2,
 // TUNE=+02) before its first block comes back on R2-2, its memory still the file's (none here: cold, so
 // TUNE=+00).
@@ -969,6 +1040,8 @@ int main() {
     const auto r2 = bankState(dir.getChildFile("bank"));
     bankRestores(dir.getChildFile("bank-restores"), r2);
     standaloneStateBeforeBoot(dir.getChildFile("standalone-state"), r2);
+    dataEntryRestored(dir.getChildFile("data-entry"), r2);
+    zeroAndBypassedBlocks(dir.getChildFile("zero"));
     romsBesideApp(dir.getChildFile("beside"));
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));

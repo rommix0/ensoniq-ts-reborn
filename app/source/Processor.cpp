@@ -285,17 +285,25 @@ void TsProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         return;
     }
     // DECISION A109: Aux off: rendered into the scratch pair and added into Main. A block longer than
-    // prepared goes in pieces of the scratch size, each with its own messages (A108).
+    // prepared goes in pieces of the scratch size, each with its own messages (A108). A 0-sample block
+    // (the VST3 wrapper makes them) is one piece of 0 frames, so its messages are not lost.
     const int piece = static_cast<int>(auxL_.size());
-    for (int done = 0; done < n; done += piece) {
+    for (int done = 0; done == 0 || done < n; done += piece) {
         const int k = std::min(piece, n - done);
         for (const auto m : midi)
-            if (const int at = std::clamp(m.samplePosition, 0, n - 1); at / piece == done / piece)
+            if (const int at = std::clamp(m.samplePosition, 0, std::max(0, n - 1)); at / piece == done / piece)
                 engine_->midi(at - done, m.data, m.numBytes);
         engine_->render(mainL + done, mainR + done, auxL_.data(), auxR_.data(), k);
         juce::FloatVectorOperations::add(mainL + done, auxL_.data(), k);
         juce::FloatVectorOperations::add(mainR + done, auxR_.data(), k);
     }
+}
+
+// DECISION A109: host bypass keeps the machine running and takes MIDI as processBlock does, so a note-off
+// sent while bypassed is not lost; the output is silent.
+void TsProcessor::processBlockBypassed(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) {
+    processBlock(buffer, midi);
+    buffer.clear();
 }
 
 // DECISION A117 (as KS-32 A21): once booted, the running RAM, whatever thread asks. On the audio thread
