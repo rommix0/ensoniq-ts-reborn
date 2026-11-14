@@ -173,9 +173,10 @@ Status after Plan 4 (`docs/verification-plan4.md`), added when Plan 4 closed:
   `rt_machine_runframe_does_not_allocate` and `rt_engine_render_does_not_allocate`.
 - **Data Entry slider never at raw 0**: **closed.** `analogRaw` floors it at 1 (A110;
   `analog_map_data_entry_never_zero`).
-- **MIDI in bursts over 1024 bytes**: **closed for the app.** The engine's block store holds 1024 bytes,
-  drops and counts the rest, and the tests check the count (A101). A host that sends a large sysex still
-  loses the excess; nothing shows it to the player.
+- **MIDI in bursts over 1024 bytes**: **still open.** The engine's block store holds 1024 bytes a block,
+  drops the rest and counts them in `Snapshot::midiDropped` (A101, tested), but the count is shown
+  nowhere, so a host that sends a large sysex in one block loses the excess silently. Pacing the bytes or
+  showing the count is for a later plan.
 - The battery RAM kept in the app's state and on disk: **closed** (A116, A117; the memory file and the
   project state).
 - Whether the app offers the SQX-70: **closed, not offered.** The app runs a stock TS-10.

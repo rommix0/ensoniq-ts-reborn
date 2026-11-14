@@ -47,7 +47,7 @@ Otherwise the first start shows a message in place of the display. Click the gea
 The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`.
 
 - **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder and the memory file. Each change is saved at once. The Standalone and the VST3 share it.
-- **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, and the machine starts cold. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page.
+- **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, the machine starts cold, and the first save (on close or after 60 s, once booted) replaces it with the running memory. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page.
 - **Erase memory...** asks first, then writes 512 KB of zeros to the memory file and restarts the machine from it. If the file cannot be written, nothing is erased and the settings page says so.
 - **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. It also holds the wrapper's saved plugin state (the sound and the controls). `TSR_SETTINGS_DIR` does not move it.
 - **The VST3 does not write the shared memory file by itself.** A VST3 instance keeps its memory in the host's project (below) and never saves to the file on close or on a timer, so many instances cannot overwrite each other. A new instance starts from the file. **Copy to shared memory...** is the one way a VST3 writes it.
@@ -55,8 +55,8 @@ The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`
 ## Audio and MIDI
 
 - **Standalone.** The settings page has JUCE's device selector: output device, buffer size and MIDI inputs. The wrapper's own Options menu also stays. The Standalone's default layout has the Aux bus off, so Main and Aux play together on one stereo pair.
-- **VST3.** The host owns the devices. MIDI comes from the host's track, every byte as the MIDI IN jack would receive it, sysex and real-time included (A108). The firmware itself takes Poly-Key and channel pressure from MIDI.
-- **Outputs (A109).** Two stereo buses: Main and Aux. If the host turns Aux off, Aux is added into Main. The Aux outputs carry a track only when its Effects Bus Routing (Track Effects page) is `-AUX-`; the default routing sends everything to Main.
+- **VST3.** The host owns the devices. MIDI comes from the host's track, every byte as the MIDI IN jack would receive it, sysex and real-time included (A108). The firmware itself takes Poly-Key and channel pressure from MIDI. One host block carries at most 1024 bytes into the machine (A101): a sysex message over about 1 KB arriving in one block is cut, and the excess is counted (`Snapshot::midiDropped`) but not shown.
+- **Outputs (A109).** Two stereo buses: Main and Aux. If the host turns Aux off, Aux is added into Main. When the host bypasses the plugin the machine keeps running and takes MIDI (so a note-off sent while bypassed is not lost), and the output is silent. The Aux outputs carry a track only when its Effects Bus Routing (Track Effects page) is `-AUX-`; the default routing sends everything to Main.
 - **MIDI out** from the firmware is counted and not sent anywhere. The app reads it only to know which sound is selected.
 
 ## The VST3: the state in the project
@@ -93,7 +93,7 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 
 These are OS v3.10's own behaviour. The app does not work around them, except where stated.
 
-- **The boot takes real time.** The play screen appears at about 3.5 s and the restored sound (A105) at about 5.3 s (A104). Notes before the end of the boot are not played.
+- **The boot takes real time.** The play screen appears at about 3.5 s, on U0-0, and the OS plays notes from then on. At about 5.3 s (A104) the saved sound is restored (A105); that program change mutes the output and makes the OS ignore notes for about 50 ms (next item).
 - **A sound change that loads a new effect mutes the output and makes the OS ignore notes for about 50 ms.** This shows after a program change, including the restore at the end of the boot. A note played within 50 ms of the change is lost. The app does not delay or resend notes.
 - **VOICE-MUTING** is a setting on the OS's System page. It is the firmware's own and the app passes it through unchanged. Its effect has not been checked here.
 - **The OS sometimes answers a MIDI-in program change on MIDI out.** The cause is unknown (Low confidence). The app counts a program change that changes the sound and ignores the rest.
@@ -110,5 +110,6 @@ Environment variables read when the app starts. Neither is needed for normal use
 - **The disk drive** is empty. The drive is drawn as a bezel round an empty slot, and the OS reports "DISK DRIVE NOT READY". SCSI is absent.
 - **The TS-12** is not supported; this is the TS-10 only.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
+- **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.
 - **Levels and the filters** have not been checked by ear (`docs/verification-plan3.md`, "User to run").
 - **Label readability** at the minimum window size and the small print the photo has (jack labels, "Bypass", "Replace w/FX") are not drawn. The full list of what a person still has to check is in `docs/verification-plan4.md`.
