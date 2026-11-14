@@ -617,6 +617,41 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Confidence: Medium.
 - Status: implemented (Plan 2 Task 3).
 
+## OT7: Stopped voices
+- Options: a stopped voice is fully idle; or it fetches and filters but is muted.
+- Choice: STOP0 or STOP1: the voice still fetches, interpolates and filters (its filter temps keep updating), adds nothing to its channel, and its envelope, address and loop/IRQ check are frozen. FILTCOUNT still advances.
+- Evidence: notes §3 (§4.6, §4.8 force volume 0); fetching and filtering on a stopped voice are unstated (§9.6). Kept as the KS-32 OTIS did, whose firmware read a stopped voice's O1(n-1) (KS-32 O7).
+- Confidence: Low.
+- Status: implemented (Plan 2 Task 4); check against the running TS firmware in Plan 3.
+
+## OT12: Volume
+- Options: rounding; what exponent 0 does.
+- Choice: otto_vol(x16, vol) = ((x16 * (0x100 | M)) >> 5) >> (15 - EX), arithmetic shifts, M = vol bits 11:4, EX = bits 15:12. Exponent 0 is a shift of 15, not a mute.
+- Evidence: notes §3 (§11.6/p36).
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 4).
+
+## OT13: Channels and saturation
+- Options: 23-bit accumulators that wrap, or sums that saturate; CA 6/7; TEST mode.
+- Choice: CA 0-5 add L/R into that channel; CA 6/7 add nothing. Sums are kept in 32 bits and saturated to 20 bits ([-524288, 524287]) into the frame at the end of the frame, then cleared. With PAGE.TEST set the frame carries the host-written CH values (23-bit, sign-extended, saturated to 20 bits) and voice sums are dropped.
+- Evidence: notes §3, §9.10, §9.15. The datasheet's 3 guard bits allow 8 full-scale voices; past that a listener expects clipping, not wrap noise.
+- Confidence: Low (saturating sums), medium (the rest).
+- Status: implemented (Plan 2 Task 4); test otto_channel_saturates_not_wraps.
+
+## OT15: Envelopes
+- Options: ramp alignment; FILTCOUNT width and scope; the K2 line testing K1SLOW; stopped voices.
+- Choice: per voice, while running: if ECOUNT != 0, LVOL and RVOL ramp; K1 ramps unless K1RAMP bit 0 (SLOW) is set and FILTCOUNT != 0; K2 likewise with K2RAMP's own SLOW; ECOUNT -= 1. FILTCOUNT is 3 bits per voice, advanced every slot. otto_ramp(v, r8) = clamp(v + (int8)r8, 0, 0xFFFF): the ramp adds at the register's LSB.
+- Evidence: notes §3 (§11.5, §11.7), §9.8.
+- Confidence: Medium-low.
+- Status: implemented (Plan 2 Task 4); tests otto_volume_ramp, otto_filter_ramp_slow.
+
+## OT19: Fewer than five voices
+- Options: refuse, clamp to 5, or run ACTV+1 slots.
+- Choice: ACTV 0-3 is allowed and runs ACTV+1 slots per frame.
+- Evidence: notes §4 says at least 5 voices (for the serial port).
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 4); test otto_actv_below_4_still_produces_frames.
+
 ## TS machine
 
 (None yet.)

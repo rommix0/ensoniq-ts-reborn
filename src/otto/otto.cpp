@@ -43,6 +43,20 @@ int32_t otto_hp(int32_t x, int32_t x1, int32_t y1, uint16_t k12) {
     return sat(int64_t(x) - x1 + (((int64_t(k12) + 2048) * y1) >> 12), 18);
 }
 
+// DECISION OT12: multiply by 1MMMMMMMM, keep the 20 MSBs (>> 5), shift right by 15 - exponent;
+// exponent 0 is a shift of 15, not a mute.
+int32_t otto_vol(int32_t x16, uint16_t vol) {
+    const int32_t mult = 0x100 | ((vol >> 4) & 0xFF);
+    return ((x16 * mult) >> 5) >> (15 - (vol >> 12));
+}
+
+// DECISION OT15: the signed 8-bit ramp adds at the register's LSB (the fine bits), saturating to
+// 0..0xFFFF.
+uint16_t otto_ramp(uint16_t v, uint8_t r8) {
+    const int32_t n = int32_t(v) + static_cast<int8_t>(r8);
+    return static_cast<uint16_t>(n < 0 ? 0 : (n > 0xFFFF ? 0xFFFF : n));
+}
+
 Otto::Otto(OttoMemory& mem) : mem_(mem) { reset(); }
 
 void Otto::reset() {
@@ -67,6 +81,7 @@ void Otto::reset() {
     ready_ = false;
     std::memset(&frame_, 0, sizeof frame_);
     s1_ = s2_ = 0;
+    std::memset(sum_, 0, sizeof sum_);
 }
 
 void Otto::stepVoice() {
@@ -86,13 +101,52 @@ void Otto::stepVoice() {
     s1_ = mem_.read(bank, a);
     s2_ = mem_.read(bank, (a + 1) & 0x1FFFFF);
     const int32_t x16 = filterVoice(v);
-    (void)x16;  // volume and channels: Task 4
-    if (!(v.cr & (kStop0 | kStop1))) updateAddress(v);
+    // DECISION OT7: a stopped voice still fetches and filters but adds nothing, and its envelope
+    // and address are frozen (KS-32 O7 behaviour; the datasheet only says its volume is 0).
+    const bool running = !(v.cr & (kStop0 | kStop1));
+    if (running) {
+        // DECISION OT13: CA 0-5 add into that channel; CA 6/7 add nothing.
+        const uint32_t ca = (v.cr >> 10) & 7;
+        if (ca < 6) {
+            sum_[ca][0] += otto_vol(x16, static_cast<uint16_t>(v.lvol));
+            sum_[ca][1] += otto_vol(x16, static_cast<uint16_t>(v.rvol));
+        }
+        envelope(v);
+    }
+    v.filtcount = (v.filtcount + 1) & 7;
+    if (running) updateAddress(v);
     serviceIrq(vi, v);
+    // DECISION OT19: ACTV below 4 (fewer than the datasheet's 5 voices) still runs ACTV+1 slots.
     if (++slot_ > actv_) {
+        latchFrame();
         slot_ = 0;
         ready_ = true;
     }
+}
+
+// DECISION OT15: per voice, only while running: with ECOUNT != 0 both volumes ramp, each K ramps
+// unless its own SLOW bit is set and FILTCOUNT != 0, and ECOUNT counts down. FILTCOUNT is a 3-bit
+// per-voice counter advanced every slot (the datasheet's K2 line testing K1SLOW is read as K2SLOW).
+void Otto::envelope(Voice& v) {
+    if (v.ecount == 0) return;
+    v.lvol = otto_ramp(static_cast<uint16_t>(v.lvol), static_cast<uint8_t>(v.lvramp >> 8));
+    v.rvol = otto_ramp(static_cast<uint16_t>(v.rvol), static_cast<uint8_t>(v.rvramp >> 8));
+    if (!(v.k1ramp & 1) || v.filtcount == 0)
+        v.k1 = otto_ramp(static_cast<uint16_t>(v.k1), static_cast<uint8_t>(v.k1ramp >> 8));
+    if (!(v.k2ramp & 1) || v.filtcount == 0)
+        v.k2 = otto_ramp(static_cast<uint16_t>(v.k2), static_cast<uint8_t>(v.k2ramp >> 8));
+    --v.ecount;
+}
+
+// DECISION OT13: sums are kept in 32 bits (no 23-bit wrap) and saturated to 20 bits at the frame
+// end; with TEST set the frame carries the host-written CH values instead and voice sums are dropped.
+void Otto::latchFrame() {
+    for (int c = 0; c < 6; ++c)
+        for (int s = 0; s < 2; ++s) {
+            const int32_t v = (page_ & kTest) ? sext(chTest_[c * 2 + s], 23) : sum_[c][s];
+            frame_.ch[c][s] = sat(v, 20);
+            sum_[c][s] = 0;
+        }
 }
 
 OttoFrame Otto::takeFrame() {

@@ -16,6 +16,8 @@ int16_t otto_decompress(uint16_t word);                            // OT6: CMPD 
 int32_t otto_interp(int16_t s1, int16_t s2, uint32_t f9);          // OT8
 int32_t otto_lp(int32_t x, int32_t y1, uint16_t k12);              // OT9: low-pass pole
 int32_t otto_hp(int32_t x, int32_t x1, int32_t y1, uint16_t k12);  // OT9: high-pass pole
+int32_t otto_vol(int32_t x16, uint16_t vol);                       // OT12: one side of volume/pan
+uint16_t otto_ramp(uint16_t v, uint8_t r8);                        // OT15: one envelope step
 
 struct OttoFrame {
     int32_t ch[6][2];  // 20-bit signed, [channel][0=L,1=R]
@@ -56,6 +58,8 @@ private:
     uint32_t readReg(uint8_t reg);  // the 32-bit read a byte-0 access performs (with side effects)
     void writeReg(uint8_t reg, uint32_t v);
     int32_t filterVoice(Voice& v);      // OT8-OT11: interpolate and filter; returns the 16-bit output
+    void envelope(Voice& v);            // OT15
+    void latchFrame();                  // OT13
     void updateAddress(Voice& v);       // OT4
     void serviceIrq(int vi, Voice& v);  // OT14
     uint32_t* voiceReg(uint8_t reg, uint32_t& mask);  // the current page's voice register, or nullptr
@@ -72,6 +76,7 @@ private:
     bool ready_;
     OttoFrame frame_;
     uint16_t s1_, s2_;   // words fetched by the current slot
+    int32_t sum_[6][2];  // OT13: channel sums of the frame in progress
 };
 
 }  // namespace ens

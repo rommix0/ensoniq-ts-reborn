@@ -18,6 +18,7 @@ set(ENS_TEST_SOURCES
   test_otto_regs.cpp
   test_otto_addr.cpp
   test_otto_signal.cpp
+  test_otto_mix.cpp
 )
 
 add_executable(ens_tests ${ENS_TEST_SOURCES})
