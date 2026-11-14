@@ -75,9 +75,11 @@ TEST(otto_lp_values) {
 
 TEST(otto_hp_values) {
     CHECK_EQ(ens::otto_hp(2000, 0, 0, 0), 2000);
+    // OT9: feedback 0.5 + K/131072, i.e. (k12 + 4096) / 8192: 0.5 at K = 0, below 1 at K = 0xFFF0.
     CHECK_EQ(ens::otto_hp(0, 0, 1000, 0), 500);
-    CHECK_EQ(ens::otto_hp(0, 0, 1000, 2048), 1000);
-    CHECK_EQ(ens::otto_hp(0, 0, 131071, 4095), 131071);  // saturated to 18 bits
+    CHECK_EQ(ens::otto_hp(0, 0, 1000, 2048), 750);
+    CHECK_EQ(ens::otto_hp(0, 0, 131071, 4095), 131055);    // 131071 * 8191 >> 13: decays, never grows
+    CHECK_EQ(ens::otto_hp(0, 0, -131072, 4095), -131056);  // floor rounding
 }
 
 // OT10: K1 = 0xFFF0, K2 = 0, DC input 0x4000 (0x8000 in half-LSB units), 300 frames per mode.

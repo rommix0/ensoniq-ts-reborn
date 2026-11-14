@@ -33,14 +33,15 @@ int32_t otto_interp(int16_t s1, int16_t s2, uint32_t f9) {
     return (int32_t(s1) * 2) + ((int32_t(s2 - s1) * int32_t(f9 & 0x1FF)) >> 8);
 }
 
-// DECISION OT9: K is the 12 MSBs over 4096; each pole saturates to 18 bits; the HP pole adds the
-// datasheet's 0.5 to K (gain above 1 for K above 0x7FF0).
+// DECISION OT9: K is the 12 MSBs over 4096; each pole saturates to 18 bits; the HP pole's feedback is
+// 0.5 + K/131072, (k12 + 4096) / 8192: the datasheet's 0.5 floor, below 1 over the whole K range
+// (the TS firmware sets K2 up to 0xFF00 on HP poles).
 int32_t otto_lp(int32_t x, int32_t y1, uint16_t k12) {
     return sat(int64_t(y1) + ((int64_t(k12) * (x - y1)) >> 12), 18);
 }
 
 int32_t otto_hp(int32_t x, int32_t x1, int32_t y1, uint16_t k12) {
-    return sat(int64_t(x) - x1 + (((int64_t(k12) + 2048) * y1) >> 12), 18);
+    return sat(int64_t(x) - x1 + (((int64_t(k12) + 4096) * y1) >> 13), 18);
 }
 
 // DECISION OT12: multiply by 1MMMMMMMM, keep the 20 MSBs (>> 5), shift right by 15 - exponent;

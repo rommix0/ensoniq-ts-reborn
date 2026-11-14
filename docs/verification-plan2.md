@@ -56,10 +56,11 @@ voices' state from copies of the OTTO. Each OT entry in `docs/decisions.md` carr
   The firmware writes the temps as 0 (1272 writes, none non-zero). OT7 is not observable with this
   firmware.
 - OT9: the HP pole's +0.5 scale, and OT10's pole-3 routing, by listening to filtered sounds.
-  **OT9's HP reading is contradicted.** The firmware writes K2 up to 0xFF00 on sounding voices with a
-  high-pass pole; with the literal +0.5 the feedback gain reaches 1.5 and pole 4 sits on the 18-bit rail
-  in 20 of the 60 bank programs. Not fixed in Task 7: the two stable readings (K/65536, or
-  0.5 + K/131072) need a listen to choose (OT9). **OT10:** mode 11 is nearly every voice, mode 10 is in
+  **OT9's HP reading was wrong; fixed.** The firmware writes K2 up to 0xFF00 on sounding voices with a
+  high-pass pole; with the literal +0.5 the feedback gain reached 1.5 and pole 4 sat on the 18-bit rail
+  in 20 of the 60 bank programs. `otto_hp` now uses feedback 0.5 + K/131072 (keeps the datasheet's 0.5
+  floor, below 1 over the whole K range): none of the 60 reaches the rail (ts_hp_voices_stay_off_the_rail).
+  User to run: listen to the high-pass sounds (OT9). **OT10:** mode 11 is nearly every voice, mode 10 is in
   12 programs, and K1 differs from K2 in most samples, so the routing choice is audible; the firmware
   cannot settle it. User to run: listen to `tsemu render tests/data/filtered_patch.mid` (WOW-SWEEP, which
   uses modes 01, 10 and 11).
@@ -78,5 +79,6 @@ voices' state from copies of the OTTO. Each OT entry in `docs/decisions.md` carr
   16 bits or fewer) or 3 alone (8 bits or fewer). Every partial write covers all the implemented bits,
   so whether the write latch is shared cannot be seen with this firmware.
 
-Render hashes (MinGW-w64 i686, `tsemu render <file> out.wav --roms roms`, default 2000 ms tail):
-`tests/data/full_chord.mid` 26db4104fbbae4f4, `tests/data/filtered_patch.mid` 51b81e7658681791.
+Render hashes after the OT9 fix (MinGW-w64 i686 and MSVC x64 alike, `tsemu render <file> out.wav
+--roms roms`, default 2000 ms tail): `tests/data/player_smoke.mid` 4a751109deae8b89,
+`tests/data/full_chord.mid` 524fcc64af78f175, `tests/data/filtered_patch.mid` 01e3c8622cc8c8be.

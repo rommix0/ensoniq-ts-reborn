@@ -553,6 +553,57 @@ TEST(ts_program_change_changes_display) {
     CHECK_EQ(r.afterProgram.underline[0], 0ull);
 }
 
+namespace {
+
+// One 32-bit OTTO register of a copy of the chip (the machine's OTTO is untouched): PAGE = page, then
+// bytes 0-3 of register r (OT1).
+uint32_t ottoReg(ens::Otto& c, uint8_t page, int r) {
+    c.write(0x3C, 0);
+    c.write(0x3D, 0);
+    c.write(0x3E, 0);
+    c.write(0x3F, page);
+    const auto b = static_cast<uint8_t>(r * 4);
+    return static_cast<uint32_t>(c.read(b)) << 24 | static_cast<uint32_t>(c.read(b + 1)) << 16 |
+           static_cast<uint32_t>(c.read(b + 2)) << 8 | c.read(b + 3);
+}
+
+}  // namespace
+
+// OT9: programs 8 (HONKY-TONK, LP4:LP3 = 00) and 50 (WOW-SWEEP, 01) give sounding voices high-pass
+// poles with K2 up to 0xFF00. Over one note each, no running voice with volume has pole 4's output
+// (O4(n-1), page 0x20 register 4) on the 18-bit rail; with the literal "+0.5" it sat at +-131071.
+TEST(ts_hp_voices_stay_off_the_rail) {
+    auto m = bootFresh();
+    if (!m) return;
+    for (const uint8_t prog : {uint8_t{8}, uint8_t{50}}) {
+        sendMidi(*m, 0xC0, prog, 0);
+        runMs(*m, 300);
+        sendMidi(*m, 0x90, 60, 100);
+        int32_t peak = 0;
+        uint32_t hpLooks = 0;
+        Audio a;
+        for (int f = 0; f < 600 * 30; ++f) {  // about 600 ms
+            m->runFrame(a);
+            if (f % 8) continue;
+            ens::Otto c(m->board().otto());
+            for (uint8_t v = 0; v < 32; ++v) {
+                const uint32_t cr = ottoReg(c, v, 0);
+                if ((cr & 3) || !((ottoReg(c, v, 2) | ottoReg(c, v, 4)) & 0xFFFF)) continue;  // stopped or silent
+                if (cr & 0x200) continue;  // LP4: pole 4 is low-pass
+                ++hpLooks;
+                const uint32_t o4 = ottoReg(c, static_cast<uint8_t>(0x20 | v), 4) & 0x3FFFF;
+                const int32_t s = (o4 & 0x20000) ? static_cast<int32_t>(o4) - 0x40000 : static_cast<int32_t>(o4);
+                peak = std::max(peak, std::abs(s));
+            }
+        }
+        sendMidi(*m, 0x80, 60, 64);
+        runMs(*m, 500);
+        std::printf("  program %d: %u looks at HP voices, |O4| max %d\n", prog, hpLooks, peak);
+        CHECK(hpLooks > 0);
+        CHECK(peak < 131071);
+    }
+}
+
 TEST(ts_render_is_deterministic) {
     const std::vector<int16_t> a = renderSmoke();
     if (a.empty()) return;
