@@ -14,8 +14,12 @@ endif()
 set(ENS_M68K_TESTS_DIR "${CMAKE_SOURCE_DIR}/testdata/680x0/68000/m68t" CACHE PATH
   "Converted Tom Harte 68000 tests (.m68t, see docs/m68k.md); m68k_suite skips when absent")
 set(ENS_ROM_DIR "${CMAKE_SOURCE_DIR}/roms" CACHE PATH "TS ROM directory (roms/, see roms/README.txt)")
+option(ENS_BUILD_APP "Build the JUCE app (MSVC x64 or Linux x64)" OFF)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})  # build/ens_tests
+if(ENS_BUILD_APP)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)  # the static cores link into the Linux VST3 .so
+endif()
 
 enable_testing()
 
@@ -77,3 +81,11 @@ add_executable(tsemu tools/tsemu/main.cpp)
 target_link_libraries(tsemu PRIVATE ens_ts ens_tools_common)
 target_include_directories(tsemu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_definitions(tsemu PRIVATE _CRT_SECURE_NO_WARNINGS)
+
+# The JUCE app (Plan 4): TS Reborn, Standalone and VST3. MSVC x64 on Windows, GCC x64 on Linux.
+if(ENS_BUILD_APP)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR NOT (MSVC OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    message(FATAL_ERROR "ENS_BUILD_APP needs MSVC x64 or Linux x64")
+  endif()
+  add_subdirectory(app)
+endif()
