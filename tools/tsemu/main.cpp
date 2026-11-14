@@ -374,6 +374,8 @@ int render(const Options& o) {
     std::printf("%zu MIDI events, %zu frames (%.3f s at %u Hz), peak %d, MIDI out %zu bytes\n", midi.size(), frames,
                 static_cast<double>(frames) / kWavRate, kWavRate, r.peak, r.midiOut);
     std::printf("pcm hash %016llx\n", static_cast<unsigned long long>(pcmHash(r.main)));
+    // Bytes the OS never saw: lost to a DUART A overrun, or beyond the wire queue (T20).
+    std::printf("MIDI in lost: %u overrun, %u dropped\n", m->duart().overruns(0), m->duart().rxDropped(0));
     return 0;
 }
 
