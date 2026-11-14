@@ -1,0 +1,14 @@
+build*/
+dist/
+testdata/
+.worktrees/
+.superpowers/
+__pycache__/
+*.wav
+*.pcm
+datasheets/
+docs/reference/mame/
+roms/misc/
+roms/os/*
+!roms/os/ts10_310h.bin
+!roms/os/ts10_310l.bin
