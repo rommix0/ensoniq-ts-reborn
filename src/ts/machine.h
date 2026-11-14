@@ -39,9 +39,7 @@ public:
     Machine(const Machine&) = delete;  // cpu_ holds a Bus& to *this
     Machine& operator=(const Machine&) = delete;
     void runFrame(Audio& out);                              // one OTTO frame (ACTV + 1 slots)
-    // Emulated CPU time since the machine was created, in clocks: what the CPU ran minus the overshoot of
-    // its last instruction, which the next slot repays (so a long DIVU at a frame's end does not show).
-    uint64_t cycles() const { return cpu_.totalCycles() - static_cast<uint64_t>(carry_); }
+    uint64_t cycles() const { return cpu_.totalCycles(); }  // CPU clocks since the machine was created (T1)
     uint16_t peek16(uint32_t addr) const;                   // ROM and RAM only, devices read 0, no side effects
     std::function<void(const BusEvent&)> onBusEvent;        // the bus trace; off when empty
     m68k::Cpu& cpu() { return cpu_; }

@@ -698,7 +698,7 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## T1: Clocks and scheduling
 - Options: the CPU/OTTO crystal (the schematic's digit is unreadable); how the CPU, OTTO, DUART and ESP share time.
-- Choice: CPU = OTTO = 15 238 090 Hz (30.47618 MHz / 2, the KS-32's crystal), so a 32-voice frame is 512 CPU clocks (29 761.9 Hz). DUART X1 4 MHz, its serial clock 500 kHz on IP3/IP4. ESP 9 216 000 Hz (103 instructions per frame, T11). Per voice slot the CPU runs 16 clocks less the carried overshoot (a carry of 16 or more skips the CPU), then `Otto::stepVoice`, then the DUART by the exact rational accumulator `acc += 16 * 4 000 000; x1 = acc / 15 238 090`. `Machine::cycles()` is the CPU's total minus the carry, so a frame ends on a slot boundary whatever the instruction mix.
+- Choice: CPU = OTTO = 15 238 090 Hz (30.47618 MHz / 2, the KS-32's crystal), so a 32-voice frame is 512 CPU clocks (29 761.9 Hz). DUART X1 4 MHz, its serial clock 500 kHz on IP3/IP4. ESP 9 216 000 Hz (103 instructions per frame, T11). Per voice slot the CPU runs 16 clocks less the carried overshoot (a carry of 16 or more skips the CPU), then `Otto::stepVoice`, then the DUART by the exact rational accumulator `acc += 16 * 4 000 000; x1 = acc / 15 238 090`. `Machine::cycles()` is the raw CPU total (the time base of `BusEvent.cycle`): 40 reset clocks + 16 per slot, plus up to one instruction's overshoot still carried.
 - Evidence: schematic sheet 1 (crystals); notes §4 (16 CLKs per voice); the KS-32 scheduler.
 - Confidence: Low-medium for the CPU clock until the firmware's own timing checks pass (Task 4); the scheduling is exact.
 - Status: implemented in `ens::ts::Machine::slot` (Plan 3 Task 3). Test: ts_frame_cadence.

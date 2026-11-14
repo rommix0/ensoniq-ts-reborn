@@ -80,6 +80,7 @@ TEST(ts_unmapped_access_is_traced) {
 // Review focus 3: 100 frames of 512 CPU clocks, whatever the instruction mix (40 reset cycles included).
 TEST(ts_frame_cadence) {
     const std::vector<std::vector<uint16_t>> loops = {
+        {0x4E72, 0x2700},                                      // STOP #$2700 (the CPU stopped)
         {0x4E71, 0x60FC},                                      // NOP; BRA
         {0x323C, 0x0003, 0x203C, 0x0000, 0xFFFF, 0x80C1, 0x60F6},  // MOVE #3,D1; loop: MOVE.L #$FFFF,D0; DIVU D1,D0; BRA
     };
@@ -87,7 +88,8 @@ TEST(ts_frame_cadence) {
         auto m = machineWith(code);
         Audio a;
         for (int i = 0; i < 100; ++i) m->runFrame(a);
-        CHECK(m->cycles() >= 51140 && m->cycles() <= 51260);
+        // 51 240 = 40 reset clocks + 3 200 slots x 16; up to one instruction's overshoot (DIVU ~140) is carried.
+        CHECK(m->cycles() >= 51240 && m->cycles() < 51240 + 160);
     }
 }
 
