@@ -57,10 +57,23 @@ The app (Plan 4) and release-folder (Plan 5) commands are added by those plans.
 |---|---|---|
 | Core suite | `build\ens_tests.exe`, `build-msvc\Release\ens_tests.exe` | Must pass on **both** toolchains. |
 | 68000 suite | `ctest --test-dir build -R m68k_suite` | Needs Tom Harte's tests (`testdata/`, ignored; see `docs/m68k.md`). `-DENS_M68K_TESTS_DIR=` can point at the KS-32 repo's local copy. |
+| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image): see the comment at the top of `tools/tsemu/main.cpp`. |
+| TS render | `build\tsemu.exe render tests/data/player_smoke.mid out.wav` | Boots, plays the MIDI file, writes Main as a WAV and prints `pcm hash <16 hex>`. |
+| Speed | `build-msvc\Release\tsemu.exe bench` | Realtime factor of a 20 s chord load after the boot; must stay at x2 or more on MSVC. |
 
-**Reference hashes** start with Plan 3 (the `tsemu` boot and render). Once they exist they are
-printed, not asserted, must be identical on MSVC x64, MinGW-w64 i686 and Linux GCC, and must not
-change unless a change is meant to alter emulation output.
+**Reference hashes** are printed, not asserted, must be identical on MSVC x64, MinGW-w64 i686 and
+Linux GCC, and must not change unless a change is meant to alter emulation output. When one changes on
+purpose, record the new value here and in the current verification report.
+
+| Hash | Printed by | Value (Plan 3) |
+|---|---|---|
+| Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `ebf5f9eb5c643976` |
+| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `4a751109deae8b89` |
+| Render | `tsemu render tests/data/full_chord.mid` | `524fcc64af78f175` |
+| Render | `tsemu render tests/data/filtered_patch.mid` | `01e3c8622cc8c8be` |
+
+Firmware tests read the ROMs from `ENS_ROM_DIR` (default `roms/`) and print "skip: ROMs not found"
+without them.
 
 Tests use the tiny registry in `tests/check.h` (`TEST(name) { CHECK(...); CHECK_EQ(a, b); }`). A new
 test file is one line in `ENS_TEST_SOURCES` in `tests/CMakeLists.txt`. For bugs, write the failing test
