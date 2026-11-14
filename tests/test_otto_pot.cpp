@@ -38,7 +38,9 @@ TEST(otto_par_tracks_pot_at_conversion_end) {
     o.setPot(0x080);
     ottoRead32(o, 0, PAR);
     steps(o, 100);
-    o.setPot(0x100);  // the pin's value when the conversion ends is what PAR gets
-    steps(o, 420);
+    o.setPot(0x100);  // the pin's value when the conversion ends (slot 512) is what PAR gets
+    steps(o, 500);    // slot 600: the conversion has ended
+    o.setPot(0x200);  // a later pin change must not reach PAR before the next conversion
+    steps(o, 100);
     CHECK_EQ(ottoRead32(o, 0, PAR), 0x100u);
 }
