@@ -16,6 +16,7 @@ set(ENS_TEST_SOURCES
   test_m68k_dis.cpp
   test_duart.cpp
   test_otto_regs.cpp
+  test_otto_addr.cpp
 )
 
 add_executable(ens_tests ${ENS_TEST_SOURCES})

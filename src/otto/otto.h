@@ -30,6 +30,15 @@ public:
         return clkHz / (16u * static_cast<uint32_t>(voices));
     }
 
+    // Voice scan. stepVoice() runs the next voice slot (0..ACTV): fetch, signal path, envelope,
+    // address update, interrupt. After slot ACTV the channel sums are latched into the frame and
+    // the frame is ready; starting slot 0 of the next frame clears the ready flag.
+    void stepVoice();
+    bool frameReady() const { return ready_; }
+    OttoFrame takeFrame();  // returns the latched frame and clears ready
+    OttoFrame runFrame();   // steps to the end of a frame, then takes it
+    uint32_t accum(int voice) const { return voice_[voice & 31].accum; }  // test accessor
+
 private:
     struct Voice {
         uint32_t cr, fc, lvol, lvramp, rvol, rvramp, ecount, k2, k2ramp, k1, k1ramp;  // pages 00-1F
@@ -40,6 +49,8 @@ private:
 
     uint32_t readReg(uint8_t reg);  // the 32-bit read a byte-0 access performs (with side effects)
     void writeReg(uint8_t reg, uint32_t v);
+    void updateAddress(Voice& v);       // OT4
+    void serviceIrq(int vi, Voice& v);  // OT14
     uint32_t* voiceReg(uint8_t reg, uint32_t& mask);  // the current page's voice register, or nullptr
 
     OttoMemory& mem_;
@@ -49,6 +60,11 @@ private:
     uint8_t wlatch_[3];    // OT1: shared write latch for bytes 0-2
     uint32_t rlatch_;      // OT1: shared read latch
     bool irqPin_;
+    uint32_t irqClear_;  // OT14: bit per voice, IRQV was read: clear CR.IRQ at its next slot
+    uint32_t slot_;      // next voice slot
+    bool ready_;
+    OttoFrame frame_;
+    uint16_t s1_, s2_;   // words fetched by the current slot
 };
 
 }  // namespace ens

@@ -561,6 +561,27 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Confidence: High for the TS.
 - Status: implemented (Plan 2 Task 1).
 
+## OT4: Address generation and loop modes
+- Options: FC added once or twice (§11.1 steps 3 and 5); >= or > at END; DIR polarity; reverse and bidirectional arithmetic; LEI and the IRQ; the accumulator after a one-shot stop.
+- Choice: only when STOP0 = STOP1 = 0. DIR=0 forward: n = acc + FC, boundary when n > END32 (strict). DIR=1: n = acc - FC, boundary when n < START32. Computed in 64 bits, stored mod 2^32. At a boundary (unless LEI): no loop: set STOP0, acc = END32 (fwd) / START32 (rev); uni loop: acc = START32 + (n - END32) / END32 - (START32 - n); bidirectional: acc = END32 - (n - END32) / START32 + (START32 - n) and DIR toggles; transwave (BLE=1, LPE=0): as uni loop, then BLE cleared and LEI set. LEI: acc = n, no boundary, no IRQ. START32 = START & 0xFFFFF800, END32 = END & 0xFFFFFF80.
+- Evidence: notes §3, §9.2-9.4. The §4.1.5 text (0 = forward) wins over the poorly printed bit map; the p29 strict-compare note wins over step 5.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 2); tests in tests/test_otto_addr.cpp.
+
+## OT5: Fetch addresses
+- Options: S2 at int + 1 or int - 1 in reverse; fetch before or after the update.
+- Choice: S1 at acc >> 11, S2 at (acc >> 11) + 1 wrapped to 21 bits, in both directions, same bank (CR.BS1:BS0), fetched with the accumulator before this slot's update.
+- Evidence: notes §3 steps 1-2.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 2).
+
+## OT14: Interrupts and IRQV
+- Options: as the datasheet's §14 text, with the timing of the CR.IRQ clear left open.
+- Choice: a boundary with IRQE sets CR.IRQ. At a voice's slot, if its CR.IRQ is set and IRQV is free (bit 7 = 1), IRQV = voice number with bit 7 = 0 and the pin asserts. A byte-0 read of IRQV with bit 7 = 0 returns it, sets bit 7, releases the pin and marks the voice; its CR.IRQ is cleared at the start of its next slot (so a new request later in that slot is kept). A read with bit 7 = 1 has no effect. A host write of CR with IRQE|IRQ forces a request. IRQV reads bits 4:0 and bit 7, others 0.
+- Evidence: notes §5.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 2); tests otto_irq_sequence, otto_forced_irq, otto_irqv_read_without_pending_is_harmless.
+
 ## TS machine
 
 (None yet.)
