@@ -66,6 +66,11 @@ void Machine::setAnalog(Analog a, uint16_t raw10) {
     updateLines();
 }
 
+uint16_t Machine::analog(Analog a) const {
+    const int i = static_cast<int>(a);
+    return i >= 0 && i < kAnalogCount ? mux_[kMuxSelect[i]] : 0;
+}
+
 // Hardware facts: IEXP (U12/A) D0 FSW3B/, D1 FSW4B/, D2 PSRB/, D3 PSLB/, active low.
 void Machine::footswitch(int n, bool down) {
     if (n != 3 && n != 4) return;

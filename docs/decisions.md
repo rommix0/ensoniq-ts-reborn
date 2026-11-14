@@ -519,8 +519,8 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## A2: Transmit and panel rings
 - Options: (a) take-by-swap vectors (Plan 6), which allocate every slot; (b) fixed rings that drop the newest byte when full and count it.
-- Choice: (b). The DUART's sent-characters ring holds 256 per channel (`Duart::popTransmitted`, `Duart::txDropped`), and the panel's bytes for the firmware 256 (`Panel::popToCpu`). `Machine::slot` drains the panel channel both ways every slot; the caller pops MIDI out with `Machine::popMidiOut` (the engine every block, Task 2; `ks32emu` every frame).
-- Evidence: a slot is 16 CPU clocks (about 1 us), and one character takes about 300 slots at 31 250 baud, so the panel rings never hold more than a few bytes; 256 bytes of MIDI out is about 80 ms of the line. The order is the old FIFO's, so the boot trace, render and smoke PCM hashes are unchanged (d2afd0fed8861cbd, 2bae46b3acc34cd0, a479ba867298cc55).
+- Choice: (b). The DUART's sent-characters ring holds 256 per channel (`Duart::popTransmitted`, `Duart::txDropped`), and the panel's bytes for the firmware 256 (`Panel::popToCpu`). `Machine::slot` drains the panel channel both ways every slot; the caller pops MIDI out with `Machine::popMidiOut` (the engine every block, Plan 4; `tsemu render` every frame, `renderMidi` in `tests/ts_render.h`).
+- Evidence: a slot is 16 CPU clocks (about 1 us), and one character takes about 300 slots at 31 250 baud, so the panel rings never hold more than a few bytes; 256 bytes of MIDI out is about 80 ms of the line. The rings were copied with the cores, so the TS reference hashes in AGENTS.md (boot trace 3bfc7336098a6def; renders 4a751109deae8b89, 524fcc64af78f175, 01e3c8622cc8c8be) were measured with them in place.
 - Confidence: High.
 - Status: settled, Plan 7 Task 1. `// DECISION A2` at `Channel::sent` (`src/duart/duart.h`), `Panel::toCpu_` (`src/ts/panel.h`) and `Machine::slot` (`src/ts/machine.cpp`). Tests: duart_pop_transmitted_in_order, panel_pop_to_cpu, rt_machine_runframe_does_not_allocate (`tests/rt_main.cpp`).
 
@@ -807,3 +807,70 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Evidence: the OS writes CSRA = 0xEE: channel A runs from the 500 kHz IP3/IP4 clocks, `rxBitClocks(0) == 128`. Middle C at velocity 100 on channel 1 peaks at 2256 within 300 ms (silence before: 3). 33 note-ons and 33 note-offs queued at once (198 bytes) give no overrun, nothing dropped and no warning text, and the notes release. Program change n selects bank n / 6, sound n % 6 of the current bank set (U0-0 BABY-GRAND to U0-9 REMEMBER-ME for 0-59; 60 and up not tried); after it the play screen underlines the selected sound (docs/ts-hardware-interface.md, "MIDI").
 - Confidence: High.
 - Status: implemented in `Machine::midiIn`, `Machine::popMidiOut` (Plan 3 Task 7); `tsemu render`, `tsemu bench`. Tests: ts_midi_rate, ts_midi_note_sounds, ts_midi_burst_no_overrun, ts_program_change_changes_display, ts_render_is_deterministic.
+
+# App
+
+Plan 4's engine and app (TS Reborn). Where a KS-32 Reborn decision is carried over, the Evidence names it.
+
+## A100: Frame rate
+- Options: (a) the WAV writer's rounded 29 762 Hz (`kWavRate`, `tests/ts_render.h`) as the engine's input rate; (b) the exact frame rate.
+- Choice: (b). `kFrameHz = ts::kCpuHz / 512.0` (29 761.9 Hz) in `src/app/engine.h`: one OTTO frame of 32 voices is 512 CPU clocks (T1). The resampler's input rate and the MIDI offset scale (A101) use it. It lives in `src/app`, not `src/ts/machine.h`, so `src/ts` stays integer-only (controller ruling, Plan 4 Task 2).
+- Evidence: T1. The engine's four outputs equal, as floats, a machine run frame by frame through `Resampler(kFrameHz, 48000, 4)` for 48 000 frames (engine_matches_machine_and_resampler).
+- Confidence: High.
+- Status: settled, Plan 4 Task 2. `// DECISION A100` at `kFrameHz` (`src/app/engine.h`) and `Engine::prepare` (`src/app/engine.cpp`). Test: engine_matches_machine_and_resampler.
+
+## A101: MIDI timing in a block
+- Options: (a) every byte of a block enters at its start; (b) a byte at output offset `o` enters before machine frame `floor(o * kFrameHz / outRate)` of the block, with a fixed store per block.
+- Choice: (b), as KS-32 A3. `Engine::midi` stores up to 1024 bytes a block with their machine frame; `render` feeds them before that frame runs, and any left after the block's last frame enter at its end. Bytes beyond 1024 are dropped and counted in `Snapshot::midiDropped`, with the DUART's own drops (A1).
+- Evidence: as KS-32 A3. A note at offset 479 starts 477 output frames after one at offset 0 (engine_midi_offset_places_note: 194 and 671). 3000 bytes in one block drop 1976 (engine_midi_overflow_is_counted). 1024 bytes is DUART A's whole wire queue (A1).
+- Confidence: High.
+- Status: settled, Plan 4 Task 2. `// DECISION A101` at `Engine::midi` (`src/app/engine.cpp`) and `kMidiStore` (`src/app/engine.h`). Tests: engine_midi_offset_places_note, engine_midi_overflow_is_counted.
+
+## A102: GUI events
+- Options: (a) the GUI calls the machine under a lock; (b) a fixed single-producer queue the audio thread drains at the start of each block.
+- Choice: (b), as KS-32 A4. `Engine::post` pushes into a 256-event `SpscRing` and returns false when it is full; `render` applies the events at the start of the next block, in post order. A button or key goes on the panel link only while `Machine::panelRoom()` is 2 or more, so none is dropped; the rest wait for a later block, still in order. On the TS the panel's ring (256 bytes) is the only limit: `Machine::slot` hands it to DUART B only while B's wire queue is empty. Analog and patch select events do not use the link and apply at once.
+- Evidence: as KS-32 A4. 256 key events at once all arrive (engine_posts_never_split_a_panel_event: no panel or channel B drops, and the keys reach MIDI out). System pressed with 100 ms of blocks held opens the System page (engine_buttons_reach_system_page). The left patch select button reaches IEXP: the OS sends `B0 46 40` within 100 ms (engine_patch_select_reaches_machine).
+- Confidence: High.
+- Status: settled, Plan 4 Task 2. `// DECISION A102` at `Engine::post` and `Engine::render` (`src/app/engine.cpp`) and `kEventQueue` (`src/app/engine.h`). Tests: spsc_ring_fifo_and_full, engine_buttons_reach_system_page, engine_posts_never_split_a_panel_event, engine_patch_select_reaches_machine.
+
+## A103: Snapshot hand-off
+- Options: (a) a sequence counter the GUI retries on; (b) a mutex the audio side takes with `try_lock`, skipping the block when the GUI holds it, while the GUI locks normally.
+- Choice: (b), as KS-32 A5. After each block the engine copies the panel state, the Seqs/Songs LED (`Machine::seqLed`, DUART OP3 low), `booted`, the frame count, the MIDI counters and the sound into `Snapshot` under `try_lock`; `Engine::snapshot()` returns a copy under the lock.
+- Evidence: as KS-32 A5. `PanelState` is plain data, so the copy does not allocate (rt_engine_render_does_not_allocate). The Seqs/Songs LED is not on the panel link (interface doc, "Display and LEDs"): `seqLed` is true after Seqs/Songs and false after Sounds (engine_seq_led).
+- Confidence: High.
+- Status: settled, Plan 4 Task 2. `// DECISION A103` at `Engine::render` (`src/app/engine.cpp`). Tests: engine_boot_snapshot, engine_seq_led, rt_engine_render_does_not_allocate.
+
+## A104: Booted
+- Options: (a) watch the display for the play screen; (b) a fixed emulated time since power-on.
+- Choice: (b), as KS-32 A6. `Snapshot::booted` is true once the engine has run `kBootMs` (5300 ms) of machine frames since `create` or `loadRam`, counted as `kBootMs * kCpuHz / 512 000` whole frames.
+- Evidence: `kBootMs` is the measured boot end (3491 ms) plus 50 % (`src/ts/machine.h`). After 5000 ms of 48 kHz blocks it is false; after 5400 ms it is true, row 0 starts `U0-0 BABY-GRAND` and the LEDs are 0x201 (engine_boot_snapshot).
+- Confidence: High.
+- Status: settled, Plan 4 Task 2. `// DECISION A104` at `kBootFrames` (`src/app/engine.cpp`). Test: engine_boot_snapshot.
+
+## A105: Sound tracking and restore
+- Options: as KS-32 A15: (a) send a bare program change after every boot; (b) send the requested sound only if the machine is not already on it, and only on a request, so a panel or MIDI-in pick is never undone; (c) the program change alone; (d) the bytes that made the selection, bank select included. And, for the TS, whether the OS sending a selection on MIDI out again counts as a new change.
+- Choice: (b) and (d), as KS-32 A15 and A18. After the boot (A104) the engine parses MIDI out and MIDI in with a running-status parser and tracks the program, its channel and the last bank select (CC 0, CC 32); `Snapshot::select` is `Bn 00 msb 20 lsb` (once a bank select has been seen) then `Cn pp`. The boot ends on U0-0 (program 0, bank 0/0), cold or warm. `setProgram(n)` records a request; at the first block start once booted, and later whenever the request changes, a request that differs from the current sound sends `setSelect`'s bytes if they select it, else `Cn n`, once, counted in `programsSent`. At the boot's end the `setSelect` bytes go out even when the program number already matches (R2-0 against the boot's U0-0). `programSeq` counts tracked program changes that change the program, never the engine's own sends: the OS at times answers a MIDI-in program change, the engine's own included, by sending that selection on MIDI out, and that answer is not a second change.
+- Evidence: a panel pick sends `B0 00 00 20 ll C0 pp` (interface doc, "MIDI"). Soft2 tracks as program 1 with that select (engine_tracks_panel_pick); `C0 05` from MIDI in as program 5 with nothing sent (engine_tracks_midi_in_program). After a warm boot `C0 20` comes back as U0-5 with one send (engine_restores_program_after_warm_boot); R2-2 (`B0 00 00 20 02 C0 0E`) and preset 81 (`B0 00 00 20 00 C0 51`) come back with the display as before (engine_restores_bank_and_preset). The restore goes out once, by 5400 ms, and a note at 5500 ms sounds (peak 0.163 against 0 before it), clear of the about 50 ms in which the OS ignores notes after a program change that loads an effect (engine_restore_happens_once_at_boot_end). In the runs tried the OS answered the first one or two MIDI-in program changes after a boot with `B0 00 00 20 00 C0 pp` on MIDI out, and later ones with nothing (engine_program_seq_and_adopt, engine_set_select_ignores_bad_bytes).
+- Confidence: High for the bytes and the restore; Medium for other channels and the multi pages (not tried); Low for when the OS answers a MIDI-in program change (only seen, not explained).
+- Status: settled, Plan 4 Task 2. `// DECISION A105` at the parser group (above `Engine::MidiParse::feed`), `Engine::track`, `Engine::setProgram` and `Engine::blockStart` (`src/app/engine.cpp`). Tests: engine_tracks_boot_as_program_zero, engine_tracks_panel_pick, engine_tracks_midi_in_program, engine_restores_program_after_warm_boot, engine_panel_pick_is_not_undone, engine_program_seq_and_adopt, engine_restores_bank_and_preset, engine_set_select_ignores_bad_bytes, engine_restore_happens_once_at_boot_end.
+
+## A106: Analogs after the boot
+- Options: (a) pass `setAnalog` to the machine at once; (b) hold the wanted raw values and apply them at a block start once the boot has ended.
+- Choice: (b), as KS-32 A16, for the inputs the host has set. At each block start, once booted, an input whose wanted value differs from `Machine::analog` is applied; until then the machine holds `kAnalogRest` (T8). A GUI `Event::Kind::Analog` also records its value, so a block start does not undo it. `loadRam` puts every input back to its rest value, since the machine keeps them over a power cycle.
+- Evidence: as KS-32 A16: the OS reads the inputs while it boots. The pitch wheel asked for at 0x100 stays at the rest 0x200 at 1000 ms and is 0x100 at 5400 ms, also after a `loadRam` (engine_analog_waits_for_boot, engine_load_ram_resets_analogs).
+- Confidence: High.
+- Status: settled, Plan 4 Task 2. `// DECISION A106` at `Engine::setAnalog` (`src/app/engine.cpp`). Tests: engine_analog_waits_for_boot, engine_load_ram_resets_analogs.
+
+## A107: MIDI note mask
+- Options: (a) none; (b) a 128-bit mask of the notes held on MIDI in, published in the snapshot, for the editor to draw those keys pressed.
+- Choice: (b), as KS-32 A19. Note on (velocity above 0) sets bit n of `Snapshot::notes`, note off (or note on with velocity 0) clears it, on any channel; All Notes Off and All Sound Off (CC 123, 120) clear all. It follows MIDI in only, from the first byte, and `loadRam` clears it.
+- Evidence: as KS-32 A19. Test: engine_note_mask.
+- Confidence: High for the rule; a note held on two channels clears on the first off (a limit, not worked around).
+- Status: settled, Plan 4 Task 2. `// DECISION A107` at `Engine::track` (`src/app/engine.cpp`).
+
+## A108: MIDI in
+- Options: (a) only channel messages; (b) every byte of every message, sysex and real-time included; and whether the engine converts pressure.
+- Choice: (b), as KS-32 A12. Every byte of every `MidiBuffer` message goes to MIDI IN as the jack would carry it (`Engine::midi`, unchanged). The engine converts nothing: the firmware itself takes Poly-Key and channel pressure from MIDI (Musician's Manual, MIDI Control "PRESSURE": "Either Channel pressure or Poly-Key pressure will be received via incoming MIDI"). This replaces design section 10's pressure line.
+- Evidence: as KS-32 A12: the jack receives the whole stream and the firmware decides what to read. The block store (A101) and the DUART (A1) bound a flood (engine_midi_overflow_is_counted).
+- Confidence: High.
+- Status: the engine side settled, Plan 4 Task 2: `// DECISION A108` at `Engine::midi` (`src/app/engine.cpp`). The processor's call comes with Task 4.

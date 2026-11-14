@@ -6,8 +6,9 @@
 #include <cstring>
 #include <new>
 
-#include "ts_firmware.h"
+#include "app/engine.h"
 #include "check.h"
+#include "ts_firmware.h"
 
 namespace {
 
@@ -130,6 +131,57 @@ TEST(rt_machine_runframe_does_not_allocate) {
     std::printf("  allocations: %zu\n", n);
     CHECK_EQ(n, 0u);
 }
+
+// Real time: once booted, 2 s of engine blocks with what a host and the GUI do meanwhile (MIDI notes
+// and a program change with offsets, button, key, analog and patch select posts, a requested sound, an
+// analog from the host, snapshots, one RAM copy) allocates nothing.
+TEST(rt_engine_render_does_not_allocate) {
+    RomSet roms;
+    if (!readTsRoms(roms)) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    std::string err;
+    auto e = ens::app::Engine::create(roms, err);
+    CHECK(e != nullptr);
+    if (!e) return;
+    constexpr int kBlock = 480;
+    e->prepare(48000, kBlock);
+    float ml[kBlock], mr[kBlock], al[kBlock], ar[kBlock];
+    for (int b = 0; b < 540; ++b) e->render(ml, mr, al, ar, kBlock);  // 5.4 s: booted
+    e->prepare(44100, 512);             // a device rate change, as prepareToPlay makes on a running machine
+    e->render(ml, mr, al, ar, kBlock);  // the first block at the new rate
+    using ens::app::Event;
+    const uint8_t on[] = {0x90, 0x3C, 0x64}, off[] = {0x80, 0x3C, 0x40}, pc[] = {0xC0, 0x05};
+    std::vector<uint8_t> ram(e->machine().ramImage().size());
+    ens::app::Snapshot s;
+    bool taken = false;
+    uint16_t mod = 0;
+    allocStart();
+    for (int b = 0; b < 200; ++b) {
+        if (b % 5 == 0) {
+            e->midi(10, on, 3);
+            e->midi(20, pc, 2);
+            e->midi(400, off, 3);
+            e->post({Event::Kind::Button, static_cast<uint8_t>(Button::Up), b % 10 == 0, 0});
+            e->post({Event::Kind::Key, 60, b % 10 == 0, 100});
+            e->post({Event::Kind::Analog, static_cast<uint8_t>(Analog::ModWheel), false, mod});
+            e->post({Event::Kind::PatchSelect, 0, b % 10 == 0, 0});
+            mod = static_cast<uint16_t>((mod + 0x40) & 0x3FF);
+            e->setProgram(b % 10 == 0 ? 9 : 5);
+            e->setAnalog(Analog::Volume, static_cast<uint16_t>(0x200 + b));
+        }
+        if (b == 50) e->requestRam();
+        e->render(ml, mr, al, ar, kBlock);
+        s = e->snapshot();
+        if (b >= 50 && !taken) taken = e->takeRam(ram);
+    }
+    const size_t n = allocStop();
+    std::printf("  allocations: %zu, frames %llu\n", n, static_cast<unsigned long long>(s.frames));
+    CHECK(taken);
+    CHECK_EQ(n, 0u);
+}
+
 // Usage: ens_rt_tests [substring]  -- runs only tests whose name contains the substring.
 int main(int argc, char** argv) {
     const char* filter = argc > 1 ? argv[1] : nullptr;

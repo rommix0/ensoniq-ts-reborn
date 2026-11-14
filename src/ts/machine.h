@@ -68,12 +68,20 @@ public:
     void button(Button b, bool down) { panel_.button(b, down); }
     void key(int note, bool down, int velocity) { panel_.key(note, down, velocity); }
     void pressure(int note, int amount) { panel_.pressure(note, amount); }
+    // Bytes the panel's ring takes now without dropping one (A2). The slot hands that ring to DUART B
+    // only while its wire queue is empty, so the ring is the only limit: a caller that queues a button
+    // or key (2 bytes) only when this is 2 or more never loses one (A102).
+    int panelRoom() const { return static_cast<int>(Panel::kToCpuSize - panel_.toCpuQueued()); }
+    uint32_t panelDropped() const { return panel_.dropped(); }  // events lost to a full ring since the last power-on
+    // The Seqs/Songs LED: DUART OP3 (SEQLED/), active low (docs/ts-hardware-interface.md, "Display and LEDs").
+    bool seqLed() const { return (duart_.outputPins() & 0x08) == 0; }
     // DECISION T20: a byte on MIDI in joins DUART A's wire queue (up to 1024, A1) and enters at the line
     // rate, 320 us a byte at 31 250 baud (D2), so a host burst cannot overrun the receiver.
     void midiIn(uint8_t byte) { duart_.receive(kMidiChannel, byte); }
     // The oldest byte the firmware sent on MIDI out and not yet popped (256 are kept, A2).
     bool popMidiOut(uint8_t& b) { return duart_.popTransmitted(kMidiChannel, b); }
     void setAnalog(Analog a, uint16_t raw10);  // a raw 10-bit conversion, clamped to 0-1023 (T8)
+    uint16_t analog(Analog a) const;           // the value last set, kAnalogRest until then
     // IEXP inputs (T9): n = 3 or 4 (Foot Switch 2's contacts; 1 and 2 go through the keyboard as buttons),
     // side 0 = left, 1 = right patch select button. Read by the OS on its next IEXP poll.
     void footswitch(int n, bool down);

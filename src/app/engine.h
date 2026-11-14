@@ -1,0 +1,136 @@
+#pragma once
+// The engine between the TS machine and a host's audio callback (Plan 4, from KS-32 Reborn's): it renders
+// Main and Aux at the host rate through the resampler, takes MIDI with block offsets (A101) and GUI
+// events through a fixed queue (A102), and publishes a panel snapshot (A103, A104). JUCE-free and
+// OS-free: no file I/O.
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include "app/resampler.h"
+#include "app/spsc_ring.h"
+#include "ts/machine.h"
+
+namespace ens::app {
+
+// DECISION A100: the machine's frame rate, the engine's input rate: one OTTO frame of 32 voices is
+// 512 CPU clocks (T1), 29 761.9 Hz. Here, not in src/ts, which stays integer-only.
+constexpr double kFrameHz = ts::kCpuHz / 512.0;
+
+struct Event {
+    enum class Kind : uint8_t { Button, Key, Analog, PatchSelect };
+    Kind kind;
+    // Button: ts::Button code. Key: note 36-96. Analog: ts::Analog. PatchSelect: 0 = left, 1 = right.
+    uint8_t id;
+    bool down;
+    uint16_t value;  // Key: strike 1-127. Analog: raw.
+};
+
+struct Snapshot {
+    ts::PanelState panel{};
+    bool seqLed = false;  // the Seqs/Songs LED: DUART OP3 low (interface doc, "Display and LEDs")
+    bool booted = false;
+    uint64_t frames = 0;        // machine frames since the last power-on (create or loadRam)
+    uint32_t midiDropped = 0;   // MIDI-in bytes dropped: the block store (A101) plus the DUART (A1)
+    uint64_t midiOutBytes = 0;  // MIDI-out bytes drained and discarded (A2)
+    int16_t program = -1;       // the current sound 0-127; -1 until the boot ends (A105)
+    std::array<uint8_t, 8> select{};  // the bytes that select it: bank select, then Cn pp (A105)
+    uint8_t selectLen = 0;            // 0 until a selection has been seen or sent
+    std::array<uint64_t, 2> notes{};  // MIDI-in note mask, bit n is note n (A107)
+    uint32_t programsSent = 0;  // selections the engine has sent into MIDI in since create (A105)
+    uint32_t programSeq = 0;    // program changes tracked from MIDI out or in, not the engine's own sends
+};
+
+class Engine {
+public:
+    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err);
+    // Message thread, audio stopped:
+    void prepare(double outRate, int maxBlock);  // allocates the resampler and buffers
+    bool loadRam(const std::vector<uint8_t>& img, std::string& err);
+    // The exact bytes to replay after this boot (A105), when they select the program setProgram asks
+    // for, instead of a bare program change, and at the boot's end even when the machine is already on
+    // that program number (R2-0 against the boot's U0-0). Call after loadRam; up to 8 bytes.
+    void setSelect(const uint8_t* bytes, int len);
+    ts::Machine& machine();  // tests, and the RAM at shut-down
+    // Message thread, audio running:
+    bool post(const Event&);    // false when the queue is full (A102)
+    Snapshot snapshot() const;  // A103
+    void requestRam();          // the next block copies the RAM
+    bool takeRam(std::vector<uint8_t>& out);  // true once a requested copy is ready
+    // Audio thread:
+    void midi(int offset, const uint8_t* data, int size);  // before render, offsets in this block (A101)
+    // Any frames >= 0, in pieces of maxBlock.
+    void render(float* mainL, float* mainR, float* auxL, float* auxR, int frames);
+    void setProgram(int n);    // requests a sound 0-127 (A105)
+    void adoptProgram(int n);  // as setProgram, but never sends: a value followed from the snapshot
+    void setAnalog(ts::Analog a, uint16_t raw);  // applied at a block start, once booted (A106)
+
+private:
+    explicit Engine(std::unique_ptr<ts::Machine> m);
+    void apply(const Event& e);
+    void renderPiece(float* const out[4], int frames);
+    void feedMidi(uint64_t upTo);  // the stored bytes due before block frame upTo
+    void blockStart();             // sends the requested sound, applies the analogs (A105, A106)
+    void sendSelect(const uint8_t* b, int n);
+
+    struct MidiByte {
+        uint64_t frame;  // machine frame of the block it enters before (A101)
+        uint8_t byte;
+    };
+    // A running-status MIDI parser for one stream: feed returns true when a message is complete.
+    struct MidiParse {
+        uint8_t status = 0, d[2] = {0, 0};
+        int n = 0;
+        bool sysex = false;
+        bool feed(uint8_t b);
+    };
+    void track(const MidiParse& p, bool fromIn);  // a complete message: program, bank, notes
+
+    static constexpr int kMidiStore = 1024;     // DECISION A101
+    static constexpr size_t kEventQueue = 256;  // DECISION A102
+    static constexpr size_t kChannels = 4;      // Main L, Main R, Aux L, Aux R
+
+    std::unique_ptr<ts::Machine> m_;
+    std::unique_ptr<Resampler> rs_;
+    std::vector<float> out_;  // resampled frames not yet handed out, interleaved Main L R, Aux L R
+    double outRate_ = 48000;
+    int maxBlock_ = 0;
+    uint64_t frames_ = 0;      // machine frames since power-on
+    uint64_t blockFrame_ = 0;  // machine frames run in this block
+    MidiByte midi_[kMidiStore];
+    int midiCount_ = 0, midiNext_ = 0;
+    uint32_t storeDropped_ = 0;
+    uint64_t midiOut_ = 0;
+    SpscRing<Event, kEventQueue> events_;
+    Event held_{};  // popped, waiting for room on the panel link
+    bool holding_ = false;
+    mutable std::mutex snapMu_;
+    Snapshot snap_;
+    std::vector<uint8_t> ram_;
+    // The sound (A105), reset by loadRam as a power cycle.
+    MidiParse inParse_, outParse_;
+    bool booted_ = false;  // the tracker's boot flag: frames_ reached kBootFrames
+    int requested_ = -1, current_ = -1;
+    bool dirty_ = false, sending_ = false;
+    uint32_t programSeq_ = 0;
+    uint8_t channel_ = 0;  // the channel last seen in a program change
+    bool bankSeen_ = false;
+    uint8_t bankMsb_ = 0, bankLsb_ = 0;
+    std::array<uint8_t, 8> select_{};
+    uint8_t selectLen_ = 0;
+    std::array<uint8_t, 8> setSel_{};
+    uint8_t setSelLen_ = 0;
+    int setSelProgram_ = -1;
+    uint32_t programsSent_ = 0;
+    std::array<uint64_t, 2> notes_{};                // A107
+    std::array<uint16_t, ts::kAnalogCount> wantAnalog_{};  // A106
+    std::array<bool, ts::kAnalogCount> wantSet_{};
+    std::atomic<bool> ramWanted_{false}, ramReady_{false};
+};
+
+}  // namespace ens::app
