@@ -1,16 +1,17 @@
 # Ensoniq TS Reborn
 
 An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer, with the TS-12 to
-follow. It will run the instrument's own operating system, OS v3.10, from your ROM files on an
+follow. It runs the instrument's own operating system, OS v3.10, from your ROM files on an
 emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the
 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from
 a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of
 [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
-**Status:** Plan 3: the TS-10 machine runs the unmodified OS v3.10 headless. It boots to the play
-screen and plays from the keys, the panel and MIDI; the battery RAM can be saved and loaded. `tsemu`
-boots it, renders a MIDI file to WAV and measures its speed.
-No plugin or app yet (Plan 4); nothing has been checked by ear.
+**Status:** Plan 4: the TS-10 machine runs the unmodified OS v3.10 in a Standalone app and a VST3
+instrument, "TS Reborn", with the front panel drawn and playable (Windows x64 and Linux x64; see
+[docs/tsapp.md](docs/tsapp.md)). `tsemu` boots the machine headless, renders a MIDI file to WAV and
+measures its speed. Nothing has been checked by ear or in a DAW; the list of what a person must check is
+in [docs/verification-plan4.md](docs/verification-plan4.md).
 The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).
 
 ## The ROMs

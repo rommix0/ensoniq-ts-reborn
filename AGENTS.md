@@ -49,13 +49,30 @@ cmake -S . -B build-msvc -G "Visual Studio 17 2022" -A x64
 cmake --build build-msvc --config Release
 ```
 
-The app (Plan 4) and release-folder (Plan 5) commands are added by those plans.
+```powershell
+# Core on Linux GCC x64 (in WSL: wsl -d Ubuntu -- bash -lc '...', repo under /mnt/c/...)
+cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-linux
+
+# App (Plan 4), MSVC x64: Standalone, VST3 and the app checks. Needs JUCE; see docs/tsapp.md
+cmake -S . -B build-app -G "Visual Studio 17 2022" -A x64 -DENS_BUILD_APP=ON
+cmake --build build-app --config Release --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
+
+# App on Linux GCC x64; -DFETCHCONTENT_SOURCE_DIR_JUCE=<juce-src> uses a JUCE checkout instead of fetching
+cmake -S . -B build-linux-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_APP=ON
+cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
+```
+
+The release-folder (Plan 5) commands are added by that plan. The app and its checks never open a
+window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an agent session.
 
 ## Testing
 
 | What | Command | Notes |
 |---|---|---|
 | Core suite | `build\ens_tests.exe`, `build-msvc\Release\ens_tests.exe` | Must pass on **both** toolchains. |
+| Real-time suite | `build\ens_rt_tests.exe`, `build-msvc\Release\ens_rt_tests.exe` | Counts allocations in `Machine::runFrame` and `Engine::render` after the boot; must be 0. Also on Linux. |
+| App checks | `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` | Headless: ROM folder, memory file, buses, parameters, state, the editor painted offscreen, the built VST3 through JUCE's host. About 35 s with the ROMs. Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`. Sets `TSR_SETTINGS_DIR` to a temp folder. |
 | 68000 suite | `ctest --test-dir build -R m68k_suite` | Needs Tom Harte's tests (`testdata/`, ignored; see `docs/m68k.md`). `-DENS_M68K_TESTS_DIR=` can point at the KS-32 repo's local copy. |
 | TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image; written back only after a run of at least the boot time), `--sqx70`: see the comment at the top of `tools/tsemu/main.cpp`. |
 | TS render | `build\tsemu.exe render tests/data/player_smoke.mid out.wav` | Boots, plays the MIDI file, writes Main as a WAV and prints `pcm hash <16 hex>`. |

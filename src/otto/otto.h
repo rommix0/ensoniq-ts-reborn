@@ -34,7 +34,7 @@ public:
 
     bool irqAsserted() const { return irqPin_; }  // true = IRQB low
     void setPot(uint16_t v10) { pot_ = v10 & 0x3FF; }  // the POT_IN pin's value as a 10-bit count (OT16)
-    int activeVoices() const { return actv_ + 1; }
+    int activeVoices() const { return static_cast<int>(actv_ + 1); }
     static uint32_t sampleRateHz(uint32_t clkHz, int voices) {  // notes §4: 16 CLKs per voice
         return clkHz / (16u * static_cast<uint32_t>(voices));
     }
