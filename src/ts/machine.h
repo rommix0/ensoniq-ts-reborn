@@ -58,6 +58,11 @@ public:
     void button(Button b, bool down) { panel_.button(b, down); }
     void key(int note, bool down, int velocity) { panel_.key(note, down, velocity); }
     void pressure(int note, int amount) { panel_.pressure(note, amount); }
+    // DECISION T20: a byte on MIDI in joins DUART A's wire queue (up to 1024, A1) and enters at the line
+    // rate, 320 us a byte at 31 250 baud (D2), so a host burst cannot overrun the receiver.
+    void midiIn(uint8_t byte) { duart_.receive(kMidiChannel, byte); }
+    // The oldest byte the firmware sent on MIDI out and not yet popped (256 are kept, A2).
+    bool popMidiOut(uint8_t& b) { return duart_.popTransmitted(kMidiChannel, b); }
     void setAnalog(Analog a, uint16_t raw10);  // a raw 10-bit conversion, clamped to 0-1023 (T8)
     // IEXP inputs (T9): n = 3 or 4 (Foot Switch 2's contacts; 1 and 2 go through the keyboard as buttons),
     // side 0 = left, 1 = right patch select button. Read by the OS on its next IEXP poll.

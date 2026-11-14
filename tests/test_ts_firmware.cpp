@@ -9,7 +9,10 @@
 #include <vector>
 
 #include "check.h"
+#include "files.h"
+#include "smf.h"
 #include "ts_firmware.h"
+#include "ts_render.h"
 
 using namespace ens::ts;
 
@@ -192,7 +195,7 @@ void tap(Machine& m, Button b) {
 
 std::vector<uint8_t> midiOut(Machine& m) {
     std::vector<uint8_t> out;
-    for (uint8_t b; m.duart().popTransmitted(kMidiChannel, b);) out.push_back(b);
+    for (uint8_t b; m.popMidiOut(b);) out.push_back(b);
     return out;
 }
 
@@ -420,4 +423,140 @@ TEST(ts_floppy_reports_no_disk) {
     CHECK(notReady);
     CHECK(bad == nullptr);
     CHECK(rowText(m->panel(), 0).compare(0, 11, "DISK   FORM") == 0);
+}
+
+// ---- MIDI (Task 7) ------------------------------------------------------------------------------
+
+namespace {
+
+void sendBytes(Machine& m, std::initializer_list<uint8_t> bytes) {
+    for (const uint8_t b : bytes) m.midiIn(b);
+}
+
+// One booted machine for the MIDI checks, run in sequence at construction (one boot). Channel 1:
+//   200 ms of silence; middle C at velocity 100 for 300 ms, its note-off, then 1 s;
+//   a burst of 33 note-ons and 33 note-offs (198 bytes) queued at once, so they enter back to back at
+//   the line rate, then 2 s watching the display; 2 s more and the peak over 200 ms (released);
+//   program change 5, then 500 ms.
+struct MidiRig {
+    std::unique_ptr<Machine> m;
+    std::vector<uint8_t> bootOut;  // what the boot sent on MIDI out
+    int silence = 0, noteOn = 0, released = 0;
+    uint32_t overruns = 0, dropped = 0;
+    const char* bad = nullptr;  // the first warning or error text seen after the burst
+    PanelState beforeProgram{}, afterProgram{};
+};
+
+MidiRig& midiTs() {
+    static MidiRig r = [] {
+        MidiRig x;
+        x.m = loadTs();
+        if (!x.m) return x;
+        Machine& m = *x.m;
+        runMs(m, kBootMs);
+        x.bootOut = midiOut(m);
+        x.silence = mainPeak(m, 200);
+        sendBytes(m, {0x90, 0x3C, 0x64});
+        x.noteOn = mainPeak(m, 300);
+        sendBytes(m, {0x80, 0x3C, 0x40});
+        runMs(m, 1000);
+        for (uint8_t k = 0; k < 33; ++k) sendBytes(m, {0x90, static_cast<uint8_t>(36 + k), 100});
+        for (uint8_t k = 0; k < 33; ++k) sendBytes(m, {0x80, static_cast<uint8_t>(36 + k), 64});
+        const uint64_t end = m.cycles() + 2ull * kCpuHz;
+        Audio a;
+        while (m.cycles() < end) {
+            m.runFrame(a);
+            if (!x.bad) x.bad = badText(m.panel());
+            if (!x.bad && shows(m.panel(), "BUFFER")) x.bad = "BUFFER";
+        }
+        x.overruns = m.duart().overruns(kMidiChannel);
+        x.dropped = m.duart().rxDropped(kMidiChannel);
+        runMs(m, 2000);
+        x.released = mainPeak(m, 200);
+        x.beforeProgram = m.panel();
+        sendBytes(m, {0xC0, 0x05});
+        runMs(m, 500);
+        x.afterProgram = m.panel();
+        return x;
+    }();
+    if (!r.m) std::printf("  skip: ROMs not found\n");
+    return r;
+}
+
+// Both rows, then each row's underline and flashing columns as hex masks.
+std::string shown(const PanelState& p) {
+    char a[80];
+    std::snprintf(a, sizeof a, " u %010llx %010llx b %010llx %010llx", static_cast<unsigned long long>(p.underline[0]),
+                  static_cast<unsigned long long>(p.underline[1]), static_cast<unsigned long long>(p.blink[0]),
+                  static_cast<unsigned long long>(p.blink[1]));
+    return "|" + rowText(p, 0) + "|" + rowText(p, 1) + "|" + a;
+}
+
+// The main PCM of tests/data/player_smoke.mid (copied from KS-32 Reborn) rendered after a fresh boot,
+// with a 2 s tail, as `tsemu render` does by default; empty without ROMs.
+std::vector<int16_t> renderSmoke() {
+    std::vector<uint8_t> file;
+    std::vector<MidiEvent> events;
+    std::string err;
+    CHECK(readFile(std::string(ENS_TEST_DATA_DIR) + "/player_smoke.mid", file, err));
+    CHECK(parseSmf(file, events, err));
+    auto m = loadTs();
+    if (!m) return {};
+    runMs(*m, kBootMs);
+    return renderMidi(*m, events, 2000).main;
+}
+
+}  // namespace
+
+// T20: channel A runs from the 500 kHz external 16x clock: 128 X1 clocks per bit, 31 250 baud. The
+// boot sends something on MIDI out, starting with a status byte.
+TEST(ts_midi_rate) {
+    MidiRig& r = midiTs();
+    if (!r.m) return;
+    CHECK_EQ(r.m->duart().rxBitClocks(kMidiChannel), 128u);
+    std::printf("  boot MIDI out: %zu bytes, first %02X\n", r.bootOut.size(), r.bootOut.empty() ? 0 : r.bootOut[0]);
+    CHECK(!r.bootOut.empty() && (r.bootOut[0] & 0x80));
+}
+
+TEST(ts_midi_note_sounds) {
+    MidiRig& r = midiTs();
+    if (!r.m) return;
+    std::printf("  peak: silence %d, note %d\n", r.silence, r.noteOn);
+    CHECK(r.silence < 64);
+    CHECK(r.noteOn > 1000);
+}
+
+// Review focus 4: a burst queued at once enters at the line rate (D2) and none of it is lost: no
+// overrun, nothing dropped from the wire queue, no warning or "out of buffers" text, and the notes
+// release.
+TEST(ts_midi_burst_no_overrun) {
+    MidiRig& r = midiTs();
+    if (!r.m) return;
+    std::printf("  overruns %u, dropped %u, peak 4 s after the burst %d\n", r.overruns, r.dropped, r.released);
+    if (r.bad) std::printf("  saw \"%s\"\n", r.bad);
+    CHECK_EQ(r.overruns, 0u);
+    CHECK_EQ(r.dropped, 0u);
+    CHECK(r.bad == nullptr);
+    CHECK(r.released < 256);
+}
+
+// Program change 5 selects the bank's sixth sound, ALL-PURPOSE, which the play screen then underlines
+// (as observed; T20).
+TEST(ts_program_change_changes_display) {
+    MidiRig& r = midiTs();
+    if (!r.m) return;
+    std::printf("  %s -> %s\n", shown(r.beforeProgram).c_str(), shown(r.afterProgram).c_str());
+    CHECK(shown(r.afterProgram) != shown(r.beforeProgram));
+    const size_t col = rowText(r.afterProgram, 1).find("ALL-PURPOSE");
+    CHECK(col != std::string::npos);
+    if (col != std::string::npos) CHECK_EQ(r.afterProgram.underline[1], 0x7FFull << col);
+    CHECK_EQ(r.afterProgram.underline[0], 0ull);
+}
+
+TEST(ts_render_is_deterministic) {
+    const std::vector<int16_t> a = renderSmoke();
+    if (a.empty()) return;
+    const std::vector<int16_t> b = renderSmoke();
+    std::printf("  %zu frames, render hash %016llx\n", a.size() / 2, static_cast<unsigned long long>(pcmHash(a)));
+    CHECK(a == b);
 }

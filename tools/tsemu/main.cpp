@@ -13,8 +13,18 @@
 // power-on, holds them 100 ms and releases them in reverse order; it may be repeated.
 // --analog sets an analog input to a raw 10-bit value (0-1023) from power-on instead of its resting
 // value (kAnalogRest): PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF; it may be repeated.
+//   tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] [--analog <name>=<raw>]...
+// render boots for kBootMs (not written), sends each MIDI file event to MIDI in at its frame and renders
+// until the last event plus --tail (default 2000 ms); it writes Main as a 16-bit stereo WAV at kWavRate
+// (--aux writes Aux the same way) and prints one summary line and "pcm hash <16 hex>", the FNV-1a 64 of
+// Main's samples. MIDI in takes channel messages only: system messages are not sent. (On Windows a file
+// named aux.<anything> is the AUX device and never completes: give --aux another name.)
+//   tsemu bench [--roms <dir>] [--seconds <n>]
+// bench boots (timed and printed on its own line), then plays a fixed 8-note chord from MIDI in every
+// second for n emulated seconds (default 20) and prints "emulated <s>, host <s>, realtime x<f>".
 // Errors print "error: <msg>" and exit 2.
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -25,9 +35,12 @@
 #include <string>
 #include <vector>
 
-#include "../common/files.h"
+#include "files.h"
 #include "m68k/m68k_dis.h"
+#include "smf.h"
 #include "ts/machine.h"
+#include "ts_render.h"
+#include "wav.h"
 
 using namespace ens::ts;
 
@@ -45,6 +58,10 @@ struct Options {
     bool displayOnly = false;
     std::vector<std::pair<uint64_t, std::vector<Button>>> presses;  // --press: ms, buttons
     std::vector<std::pair<Analog, uint16_t>> analog;                  // --analog: input, raw
+    std::vector<std::string> positional;                              // render: <in.mid> <out.wav>
+    std::string aux;                                                  // render --aux
+    uint32_t tailMs = 2000;                                           // render --tail
+    uint64_t seconds = 20;                                            // bench --seconds
 };
 
 constexpr struct {
@@ -180,10 +197,7 @@ std::pair<Analog, uint16_t> parseAnalog(const std::string& v) {
     fail("bad value '" + v + "' for --analog (PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF=<raw>)");
 }
 
-int boot(const Options& o) {
-    std::set<Device> traced;
-    if (!parseTrace(o.trace, traced))
-        fail("bad value '" + o.trace + "' for --trace (otto,esp,duart,fdc,iexp,scsi,unmapped,iack)");
+std::unique_ptr<Machine> makeMachine(const Options& o) {
     RomSet roms;
     roms.osHigh = load(o.roms + "/os", "ts10_310h.bin");
     roms.osLow = load(o.roms + "/os", "ts10_310l.bin");
@@ -195,6 +209,14 @@ int boot(const Options& o) {
     auto m = Machine::create(roms, err);
     if (!m) fail(err);
     for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
+    return m;
+}
+
+int boot(const Options& o) {
+    std::set<Device> traced;
+    if (!parseTrace(o.trace, traced))
+        fail("bad value '" + o.trace + "' for --trace (otto,esp,duart,fdc,iexp,scsi,unmapped,iack)");
+    auto m = makeMachine(o);
 
     std::set<uint32_t> unmapped;
     std::map<int, uint8_t> duartLast;  // register -> last value written
@@ -236,7 +258,7 @@ int boot(const Options& o) {
             m->button(events.begin()->second.first, events.begin()->second.second);
         m->runFrame(audio);
         ++frames;
-        for (uint8_t b = 0; m->duart().popTransmitted(kMidiChannel, b);) tx[kMidiChannel].push_back(b);
+        for (uint8_t b = 0; m->popMidiOut(b);) tx[kMidiChannel].push_back(b);
         const PanelState& p = m->panel();
         const std::string t = std::to_string(m->cycles() * 1000 / kCpuHz);
         for (int r = 0; r < kPanelRows; ++r) {
@@ -300,17 +322,82 @@ int boot(const Options& o) {
     return 0;
 }
 
+void writeWav(const std::string& path, const std::vector<int16_t>& pcm) {
+    std::string err;
+    if (!writeFile(path, makeWav16(pcm, 2, kWavRate), err)) fail(err + " '" + path + "'");
+}
+
+int render(const Options& o) {
+    if (o.positional.size() != 2) fail("render needs <in.mid> <out.wav>");
+    std::vector<uint8_t> file;
+    std::vector<MidiEvent> midi;
+    std::string err;
+    if (!readFile(o.positional[0], file, err) || !parseSmf(file, midi, err)) fail(err + " '" + o.positional[0] + "'");
+    auto m = makeMachine(o);
+    runMs(*m, kBootMs);
+    const Rendered r = renderMidi(*m, midi, o.tailMs);
+    writeWav(o.positional[1], r.main);
+    if (!o.aux.empty()) writeWav(o.aux, r.aux);
+    const size_t frames = r.main.size() / 2;
+    std::printf("%zu MIDI events, %zu frames (%.3f s at %u Hz), peak %d, MIDI out %zu bytes\n", midi.size(), frames,
+                static_cast<double>(frames) / kWavRate, kWavRate, r.peak, r.midiOut);
+    std::printf("pcm hash %016llx\n", static_cast<unsigned long long>(pcmHash(r.main)));
+    return 0;
+}
+
+// Every second the chord C2 G2 C3 E3 G3 C4 E4 G4 (velocity 100) goes on at the start of the second and
+// off 750 ms later; the audio is discarded. The boot is timed on its own line.
+int bench(const Options& o) {
+    if (!o.positional.empty()) fail("bench takes no positional arguments");
+    if (o.seconds == 0) fail("bench needs --seconds of at least 1");
+    using Clock = std::chrono::steady_clock;
+    const auto secs = [](Clock::time_point a, Clock::time_point b) {
+        return std::chrono::duration<double>(b - a).count();
+    };
+    auto m = makeMachine(o);
+    const auto t0 = Clock::now();
+    runMs(*m, kBootMs);
+    const auto t1 = Clock::now();
+    std::printf("boot: emulated %.3f s, host %.3f s, realtime x%.2f\n", kBootMs / 1000.0, secs(t0, t1),
+                kBootMs / 1000.0 / secs(t0, t1));
+    constexpr uint8_t kChord[8] = {36, 43, 48, 52, 55, 60, 64, 67};
+    const uint64_t second = msFrames(1000), frames = o.seconds * second;
+    int peak = 0;
+    Audio a;
+    const auto t2 = Clock::now();
+    for (uint64_t f = 0; f < frames; ++f) {
+        const uint64_t at = f % second;
+        if (at == 0 || at == second * 3 / 4)
+            for (const uint8_t n : kChord) sendMidi(*m, at == 0 ? 0x90 : 0x80, n, at == 0 ? 100 : 64);
+        m->runFrame(a);
+        for (uint8_t b = 0; m->popMidiOut(b);) {
+        }
+        peak = std::max({peak, std::abs(int{a.mainL}), std::abs(int{a.mainR})});
+    }
+    const double host = secs(t2, Clock::now()), emulated = static_cast<double>(o.seconds);
+    std::printf("emulated %.3f s, host %.3f s, realtime x%.2f\n", emulated, host, emulated / host);
+    std::printf("peak %d (a silent run would be 0)\n", peak);
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     try {
-        if (argc < 2 || std::string(argv[1]) != "boot")
+        const std::string cmd = argc < 2 ? "" : argv[1];
+        if (cmd != "boot" && cmd != "render" && cmd != "bench")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
-                 "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...");
+                 "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...\n"
+                 "  tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] "
+                 "[--analog <name>=<raw>]...\n"
+                 "  tsemu bench [--roms <dir>] [--seconds <n>]");
         Options o;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
-            if (a.compare(0, 2, "--") != 0) fail("unexpected argument '" + a + "'");
+            if (a.compare(0, 2, "--") != 0) {
+                o.positional.push_back(a);
+                continue;
+            }
             if (a == "--display-only") {
                 o.displayOnly = true;
                 continue;
@@ -325,8 +412,14 @@ int main(int argc, char** argv) {
             else if (a == "--last") o.last = static_cast<uint32_t>(parseNum(a, v));
             else if (a == "--press") o.presses.push_back(parsePress(v));
             else if (a == "--analog") o.analog.push_back(parseAnalog(v));
+            else if (a == "--tail") o.tailMs = static_cast<uint32_t>(parseNum(a, v));
+            else if (a == "--aux") o.aux = v;
+            else if (a == "--seconds") o.seconds = parseNum(a, v);
             else fail("unknown option " + a);
         }
+        if (cmd == "render") return render(o);
+        if (cmd == "bench") return bench(o);
+        if (!o.positional.empty()) fail("unexpected argument '" + o.positional[0] + "'");
         return boot(o);
     } catch (const Failure& f) {
         std::fprintf(stderr, "error: %s\n", f.msg.c_str());

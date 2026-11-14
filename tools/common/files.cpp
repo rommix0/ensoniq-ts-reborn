@@ -16,3 +16,14 @@ bool readFile(const std::string& path, std::vector<uint8_t>& bytes, std::string&
     }
     return true;
 }
+
+bool writeFile(const std::string& path, const std::vector<uint8_t>& bytes, std::string& err) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    f.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    f.flush();
+    if (!f) {
+        err = "cannot write";
+        return false;
+    }
+    return true;
+}

@@ -530,8 +530,8 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: one latch shared by all registers, or one per register; which byte triggers the read.
 - Choice: byte 0 of a read performs the 32-bit read into one shared latch and returns bits 31:24; bytes 1-3 return the latch. Bytes 0-2 of a write go into one shared latch; a byte-3 write commits latch + byte to the register it addresses on the current page. Latches are 0 after reset and keep their bytes after a commit.
 - Evidence: notes §1 (§13/p39). Whether the latches are shared is not stated.
-- Confidence: Medium.
-- Status: implemented (Plan 2 Task 1); test otto_byte3_commits_shared_latch.
+- Confidence: High for the byte order and for reads (TS OS v3.10); medium for the shared latch, which that firmware cannot show.
+- Status: implemented (Plan 2 Task 1); test otto_byte3_commits_shared_latch. Checked against TS OS v3.10 (Plan 3 Task 7, bus trace of a boot and of notes on all 60 bank programs): every OTTO access is a byte access at an odd address, never a word. Reads are always bytes 0, 1, 2, 3 in that order. Writes are bytes 0-1-2-3, bytes 2-3 (only to registers of 16 bits or fewer: CR, volumes, ramps, ECOUNT, K1, K2) or byte 3 alone (only PAGE, ACTV, MODE, W_ST, W_END, LR_END). A partial write always covers every implemented bit, so shared and per-register latches give the same result with this firmware. Byte 0 = MSB agrees with those patterns and with the boot's ACTV and PAGE writes (docs/verification-plan2.md, "Left for Plan 3").
 
 ## OT2: Pages and unused bits
 - Options: PS ignored or not with TEST; what unused bits and the test page read.
@@ -600,15 +600,15 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: K scaling; the HP "+0.5"; saturation.
 - Choice: k12 = K >> 4. LP: sat18(y1 + ((k12 * (x - y1)) >> 12)). HP: sat18(x - x1 + (((k12 + 2048) * y1) >> 12)). sat18 clamps to [-131072, 131071]; floor rounding (a decaying HP can rest at -1).
 - Evidence: notes §3, §9.7. LP medium. The HP scale is the datasheet's formula read literally: gain above 1 for K above 0x7FF0, which the coefficient formula never produces.
-- Confidence: LP medium; HP low.
-- Status: implemented (Plan 2 Task 3); revisit by ear in Plan 3/4.
+- Confidence: LP medium. HP: contradicted by TS OS v3.10 for K above 0x7FF0 (below).
+- Status: implemented (Plan 2 Task 3), unchanged in Plan 3 Task 7. The running TS firmware writes K2 up to 0xFF00 (and 0xFFFF while setting a voice up) on voices whose CR selects a high-pass pole (LP4:LP3 = 00 or 01), and those voices sound with that K2. With the literal "+0.5" the HP feedback gain reaches 1.5, the pole grows without bound and O4 sits on the 18-bit rail (±131071) in 20 of the 60 bank programs (one note each); with LP poles only, O4 stays within ±65491. So the firmware uses the whole 16-bit K range for HP poles, and the literal reading is wrong above 0x7FF0. Candidates, both stable over the whole range: (a) feedback K/65536 (no +0.5); (b) 0.5 + K/131072, which keeps the datasheet's 0.5 floor ("caps one HP pole near 8 kHz") and maps K's full range to [0.5, 1). (b) fits both the datasheet and the firmware; choosing needs a listen or a real TS recording. Open; to settle before Plan 4's audio work (docs/verification-plan2.md, "Left for Plan 3").
 
 ## OT10: Filter routing
 - Options: the p9 table and the p34 diagram disagree on pole 3's coefficient in modes 10 and 11.
 - Choice: the p9 table: pole 3 = 00 HP K2, 01 LP K1, 10 LP K2, 11 LP K1; pole 4 LP K2 (LP4=1) or HP K2. Poles 1-2 LP K1. HP poles take Xn-1 from O2(n-2) (pole 3) and O3(n-2) (pole 4), which hold the previous output of the pole before.
 - Evidence: notes §3; the ES5505 datasheet's table is identical to p9.
 - Confidence: Medium.
-- Status: implemented (Plan 2 Task 3); test otto_filter_mode_routing.
+- Status: implemented (Plan 2 Task 3); test otto_filter_mode_routing. TS OS v3.10 (Plan 3 Task 7) uses mode 11 for nearly every voice (6986 of 7124 CR writes in a run of notes on all 60 bank programs) and mode 10 in 12 of the 60 programs; on sounding voices K1 and K2 differ (12 MSBs) in 89 % of mode-11 and 86 % of mode-10 samples, so the table-versus-drawing choice changes most sounds. Not settled by the firmware; user to run: listen to `tsemu render tests/data/filtered_patch.mid` (WOW-SWEEP) and other sounds.
 
 ## OT11: Filter output to the pan stage
 - Options: which 16 of the 18 bits.
@@ -621,22 +621,22 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: a stopped voice is fully idle; or it fetches and filters but is muted.
 - Choice: STOP0 or STOP1: the voice still fetches, interpolates and filters (its filter temps keep updating), adds nothing to its channel, and its envelope, address and loop/IRQ check are frozen. FILTCOUNT still advances.
 - Evidence: notes §3 (§4.6, §4.8 force volume 0); fetching and filtering on a stopped voice are unstated (§9.6). Kept as the KS-32 OTIS did, whose firmware read a stopped voice's O1(n-1) (KS-32 O7).
-- Confidence: Low.
-- Status: implemented (Plan 2 Task 4); check against the running TS firmware in Plan 3.
+- Confidence: Low, and not observable with TS OS v3.10.
+- Status: implemented (Plan 2 Task 4). Checked against TS OS v3.10 (Plan 3 Task 7): the boot reads no filter temp; a run of notes on all 60 bank programs and a 32-note chord reads only O1(n-1), 26 times, always of a running voice. The firmware writes the six temps as 0 (1272 writes, none non-zero), so it does not depend on what a stopped voice's filter does, unlike the KS-32's.
 
 ## OT12: Volume
 - Options: rounding; what exponent 0 does.
 - Choice: otto_vol(x16, vol) = ((x16 * (0x100 | M)) >> 5) >> (15 - EX), arithmetic shifts, M = vol bits 11:4, EX = bits 15:12. Exponent 0 is a shift of 15, not a mute.
 - Evidence: notes §3 (§11.6/p36).
-- Confidence: Medium.
-- Status: implemented (Plan 2 Task 4).
+- Confidence: Medium; the exponent-0 case is inaudible either way.
+- Status: implemented (Plan 2 Task 4). TS OS v3.10 (Plan 3 Task 7) writes LVOL/RVOL with exponent 0 and a non-zero mantissa 18 times in 4894 volume writes of a run of notes on all 60 bank programs, none at boot. A shift of 15 leaves at most 16 LSB of a full-scale voice (below -66 dBFS), so mute versus shift cannot be heard.
 
 ## OT13: Channels and saturation
 - Options: 23-bit accumulators that wrap, or sums that saturate; CA 6/7; TEST mode.
 - Choice: CA 0-5 add L/R into that channel; CA 6/7 add nothing. Sums are kept in 32 bits and saturated to 20 bits ([-524288, 524287]) into the frame at the end of the frame, then cleared. With PAGE.TEST set the frame carries the host-written CH values (23-bit, sign-extended, saturated to 20 bits) and voice sums are dropped.
 - Evidence: notes §3, §9.10, §9.15. The datasheet's 3 guard bits allow 8 full-scale voices; past that a listener expects clipping, not wrap noise.
 - Confidence: Low (saturating sums), medium (the rest).
-- Status: implemented (Plan 2 Task 4); test otto_channel_saturates_not_wraps.
+- Status: implemented (Plan 2 Task 4); test otto_channel_saturates_not_wraps. Plan 3 Task 7: the TS reaches the limit. `tests/data/full_chord.mid` (16 notes at velocity 127 on BABY-GRAND) drives OTTO channel 0 to the 20-bit limit in 123 samples, where wrapping sums would give full-scale steps; Main peaks at 32767. User to run: listen to `tsemu render tests/data/full_chord.mid` for clipping that does not belong.
 
 ## OT15: Envelopes
 - Options: ramp alignment; FILTCOUNT width and scope; the K2 line testing K1SLOW; stopped voices.
@@ -656,8 +656,8 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: conversion started by the PAR read, or by a free-running 2^13-CLK clock; when the value lands.
 - Choice: a byte-0 read of PAR returns PAR, sets it to 0x3FF and starts a conversion; 512 slots later PAR = the pin's value at that moment (setPot). A read during a conversion restarts it.
 - Evidence: notes §6 (512 us at 16 MHz = 512 slots of 16 CLKs, so the same in slots at any clock); §9.13 conflicts.
-- Confidence: Medium.
-- Status: implemented (Plan 2 Task 5); tests in tests/test_otto_pot.cpp.
+- Confidence: Medium-high: the TS firmware's timing rules out a sample taken at the read; where between about 128 and 1024 slots after it the pin is sampled is not pinned.
+- Status: implemented (Plan 2 Task 5); tests in tests/test_otto_pot.cpp. TS OS v3.10 (Plan 3 Task 7): the OS reads PAR every 1024-8191 slots (about 2 ms) and changes the mux select (DUART OP2-OP0) within 127 slots after a read in 24 388 of 24 398 changes (the rest within 511, or before the first read). So each conversion a read starts ends on the newly selected input, and the next read returns it: the Analog Test page pairs every reading with its own input (ts_analog_resting_values). A conversion that sampled the pin when it starts would pair each reading with the input before.
 
 ## OT20: Host transfers to sound memory
 - Options: model the chip's host-to-memory slots, or leave sound memory to the board.
@@ -800,3 +800,10 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Evidence: of all 256 single bytes during "CALIBRATING KEYBOARD", only `FF` ends the OS's wait, and only from the moment it queues `FB FF FB FD` to its next `FB F0`. The OS holds OP4/OP5 high only until 0.24 ms (active-low resets would keep the keyboard in reset). SACK/ goes low just before the first keyboard command and stays low; it pulses high only under a continuous line-rate flood (docs/ts-hardware-interface.md, "Keyboard link").
 - Confidence: High for the `FF` answer and the reset polarity; low for SACK/'s role (ignoring it changes no firmware test) and for what the other keyboard commands mean.
 - Status: implemented in `Panel::run`, `Panel::setLines`, `Panel::popToCpu`, `Machine::slot` and `Machine::updateLines` (Plan 3 Task 5). Tests: ts_panel_lines, ts_boot_shows_play_screen.
+
+## T20: MIDI in and out
+- Options: MIDI in straight onto DUART A's wire queue, or a second machine-side queue fed one byte at a time when the wire is idle (as the keyboard link does); what program change selects.
+- Choice: `Machine::midiIn` puts the byte on DUART A's wire queue (1024 characters, A1), which hands them to the receiver back to back at the line rate, 320 us a byte at 31 250 baud (D2). `popMidiOut` pops what left TxDA (256 kept, A2). No second queue: the keyboard link holds bytes back for SACK/ (T19), MIDI has no flow control, and the wire queue already paces a burst.
+- Evidence: the OS writes CSRA = 0xEE: channel A runs from the 500 kHz IP3/IP4 clocks, `rxBitClocks(0) == 128`. Middle C at velocity 100 on channel 1 peaks at 2256 within 300 ms (silence before: 3). 33 note-ons and 33 note-offs queued at once (198 bytes) give no overrun, nothing dropped and no warning text, and the notes release. Program change n selects bank n / 6, sound n % 6 of the current bank set (U0-0 BABY-GRAND to U0-9 REMEMBER-ME for 0-59; 60 and up not tried); after it the play screen underlines the selected sound (docs/ts-hardware-interface.md, "MIDI").
+- Confidence: High.
+- Status: implemented in `Machine::midiIn`, `Machine::popMidiOut` (Plan 3 Task 7); `tsemu render`, `tsemu bench`. Tests: ts_midi_rate, ts_midi_note_sounds, ts_midi_burst_no_overrun, ts_program_change_changes_display, ts_render_is_deterministic.

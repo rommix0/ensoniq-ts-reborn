@@ -49,6 +49,11 @@ target_link_libraries(ens_ts PUBLIC ens_otto ens_esp ens_m68k ens_duart)
 add_library(ens_m68k_harte STATIC src/m68k/harte_format.cpp)
 target_link_libraries(ens_m68k_harte PUBLIC ens_m68k)
 
+# File reading and writing, the MIDI file reader and the WAV writer, for the tools and the tests.
+add_library(ens_tools_common STATIC tools/common/files.cpp tools/common/smf.cpp tools/common/wav.cpp)
+target_include_directories(ens_tools_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tools/common)
+target_compile_definitions(ens_tools_common PRIVATE _CRT_SECURE_NO_WARNINGS)
+
 add_subdirectory(tests)
 
 # Command-line tools (file I/O allowed here, not in src/).
@@ -62,7 +67,9 @@ target_link_libraries(m68k_harte PRIVATE ens_m68k_harte)
 target_compile_definitions(m68k_harte PRIVATE _CRT_SECURE_NO_WARNINGS)
 add_test(NAME m68k_suite COMMAND m68k_harte ${ENS_M68K_TESTS_DIR})
 
-# TS machine runner: boots the OS ROM in emulation and reports what it did.
-add_executable(tsemu tools/tsemu/main.cpp tools/common/files.cpp)
-target_link_libraries(tsemu PRIVATE ens_ts)
+# TS machine runner: boots the OS ROM in emulation and reports what it did, renders a MIDI file to WAV.
+# tests/ts_render.h is the render loop it shares with the tests.
+add_executable(tsemu tools/tsemu/main.cpp)
+target_link_libraries(tsemu PRIVATE ens_ts ens_tools_common)
+target_include_directories(tsemu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_definitions(tsemu PRIVATE _CRT_SECURE_NO_WARNINGS)

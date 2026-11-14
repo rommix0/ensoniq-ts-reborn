@@ -10,6 +10,7 @@
 
 #include "check.h"
 #include "ts/machine.h"
+#include "ts_render.h"  // runMs
 
 // The TS-10 OS v3.10 and wave ROM files from ENS_ROM_DIR, unchecked; false when a file is missing.
 inline bool readTsRoms(ens::ts::RomSet& r) {
@@ -40,13 +41,6 @@ inline std::unique_ptr<ens::ts::Machine> loadTs() {
         ++ens_test::failures();
     }
     return m;
-}
-
-// Runs whole frames until ms of CPU time (kCpuHz) have passed; the audio is discarded.
-inline void runMs(ens::ts::Machine& m, uint32_t ms) {
-    const uint64_t end = m.cycles() + static_cast<uint64_t>(ms) * ens::ts::kCpuHz / 1000;
-    ens::ts::Audio a;
-    while (m.cycles() < end) m.runFrame(a);
 }
 
 // FNV-1a 64 over every BusEvent field (each as 8 little-endian bytes); the machine's hook is restored.

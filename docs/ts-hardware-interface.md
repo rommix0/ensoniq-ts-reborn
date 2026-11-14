@@ -104,6 +104,22 @@ ACTV also resets to 0x1F, so `activeVoices() == 32` alone would not show that th
 
 **Confidence.** High.
 
+## How the OS drives the OTTO (OT1, OT7, OT16)
+
+**Fact.** Every OTTO access is a byte access at an odd address. Reads are bytes 0-1-2-3 in order;
+writes are 0-1-2-3, 2-3 (registers of 16 bits or fewer) or 3 alone (8 bits or fewer). The OS reads
+no filter temps at boot and, while playing, only O1(n-1) of running voices; it writes the temps as 0.
+It reads PAR about every 2 ms and changes the analog mux select within 127 slots after each read.
+Counts and what they settle: `docs/decisions.md` OT1, OT7, OT9, OT10, OT12, OT13, OT16 and
+`docs/verification-plan2.md`, "Left for Plan 3".
+
+**How found.** A scratch harness (not committed) tallied the OTTO bus events of a boot and of one note
+on each of the 60 bank programs plus a 32-note chord: access sizes, byte sequences per register, the
+voice's CR at each filter-temp read (read from a copy of the OTTO, so the machine was untouched), PAR
+reads against DUART output-port changes.
+
+**Confidence.** High (observed).
+
 ## Interrupts (T5)
 
 **Fact.** OTTO on level 1, DUART on level 3, all autovectored (AVEC). Level 2 (the disk line) has no
@@ -499,3 +515,24 @@ ts_button_changes_page, ts_key_sounds, ts_poly_pressure_is_sent (the firmware).
 **Settled in Task 6.** With Task 4's analog inputs (every input 0 but the reference) the Volume slider
 at 0 silenced the TS and the Data Entry slider at 0 kept rewriting the selected value at its minimum.
 Both now rest elsewhere ("Analog inputs").
+
+## MIDI (T20)
+
+**Fact.**
+- MIDI in and out are DUART channel A (`kMidiChannel`). The OS writes CSRA = 0xEE: both directions
+  from the 500 kHz clocks on IP3/IP4, 31 250 baud, `rxBitClocks(0) == 128` after the boot. The boot
+  sends 77 bytes on MIDI out, starting with a status byte (0xBB).
+- `Machine::midiIn(byte)` queues a byte on RxDA (up to 1024, A1); it enters at the line rate, 320 us a
+  byte (D2). `Machine::popMidiOut(b)` pops what left TxDA, oldest first (256 kept, A2).
+- With the boot's defaults a note on channel 1 sounds: `90 3C 64` peaks at 2256 within 300 ms (3
+  before). A burst of 33 note-ons and 33 note-offs queued at once gives no overrun and no warning text.
+- Program change n selects sound n % 6 of bank n / 6 (`C0 05`: U0-0's ALL-PURPOSE; `C0 32`: U0-8's
+  WOW-SWEEP; 0-59 tried). The play screen then underlines the selected sound.
+
+**How found.** The MIDI tests (`tests/test_ts_firmware.cpp`) and the scratch harness, sending each
+program change and reading the display.
+
+**Confidence.** High. **MAME.** Not compared.
+
+**Tests.** ts_midi_rate, ts_midi_note_sounds, ts_midi_burst_no_overrun,
+ts_program_change_changes_display, ts_render_is_deterministic.
