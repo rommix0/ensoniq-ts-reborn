@@ -33,6 +33,7 @@ public:
     void write(uint8_t ha, uint8_t data);
 
     bool irqAsserted() const { return irqPin_; }  // true = IRQB low
+    void setPot(uint16_t v10) { pot_ = v10 & 0x3FF; }  // the POT_IN pin's value as a 10-bit count (OT16)
     int activeVoices() const { return actv_ + 1; }
     static uint32_t sampleRateHz(uint32_t clkHz, int voices) {  // notes §4: 16 CLKs per voice
         return clkHz / (16u * static_cast<uint32_t>(voices));
@@ -77,6 +78,8 @@ private:
     OttoFrame frame_;
     uint16_t s1_, s2_;   // words fetched by the current slot
     int32_t sum_[6][2];  // OT13: channel sums of the frame in progress
+    uint32_t pot_ = 0;   // OT16: the pin's value; survives reset()
+    uint32_t potSlots_;  // OT16: slots left in the conversion in progress, 0 = idle
 };
 
 }  // namespace ens

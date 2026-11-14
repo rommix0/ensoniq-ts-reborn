@@ -81,7 +81,8 @@ as "user to run", not claimed as passed.
 - `docs/design/`: one design per stage. `docs/superpowers/plans/`: the implementation plans.
 - `docs/verification-planN.md`: the closing check of each plan (toolchains, hashes, manual checks,
   what is left open). Treat old plans and reports as history; correct live docs instead.
-- `docs/reference/`: datasheet notes (ESP now; OTTO notes from Plan 2). `docs/m68k.md`: the 68000
+- `docs/reference/`: datasheet notes: ESP (`es5510-esp-datasheet-notes-part1/2.md`) and OTTO
+  (`es5506-otto-datasheet-notes.md`, the source the `src/otto` core cites as "notes §N"). `docs/m68k.md`: the 68000
   core and its test suite (written for KS-32; the core is unchanged).
 
 When behaviour changes, update the live guide and the decision entry in the same change.

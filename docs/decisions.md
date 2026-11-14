@@ -652,6 +652,20 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Confidence: Medium.
 - Status: implemented (Plan 2 Task 4); test otto_actv_below_4_still_produces_frames.
 
+## OT16: Pot A/D
+- Options: conversion started by the PAR read, or by a free-running 2^13-CLK clock; when the value lands.
+- Choice: a byte-0 read of PAR returns PAR, sets it to 0x3FF and starts a conversion; 512 slots later PAR = the pin's value at that moment (setPot). A read during a conversion restarts it.
+- Evidence: notes §6 (512 us at 16 MHz = 512 slots of 16 CLKs, so the same in slots at any clock); §9.13 conflicts.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 5); tests in tests/test_otto_pot.cpp.
+
+## OT20: Host transfers to sound memory
+- Options: model the chip's host-to-memory slots, or leave sound memory to the board.
+- Choice: not in the core. The TS machine owns sound memory and the CPU's path to it (Plan 3).
+- Evidence: notes §1: OTTO has no DMA address register; the address comes through external latches.
+- Confidence: High.
+- Status: no code (by design).
+
 ## TS machine
 
 (None yet.)

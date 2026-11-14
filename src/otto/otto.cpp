@@ -82,10 +82,12 @@ void Otto::reset() {
     std::memset(&frame_, 0, sizeof frame_);
     s1_ = s2_ = 0;
     std::memset(sum_, 0, sizeof sum_);
+    potSlots_ = 0;
 }
 
 void Otto::stepVoice() {
     if (slot_ == 0) ready_ = false;
+    if (potSlots_ && --potSlots_ == 0) par_ = pot_;  // OT16
     const int vi = static_cast<int>(slot_);
     Voice& v = voice_[vi];
     // Ruling (OT14): the read-acknowledged voice's CR.IRQ is cleared at the start of its next slot,
@@ -279,7 +281,14 @@ uint32_t* Otto::voiceReg(uint8_t reg, uint32_t& mask) {
 
 uint32_t Otto::readReg(uint8_t reg) {
     switch (reg) {
-    case 13: return par_;
+    case 13: {
+        // DECISION OT16: a byte-0 read of PAR returns it, sets it to 0x3FF and starts a conversion
+        // that loads the pin's value 512 slots later (512 us at 16 MHz, 16 CLKs per slot).
+        const uint32_t r = par_;
+        par_ = 0x3FF;
+        potSlots_ = 512;
+        return r;
+    }
     case 14: {
         const uint32_t r = irqv_;
         if (!(irqv_ & 0x80)) {
