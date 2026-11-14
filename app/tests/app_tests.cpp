@@ -1,8 +1,9 @@
 // TS Reborn app checks (from KS-32 Reborn's): checkRomFolder on a temp folder of dummy files the right
 // size (never ROM content), the memory file's load and save, the processor's memory-file guards and its
 // parameters (A111). On the real ROMs: the sound follow (A111), the plugin state and memory per format
-// (A117), the two output buses (A109), and the built TS Reborn.vst3 loaded and played through JUCE's own
-// VST3 host, as a DAW would. Every check sets TSR_SETTINGS_DIR to a temp folder.
+// (A117), the two output buses (A109), the panel editor clicked and painted offscreen (A113-A115), and the
+// built TS Reborn.vst3 loaded, played and its editor opened through JUCE's own VST3 host, as a DAW would.
+// No check puts a window on the desktop. Every check sets TSR_SETTINGS_DIR to a temp folder.
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <algorithm>
@@ -15,9 +16,11 @@
 
 #include "../source/AppSettings.h"
 #include "../source/MemoryFile.h"
+#include "../source/PanelEditor.h"
 #include "../source/Processor.h"
 #include "../source/RomFolder.h"
 #include "app/analog_map.h"
+#include "app/panel_layout.h"
 #include "ts/panel.h"
 
 namespace {
@@ -739,6 +742,146 @@ void auxBusOff(const juce::File& dir) {
     CHECK(mismatches == 0 && auxPeak[0] > 0.001f && auxPeak[1] > 0.001f);
 }
 
+// The panel editor, headless: never put on the desktop, driven by synthetic mouse events, painted into an
+// image. TSR_SNAPSHOT_DIR=<folder> also writes the images there (panel.png, panel-codes.png, panel-noroms.png).
+constexpr float kEdScale = 1546.0f / ens::app::kDesignW;  // the default size (A112)
+
+const ens::app::Control& control(ens::app::ControlKind kind, int id) {
+    for (const auto& c : ens::app::panelLayout())
+        if (c.kind == kind && c.id == id) return c;
+    std::abort();
+}
+
+// The board's part drawn for a table control: the child at its design rect's centre.
+juce::Component& part(juce::Component& ed, const ens::app::Control& c) {
+    auto& board = *ed.getChildComponent(0);
+    auto* p = board.getComponentAt(c.r.x + c.r.w / 2, c.r.y + c.r.h / 2);
+    if (p == nullptr || p == &board) std::abort();
+    return *p;
+}
+
+juce::MouseEvent mouse(juce::Component& c, juce::Point<float> at, juce::Point<float> down) {
+    const auto now = juce::Time::getCurrentTime();
+    return {juce::Desktop::getInstance().getMainMouseSource(), at, {}, 1.0f, 0, 0, 0, 0, &c, &c, now, down, now, 1,
+            false};
+}
+
+void click(TsProcessor& p, juce::Component& ed, ens::ts::Button b) {  // held 100 ms, then 300 ms
+    auto& c = part(ed, control(ens::app::ControlKind::Button, static_cast<int>(b)));
+    const juce::Point<float> at(5, 5);
+    c.mouseDown(mouse(c, at, at));
+    run(p, 100);
+    c.mouseUp(mouse(c, at, at));
+    run(p, 300);
+}
+
+// Pixels in a design rect whose channel `ch` (0 red, 1 green) is above `min`.
+int brightPixels(const juce::Image& img, ens::app::Rect r, int ch, int min) {
+    int n = 0;
+    for (int y = static_cast<int>(r.y * kEdScale); y < static_cast<int>((r.y + r.h) * kEdScale); ++y)
+        for (int x = static_cast<int>(r.x * kEdScale); x < static_cast<int>((r.x + r.w) * kEdScale); ++x) {
+            const auto px = img.getPixelAt(x, y);
+            n += (ch == 0 ? px.getRed() : px.getGreen()) > min;
+        }
+    return n;
+}
+
+juce::Image paintEditor(juce::Component& ed, const char* name) {
+    auto img = ed.createComponentSnapshot(ed.getLocalBounds(), true, 1.0f);
+    const auto dir = juce::SystemStats::getEnvironmentVariable("TSR_SNAPSHOT_DIR", {});
+    if (dir.isNotEmpty()) {
+        const auto f = juce::File(dir).getChildFile(name);
+        f.deleteFile();
+        juce::FileOutputStream out(f);
+        if (out.openedOk()) juce::PNGImageFormat().writeImageToStream(img, out);
+    }
+    return img;
+}
+
+// Main's peak while `note` is held 300 ms from a press at design depth y (0 = the key's back edge), then
+// released for 700 ms.
+float keyPeak(TsProcessor& p, juce::Component& ed, int note, float y) {
+    auto& c = part(ed, control(ens::app::ControlKind::Key, note));
+    const juce::Point<float> at(8, y);
+    c.mouseDown(mouse(c, at, at));
+    juce::AudioBuffer<float> buf(4, 480);
+    juce::MidiBuffer none;
+    float peak = 0;
+    for (int i = 0; i < 100; ++i) {
+        if (i == 30) c.mouseUp(mouse(c, at, at));
+        buf.clear();
+        p.processBlock(buf, none);
+        if (i < 30) peak = std::max(peak, buf.getMagnitude(0, 0, 480));
+    }
+    return peak;
+}
+
+void editor(const juce::File& dir) {
+    using ens::app::ControlKind;
+    using ens::ts::Button;
+    // No ROMs: the display gives the reason.
+    setSettingsDir(dir.getChildFile("none"));
+    AppSettings().setRomFolder(dir.getChildFile("empty"));
+    {
+        TsProcessor p;
+        CHECK(p.engine() == nullptr && p.romError().isNotEmpty());
+        std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+        const auto img = paintEditor(*ed, "panel-noroms.png");
+        CHECK(brightPixels(img, ens::app::kDisplayText, 1, 120) > 100);
+    }
+
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 552 && !ed->isOnDesktop());
+
+    // Presets, Bank 3, the lower-left soft button: a preset, with LEDs 1 (Presets) and 10 (Bank 3) lit.
+    click(p, *ed, Button::Presets);
+    click(p, *ed, Button::Bank3);
+    click(p, *ed, Button::Soft4);
+    std::printf("  editor row 1: %s\n", ens::ts::rowText(p.engine()->snapshot().panel, 1).c_str());
+    CHECK(rowStarts(p, 1, "PSET"));
+    const auto leds = p.engine()->snapshot().panel.leds;
+    CHECK((leds >> 1 & 1u) && (leds >> 10 & 1u));
+
+    // The editor's timer takes the snapshot (30 Hz; no message loop runs here, so it is called when due); the
+    // image shows the text and those LEDs.
+    auto& pe = static_cast<PanelEditor&>(*ed);
+    for (int i = 0; i < 100 && pe.snap().panel.leds != leds; ++i) {
+        juce::Thread::sleep(10);
+        juce::Timer::callPendingTimersSynchronously();
+    }
+    const auto img = paintEditor(*ed, "panel.png");
+    const auto ledArea = [](int led) { return control(ControlKind::Led, led).r; };
+    CHECK(brightPixels(img, ens::app::kDisplayText, 1, 120) > 100);
+    CHECK(brightPixels(img, ledArea(1), 0, 200) > 0 && brightPixels(img, ledArea(10), 0, 200) > 0);
+    CHECK(brightPixels(img, ledArea(9), 0, 200) == 0);  // Sounds: off
+    // "Show display codes": every cell as two hex digits, a different picture of the same cells.
+    pe.toggleHexCodes();
+    const int codes = brightPixels(paintEditor(*ed, "panel-codes.png"), ens::app::kDisplayText, 1, 120);
+    CHECK(codes > 100 && codes != brightPixels(img, ens::app::kDisplayText, 1, 120));
+    pe.toggleHexCodes();
+
+    // The pitch wheel: a drag up raises it inside one gesture, the release springs it back (A111).
+    auto* bend = p.params().getParameter("pitchWheel");
+    auto& wheel = part(*ed, control(ControlKind::Wheel, static_cast<int>(ens::ts::Analog::PitchWheel)));
+    const juce::Point<float> from(20, 100), to(20, 50);
+    wheel.mouseDown(mouse(wheel, from, from));
+    wheel.mouseDrag(mouse(wheel, to, from));
+    CHECK(bend->getValue() > 0.7f);
+    wheel.mouseUp(mouse(wheel, to, from));
+    CHECK(bend->getValue() == 0.5f);
+
+    // A115: the front of a key is louder than its back.
+    const float back = keyPeak(p, *ed, 60, 5), front = keyPeak(p, *ed, 60, 340);
+    std::printf("  key peak back %.4f, front %.4f\n", back, front);
+    CHECK(front > 2 * back && back > 0);
+    ed.reset();
+}
+
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
 // naming the ROM folder, so neither the user's settings nor their memory file is touched. Aux is off,
 // as the Standalone plays it (A109).
@@ -787,6 +930,16 @@ void vst3(const juce::File& dir) {
     }
     std::printf("  VST3 note peak: %.4f %.4f\n", l, r);
     CHECK(l > 0.001f && r > 0.001f);
+
+    // The host-side editor makes the plugin's IPlugView, which builds the panel editor at its default size
+    // (A112), and closes it again without a crash.
+    std::unique_ptr<juce::AudioProcessorEditor> ed(plugin->createEditorAndMakeActive());
+    CHECK(ed != nullptr);
+    if (ed) {
+        std::printf("  VST3 editor: %d x %d\n", ed->getWidth(), ed->getHeight());
+        CHECK(ed->getWidth() == 1546 && ed->getHeight() == 552 && !ed->isOnDesktop());
+    }
+    ed.reset();
     plugin->releaseResources();
     plugin.reset();
 }
@@ -794,7 +947,7 @@ void vst3(const juce::File& dir) {
 }  // namespace
 
 int main() {
-    juce::ScopedJuceInitialiser_GUI gui;  // the VST3 host needs the message manager
+    juce::ScopedJuceInitialiser_GUI gui;  // the VST3 host and editor need the message manager
     const auto dir =
         juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("tsr_app_tests", "", false);
     romFolder(dir.getChildFile("roms"));
@@ -815,6 +968,7 @@ int main() {
     standaloneStateBeforeBoot(dir.getChildFile("standalone-state"), r2);
     romsBesideApp(dir.getChildFile("beside"));
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
+    editor(dir.getChildFile("editor"));
     vst3(dir.getChildFile("vst3"));
     dir.deleteRecursively();
     std::printf(failures == 0 ? "app_tests: all passed\n" : "app_tests: %d failed\n", failures);

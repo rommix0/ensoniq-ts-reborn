@@ -31,8 +31,9 @@ target_link_libraries(TSReborn
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 # The checks that need JUCE but no window of their own: the ROM folder, the memory file, the
-# processor's memory-file guards (dummy files only), its two buses and the built VST3 loaded through
-# JUCE's VST3 host (the last two need the ROMs). The processor is compiled in as a plain class (no wrapper).
+# processor's memory-file guards (dummy files only), its two buses, the panel editor painted offscreen and
+# the built VST3 loaded through JUCE's VST3 host (the last three need the ROMs, but for the editor's no-ROM
+# case). The processor is compiled in as a plain class (no wrapper).
 juce_add_console_app(TSReborn_AppTests PRODUCT_NAME "TSReborn_AppTests" VERSION 0.4.0)
 target_sources(TSReborn_AppTests PRIVATE tests/app_tests.cpp ${TSR_SOURCES})
 target_compile_definitions(TSReborn_AppTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_PLUGINHOST_VST3=1
