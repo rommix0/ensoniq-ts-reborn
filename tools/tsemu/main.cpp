@@ -1,6 +1,6 @@
 // tsemu: runs the emulated TS-10 (OS v3.10 on the 68000 with the DUART and the OTTO/ESP board).
 //   tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] [--last <n>]
-//              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...
+//              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]... [--ram <file>]
 // --trace takes a comma list of otto,esp,duart,fdc,iexp,scsi,unmapped,iack; matching bus events are
 // printed as "<cycle> <DEV> <R|W><size> <addr> <value>". --last <n> prints the last n instruction
 // addresses disassembled, to see where a run stops (the disassembler is a debugging aid).
@@ -13,7 +13,11 @@
 // power-on, holds them 100 ms and releases them in reverse order; it may be repeated.
 // --analog sets an analog input to a raw 10-bit value (0-1023) from power-on instead of its resting
 // value (kAnalogRest): PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF; it may be repeated.
+// --ram <file> is the battery RAM (Machine::ramImage, 512 KB raw: OSRAM then SEQEXP, T13): loaded at
+// power-on if the file exists (otherwise the RAM starts blank, a cold start) and written back when boot or
+// render ends without an error.
 //   tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] [--analog <name>=<raw>]...
+//                [--ram <file>]
 // render boots for kBootMs (not written), sends each MIDI file event to MIDI in at its frame and renders
 // until the last event plus --tail (default 2000 ms); it writes Main as a 16-bit stereo WAV at kWavRate
 // (--aux writes Aux the same way) and prints one summary line and "pcm hash <16 hex>", the FNV-1a 64 of
@@ -30,6 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <string>
@@ -62,6 +67,7 @@ struct Options {
     std::string aux;                                                  // render --aux
     uint32_t tailMs = 2000;                                           // render --tail
     uint64_t seconds = 20;                                            // bench --seconds
+    std::string ram;                                                  // --ram: the battery RAM image file
 };
 
 constexpr struct {
@@ -209,7 +215,17 @@ std::unique_ptr<Machine> makeMachine(const Options& o) {
     auto m = Machine::create(roms, err);
     if (!m) fail(err);
     for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
+    if (!o.ram.empty() && std::filesystem::exists(o.ram)) {
+        std::vector<uint8_t> img;
+        if (!readFile(o.ram, img, err) || !m->loadRamImage(img, err)) fail(err + " '" + o.ram + "'");
+    }
     return m;
+}
+
+// --ram: the RAM back to the file.
+void saveRam(const Machine& m, const std::string& path) {
+    std::string err;
+    if (!path.empty() && !writeFile(path, m.ramImage(), err)) fail(err + " '" + path + "'");
 }
 
 int boot(const Options& o) {
@@ -273,6 +289,7 @@ int boot(const Options& o) {
         panelShown = p;
         firstFrame = false;
     }
+    saveRam(*m, o.ram);
     if (o.displayOnly) return 0;
 
     std::printf("ran %llu frames (%llu ms), %llu CPU cycles%s\n", static_cast<unsigned long long>(frames),
@@ -338,6 +355,7 @@ int render(const Options& o) {
     const Rendered r = renderMidi(*m, midi, o.tailMs);
     writeWav(o.positional[1], r.main);
     if (!o.aux.empty()) writeWav(o.aux, r.aux);
+    saveRam(*m, o.ram);
     const size_t frames = r.main.size() / 2;
     std::printf("%zu MIDI events, %zu frames (%.3f s at %u Hz), peak %d, MIDI out %zu bytes\n", midi.size(), frames,
                 static_cast<double>(frames) / kWavRate, kWavRate, r.peak, r.midiOut);
@@ -388,8 +406,9 @@ int main(int argc, char** argv) {
         if (cmd != "boot" && cmd != "render" && cmd != "bench")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
                  "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...\n"
+                 "             [--ram <file>]\n"
                  "  tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] "
-                 "[--analog <name>=<raw>]...\n"
+                 "[--analog <name>=<raw>]... [--ram <file>]\n"
                  "  tsemu bench [--roms <dir>] [--seconds <n>]");
         Options o;
         for (int i = 2; i < argc; ++i) {
@@ -415,6 +434,7 @@ int main(int argc, char** argv) {
             else if (a == "--tail") o.tailMs = static_cast<uint32_t>(parseNum(a, v));
             else if (a == "--aux") o.aux = v;
             else if (a == "--seconds") o.seconds = parseNum(a, v);
+            else if (a == "--ram") o.ram = v;
             else fail("unknown option " + a);
         }
         if (cmd == "render") return render(o);

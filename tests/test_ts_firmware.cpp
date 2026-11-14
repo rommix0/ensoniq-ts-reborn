@@ -611,3 +611,122 @@ TEST(ts_render_is_deterministic) {
     std::printf("  %zu frames, render hash %016llx\n", a.size() / 2, static_cast<unsigned long long>(pcmHash(a)));
     CHECK(a == b);
 }
+
+// ---- Battery RAM (Task 8) -----------------------------------------------------------------------
+
+namespace {
+
+// Counts into bad each vector-4 exception taken at an opcode other than ILLEGAL (see bootedTs).
+void watchIllegal(Machine& mc, uint32_t& bad) {
+    uint32_t last = 0, seen = 0;
+    mc.cpu().onInstruction = [&mc, &bad, last, seen](uint32_t pc) mutable {
+        const uint32_t n = mc.cpu().exceptionCount(4);
+        if (n != seen) {
+            if (mc.peek16(last) != kIllegalOpcode) ++bad;
+            seen = n;
+        }
+        last = pc;
+    };
+}
+
+}  // namespace
+
+// T13: the battery RAM keeps the settings. Master Tune is set to +02 on the System page (Up twice),
+// the RAM is saved, and a fresh machine powered on from the image (a power cycle keeping the RAM) boots
+// with no warning or error text and shows TUNE=+02 on its System page.
+TEST(ts_ram_image_keeps_settings) {
+    auto a = bootFresh();
+    if (!a) return;
+    tap(*a, Button::System);
+    const std::string cold = rowText(a->panel(), 0);
+    tap(*a, Button::Up);
+    tap(*a, Button::Up);
+    const std::string set = rowText(a->panel(), 0);
+    const std::vector<uint8_t> img = a->ramImage();
+
+    auto m = loadTs();
+    std::string err;
+    CHECK(m->loadRamImage(img, err));
+    const char* bad = watchMs(*m, kBootMs);
+    const std::string booted = rowText(m->panel(), 0);
+    tap(*m, Button::System);
+    const std::string tune = rowText(m->panel(), 0);
+    std::printf("  cold |%s|\n  set  |%s|\n  boot |%s|\n  warm |%s|\n", cold.c_str(), set.c_str(), booted.c_str(),
+                tune.c_str());
+    if (bad) std::printf("  saw \"%s\"\n", bad);
+    CHECK(cold.compare(0, 16, "SYSTEM  TUNE=+00") == 0);
+    CHECK(set.compare(0, 16, "SYSTEM  TUNE=+02") == 0);
+    CHECK(bad == nullptr);
+    CHECK(tune.compare(0, 16, "SYSTEM  TUNE=+02") == 0);
+}
+
+// Review focus 5: a power-on with garbage in the battery RAM (pseudo-random bytes, fixed seed) boots
+// to the play screen and takes no fault vector.
+TEST(ts_garbage_ram_boots) {
+    auto m = loadTs();
+    if (!m) return;
+    std::vector<uint8_t> img(m->ramImage().size());
+    uint32_t x = 0x7E5710u;
+    for (uint8_t& b : img) {
+        x = x * 1664525u + 1013904223u;  // Numerical Recipes LCG; the top byte is the best mixed
+        b = static_cast<uint8_t>(x >> 24);
+    }
+    std::string err;
+    CHECK(m->loadRamImage(img, err));
+    uint32_t badIllegal = 0;
+    watchIllegal(*m, badIllegal);
+    const char* bad = watchMs(*m, kBootMs);
+    m->cpu().onInstruction = nullptr;
+    std::printf("  |%s|\n  |%s|\n", rowText(m->panel(), 0).c_str(), rowText(m->panel(), 1).c_str());
+    if (bad) std::printf("  saw \"%s\"\n", bad);
+    for (int v : {2, 3, 5, 6, 7, 8, 11, 14, 15, 24}) {
+        if (m->cpu().exceptionCount(v)) std::printf("  vector %d taken %u times\n", v, m->cpu().exceptionCount(v));
+        CHECK_EQ(m->cpu().exceptionCount(v), 0u);
+    }
+    CHECK_EQ(badIllegal, 0u);
+    CHECK(!m->cpu().halted());
+    CHECK(bad == nullptr);
+    CHECK(rowText(m->panel(), 0) == "U0-0 BABY-GRAND   FULL-BODY   BRITE-PNO ");
+}
+
+// T13: the OS finds SEQEXP (the SQX-70) by its probe at 0x038000, offers 97 311 free events (the manual's
+// "over 97,000 notes") and stores a kept sequence from the top of SEQEXP (0x077FFF) down, so it lands in
+// the battery image. Twenty notes are recorded on SEQUENCE-01 (Record with Play) and kept (YES).
+TEST(ts_sequence_is_kept_in_seqexp) {
+    auto m = bootFresh();
+    if (!m) return;
+    const auto freeEvents = [&m] {
+        for (int i = 0; i < 3; ++i) tap(*m, Button::SequencerControl);  // the third sub-page shows FREE
+        const std::string r = rowText(m->panel(), 0);
+        const size_t at = r.find("FREE=");
+        return at == std::string::npos ? -1 : std::atoi(r.c_str() + at + 5);
+    };
+    const int before = freeEvents();
+    const auto seqExpUsed = [&m] {
+        const std::vector<uint8_t>& img = m->ramImage();
+        return std::count_if(img.begin() + 0x7F000, img.end(), [](uint8_t b) { return b != 0; });  // 0x77000-0x77FFF
+    };
+    const auto usedBefore = seqExpUsed();
+    tap(*m, Button::SeqsSongs);
+    tap(*m, Button::Soft2);  // SEQUENCE-01
+    chord(*m, Button::Record, Button::Play);
+    runMs(*m, 3000);
+    for (int k = 0; k < 20; ++k) {
+        m->key(48 + k, true, 80);
+        runMs(*m, 20);
+        m->key(48 + k, false, 0);
+        runMs(*m, 20);
+    }
+    tap(*m, Button::StopContinue);
+    const std::string ask = rowText(m->panel(), 0);
+    tap(*m, Button::Soft3);  // *YES*
+    runMs(*m, 2000);
+    const int after = freeEvents();
+    const auto usedAfter = seqExpUsed();
+    std::printf("  FREE %d -> %d; |%s|; nonzero bytes at 0x77000-0x77FFF %d -> %d\n", before, after, ask.c_str(),
+                static_cast<int>(usedBefore), static_cast<int>(usedAfter));
+    CHECK_EQ(before, 97311);
+    CHECK(ask.compare(0, 18, "KEEP FIRST TRACK ?") == 0);
+    CHECK(after > 0 && after < before);
+    CHECK(usedAfter > usedBefore);
+}

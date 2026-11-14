@@ -8,7 +8,9 @@ namespace {
 constexpr uint32_t kMask24 = 0xFFFFFF;
 // DECISION T13: the map found by running the OS (docs/ts-hardware-interface.md, "Memory map").
 constexpr uint32_t kRomBase = 0xC00000, kRomWindow = 0x100000, kRomBytes = 0x80000;  // mirror unobserved
-constexpr uint32_t kRamLowTop = 0x040000, kRamHighBase = 0xFC0000;  // OSRAM at 0 and again at the top
+// OSRAM at 0-0x37FFF and its top 32 KB again at 0xFF8000 (the window 0xFC0000-0xFFFFFF aliases all of it);
+// SEQEXP at 0x38000-0x77FFF, where the OS probes for the SQX-70.
+constexpr uint32_t kSeqExpBase = 0x038000, kSeqExpTop = 0x078000, kRamHighBase = 0xFC0000;
 constexpr uint32_t kIo1Base = 0x200000, kIo1Window = 0x100000;      // A19:A18 = DUART, SCSI, FDC, IEXP
 constexpr uint32_t kIo2Base = 0x300000, kIo2Window = 0x100000;      // A19 = OTTO, ESP
 constexpr uint32_t kHostBase = 0x400000, kHostWindow = 0x800000;    // DECISION T4: OTTO banks 2-3
@@ -16,7 +18,7 @@ constexpr uint8_t kMuxSelect[kAnalogCount] = {0, 2, 3, 4, 5, 6, 7};  // Hardware
 }  // namespace
 
 Machine::Region Machine::decode(uint32_t a) {
-    if (a < kRamLowTop || a >= kRamHighBase) return Region::Ram;
+    if (a < kSeqExpTop || a >= kRamHighBase) return Region::Ram;
     if (a >= kRomBase && a < kRomBase + kRomWindow) return Region::Rom;
     if (a >= kHostBase && a < kHostBase + kHostWindow) return Region::Host;
     if (a >= kIo1Base && a < kIo1Base + kIo1Window) {
@@ -76,6 +78,24 @@ void Machine::patchSelect(int side, bool down) {
     iexpDown_ = static_cast<uint8_t>(down ? iexpDown_ | bit : iexpDown_ & ~bit);
 }
 
+// DECISION T13: OSRAM is ram_[0, 0x40000) in CPU order (0xFF8000 at 0x38000), SEQEXP ram_[0x40000, 0x80000).
+uint32_t Machine::ramIndex(uint32_t a) {
+    if (a >= kRamHighBase) return a & (kOsRamBytes - 1);
+    return a < kSeqExpBase ? a : kOsRamBytes + (a - kSeqExpBase);
+}
+
+// DECISION T13: a power cycle keeping the battery RAM. The sample DRAM (T4) has no battery and is cleared.
+bool Machine::loadRamImage(const std::vector<uint8_t>& img, std::string& err) {
+    if (img.size() != ram_.size()) {
+        err = "RAM image: expected " + std::to_string(ram_.size()) + " bytes, got " + std::to_string(img.size());
+        return false;
+    }
+    ram_ = img;
+    for (uint32_t w = 0; w < WaveMemory::kSampleRamWords; ++w) waves_.sampleRam(w) = 0;
+    powerOn();
+    return true;
+}
+
 uint8_t Machine::romByte(uint32_t off) const {
     const uint16_t w = os_[(off & (kRomBytes - 1)) >> 1];
     return static_cast<uint8_t>((off & 1) ? w : w >> 8);
@@ -86,7 +106,7 @@ uint8_t Machine::memByte(uint32_t a, bool& mapped) const {
     switch (decode(a)) {
     case Region::Rom: return romByte(a);
     case Region::Ram: {
-        const uint32_t i = a & (kRamBytes - 1);  // DECISION T13: 0-7 read the ROM until the first write there
+        const uint32_t i = ramIndex(a);  // DECISION T13: 0-7 read the ROM until the first write there
         return (overlay_ && i < 8) ? romByte(i) : ram_[i];
     }
     case Region::Host: {
@@ -217,7 +237,7 @@ void Machine::write8(uint32_t a, uint8_t v) {
         return;
     }
     if (r == Region::Ram) {
-        const uint32_t i = a & (kRamBytes - 1);
+        const uint32_t i = ramIndex(a);
         if (i < 8) overlay_ = false;
         ram_[i] = v;
         return;

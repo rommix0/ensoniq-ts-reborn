@@ -119,6 +119,37 @@ TEST(ts_ram_alias_and_sample_window) {
     CHECK_EQ(m->peek16(0x400002), 0x5678);
 }
 
+// T13: SEQEXP (the SQX-70 RAM) at 0x038000-0x077FFF, apart from OSRAM's top 32 KB (0xFF8000); nothing
+// above it. The battery image is OSRAM (256 KB, CPU order, 0xFF8000 at 0x38000) then SEQEXP; loading it
+// keeps the RAM and brings the 0-7 overlay back. A wrong size changes nothing.
+TEST(ts_seqexp_window_and_ram_image) {
+    auto m = machineWith({kBraSelf});
+    m->write16(0x000000, 0xAAAA);
+    m->write16(0x038000, 0x1111);
+    m->write16(0xFF8000, 0x2222);
+    m->write16(0x077FFE, 0x3333);
+    m->write16(0x078000, 0x4444);  // unmapped
+    CHECK_EQ(m->peek16(0x038000), 0x1111);
+    CHECK_EQ(m->peek16(0xFF8000), 0x2222);
+    CHECK_EQ(m->peek16(0x077FFE), 0x3333);
+    CHECK_EQ(m->peek16(0x078000), 0);
+    std::vector<uint8_t> img = m->ramImage();
+    CHECK_EQ(img.size(), 0x80000u);
+    CHECK_EQ(img[0x00000], 0xAA);
+    CHECK_EQ(img[0x38000], 0x22);
+    CHECK_EQ(img[0x40000], 0x11);
+    CHECK_EQ(img[0x7FFFE], 0x33);
+    std::string err;
+    CHECK(!m->loadRamImage(std::vector<uint8_t>(1, 0), err));
+    CHECK(err == "RAM image: expected 524288 bytes, got 1");
+    CHECK_EQ(m->peek16(0x038000), 0x1111);
+    CHECK_EQ(m->peek16(0x000000), 0xAAAA);
+    img[0x40000] = 0x55;
+    CHECK(m->loadRamImage(img, err));
+    CHECK_EQ(m->peek16(0x038000), 0x5511);
+    CHECK_EQ(m->peek16(0x000000), 0x00FF);  // the ROM's reset SSP again, until the OS writes 0-7
+}
+
 // IEXP (T9): D0 FSW3B/, D1 FSW4B/, D2 PSRB/, D3 PSLB/, active low; the upper bits read high.
 TEST(ts_iexp_inputs) {
     auto m = machineWith({kBraSelf});

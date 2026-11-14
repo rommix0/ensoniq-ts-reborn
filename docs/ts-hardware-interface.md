@@ -33,7 +33,8 @@ the confidence and the decision entry in `docs/decisions.md`.
 
 | Addresses | What |
 |---|---|
-| 0x000000–0x03FFFF and 0xFC0000–0xFFFFFF | OSRAM, 256 KB (U3/U4), the same RAM in both windows. Reads of 0–7 come from the ROM until the first write into 0–7 |
+| 0x000000–0x037FFF and 0xFC0000–0xFFFFFF | OSRAM, 256 KB (U3/U4). The top window aliases all of it; the OS uses only its top 32 KB there (0xFF8000–0xFFFFFF, the stack), which the low window does not reach. Reads of 0–7 come from the ROM until the first write into 0–7 |
+| 0x038000–0x077FFF | SEQEXP, 256 KB (U1/U2, the SQX-70 kit), fitted (Task 8) |
 | 0x200000 + 0x40000 n | I/O1: n = 0 DUART, 1 SCSI, 2 FDC, 3 IEXP (A19:A18 into U7/A) |
 | 0x300000–0x37FFFF | OTTO (odd bytes, HA5..HA0 = A6..A1) |
 | 0x380000–0x3FFFFF | ESP (odd bytes, host register = A8..A1) |
@@ -60,7 +61,7 @@ The devices are decoded over their whole block (a DUART register is A4..A1 anywh
   (0x0000, 0x1111, 0x2222, 0x3333 at +2) and reads them back from the top down: a socket probe in
   steps of 2 MB, one 1M x 8 SIMM pair (1M words). Four steps of 2 MB from 0x400000 end at the ROM:
   the 8 MB window of CPU A22..A1.
-- **OSRAM in two windows.** The reset SSP is 0xFF80A0. RAM use in the boot by 32 KB block: 0x0000–
+- **OSRAM in two windows.** (Task 4; the 0x038000 probe is SEQEXP's, below.) The reset SSP is 0xFF80A0. RAM use in the boot by 32 KB block: 0x0000–
   0x7FFF and 0xFF8000–0xFFFFFF heavily (from 0.2 ms), 0x8000–0x17FFF cleared at about 1.1 s,
   0x18000–0x1FFFF used from 1.27 s, and one word written and read back at 0x038000 at 1274.7 ms.
   0xFF8000–0xFF806D is never touched in the boot, so the 0x038000 probe does not disturb anything in
@@ -78,16 +79,66 @@ The devices are decoded over their whole block (a DUART register is A4..A1 anywh
 | ROM only at 0xC00000–0xC7FFFF (no mirror) | Boots the same; the mirror is unobserved |
 | Sample RAM: none, 2 MB, 2 MB aliased over the whole window, empty sockets reading 0xFFFF | All four boot with an identical event sequence; no "WRONG SOCKETS" text. The probe's result is not visible in the boot |
 
-**Where SEQEXP is.** Not found. The boot touches no address outside the map above, so SEQEXP is
-either probed later (the sequencer) or behind the 0x038000 probe. The target is a stock TS (no
-SQX-70), so it is not modelled. A later check: the sequencer's free-memory display (30 000 notes stock,
-97 000 with the SQX-70, service manual p59) with RAM placed at a candidate address.
+**Where SEQEXP is (Task 8).** At 0x038000–0x077FFF, found by running the sequencer. A scratch build
+(not committed) mapped RAM over all of 0x020000–0x1FFFFF and counted RAM writes per 32 KB block, the
+PAL's granularity:
+- The boot's only RAM access between 0x020000 and 0xFF8000 is the word written and read back at
+  0x038000 (2 writes, 2 reads).
+- The Sequencer Control page (pressed three times; Musician's Manual, "FREE") shows FREE=97311 when
+  0x038000 holds what was written and FREE=31775 when it reads 0. 31 775 + 993 = 32 768 and
+  97 311 + 993 = 98 304 events of 4 bytes: 128 KB and 384 KB of sequencer memory, the manual's 30 000 and
+  "over 97,000 notes" with the SQX-70. The step is 256 KB, U1/U2's size.
+- A sequence recorded with pressure (Record with Play, then keep it: YES) is written from the top of
+  sequencer memory down: 0x068000–0x077FFF with the probe answered, 0x028000–0x037FFF without; the
+  record buffer is at 0x018000–0x02FFFF either way. Nothing is written at 0x078000 or above.
+So sequencer memory ends at 0x038000 on a stock TS and at 0x078000 with the SQX-70, and 0x038000–
+0x03FFFF is never used through the low window. OSRAM therefore cannot answer at 0x038000 (a stock TS
+would report the SQX-70), and the 32 KB that 0x038000–0x03FFFF would be in OSRAM are its top 32 KB,
+seen at 0xFF8000. SEQEXP is the 256 KB from 0x038000.
+
+The machine fits SEQEXP: the user gets the SQX-70's memory, and the battery image holds it. A stock TS
+(SEQEXP/ decoded, no chips: the probe reads open bus) is not modelled. Before Task 8 the low OSRAM window
+reached 0x03FFFF: the probe passed, the OS reported FREE=97311, and a kept sequence went to unmapped
+space at 0x068000 up and was lost (ts_sequence_is_kept_in_seqexp fails on that map).
 
 **Confidence.** High for the device windows (each is the first place the OS goes, in the schematic's
-decoder order, and nothing is unmapped). High for the OSRAM low window and overlay. Medium for the
+decoder order, and nothing is unmapped). High for the OSRAM low window and overlay. Medium-high for
+SEQEXP's window (the probe, the free counts and where the data lands agree; the physical order of the
+32 KB pieces inside U1/U2 is not observable and the image keeps CPU order). Medium for the
 top window being the same RAM (argued from the service manual, not observable). Medium for the
 sample-RAM window base (a probe pattern); low for the installed size and empty-socket reads.
 **MAME.** Not compared.
+
+## Battery RAM (T13)
+
+**Fact.**
+- The battery holds OSRAM and SEQEXP. `Machine::ramImage()` returns both as raw bytes, 512 KB: OSRAM
+  in CPU order (offset n is address n for n < 0x38000, and 0xFF8000 + (n − 0x38000) above), then SEQEXP
+  in CPU order (offset 0x40000 + n is address 0x038000 + n).
+- `Machine::loadRamImage(img, err)` takes exactly 524 288 bytes. A wrong size fails with "RAM image:
+  expected 524288 bytes, got n" and changes nothing.
+- Loading an image is a power cycle with the battery connected: the CPU, the OTTO, the ESP, the DUART,
+  the FDC and the panel are reset, the 0–7 overlay comes back, the sample DRAM (no battery) is cleared,
+  and the analog and IEXP inputs keep their values (they are the player's controls). The next
+  `runFrame` boots from the loaded RAM. A cold start is blank RAM, which is what `Machine::create` gives.
+- **A boot from saved RAM is a warm start.** Master Tune set to +02 (System, Up twice) still reads
+  "TUNE=+02" after a power-on from the image. The warm boot shows the cold boot's play screen (U0-0
+  BABY-GRAND) with no warning or error text; its last display byte comes at 3014 ms against 3491 ms
+  cold.
+- **Garbage RAM is a cold start.** 512 KB of pseudo-random bytes give exactly the cold boot's display
+  sequence, ending at 3491 ms on the play screen, and no fault vector: the OS rebuilds its RAM.
+- `tsemu boot|render --ram <file>` loads the file at power-on if it exists and writes the RAM back at
+  the end.
+
+**How found.** ts_ram_image_keeps_settings, ts_garbage_ram_boots, and `tsemu boot --ram` runs compared
+with cold boots (display sequence, exception counts). The same runs give byte-identical image files
+from the MinGW and MSVC builds.
+
+**Alternatives.** OSRAM only (Task 4): loses the sequencer's SQX-70 memory, see "Memory map". Keeping the
+sample DRAM over a power cycle: not what the hardware does, and it would make a load depend on the
+machine's earlier state.
+
+**Confidence.** High for the warm and garbage behaviour (observed); the image layout is a choice (T13).
 
 ## OTTO voice count
 

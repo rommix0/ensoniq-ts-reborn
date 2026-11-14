@@ -51,6 +51,12 @@ public:
     void runFrame(Audio& out);                              // one OTTO frame (ACTV + 1 slots)
     uint64_t cycles() const { return cpu_.totalCycles(); }  // CPU clocks since the machine was created (T1)
     uint16_t peek16(uint32_t addr) const;                   // memory only (devices read 0), no side effects
+    // DECISION T13: the battery RAM, raw: OSRAM (256 KB) then SEQEXP (256 KB), each in CPU address order.
+    const std::vector<uint8_t>& ramImage() const { return ram_; }
+    // A power cycle with the battery holding the RAM: the image (exactly ramImage().size() bytes) replaces
+    // the RAM, the sample DRAM is lost, the CPU and every device restart; the analog and IEXP inputs keep
+    // their values. A wrong size fails with err set and changes nothing.
+    bool loadRamImage(const std::vector<uint8_t>& img, std::string& err);
     std::function<void(const BusEvent&)> onBusEvent;        // the bus trace; off when empty
     std::function<void(uint8_t)> onPanelByte;               // each byte the panel receives on TxDB; off when empty
     const PanelState& panel() const { return panel_.state(); }
@@ -93,6 +99,7 @@ private:
     static Region decode(uint32_t a);
     static Device deviceOf(Region r);
     uint8_t romByte(uint32_t off) const;
+    static uint32_t ramIndex(uint32_t a);  // a RAM address's byte in ram_
     uint16_t hostWord(uint32_t a) const;
     uint8_t memByte(uint32_t a, bool& mapped) const;  // ROM, RAM and the sample-RAM window
     uint8_t ioRead(Region r, uint32_t a);
@@ -108,7 +115,8 @@ private:
     Panel panel_;
     m68k::Cpu cpu_{*this};
     std::vector<uint16_t> os_;  // 256K words, T2
-    static constexpr uint32_t kRamBytes = 0x40000;  // DECISION T13: OSRAM 256 KB (SEQEXP, the SQX-70, not fitted)
+    static constexpr uint32_t kOsRamBytes = 0x40000;              // DECISION T13: OSRAM (U3/U4) 256 KB
+    static constexpr uint32_t kRamBytes = 2 * kOsRamBytes;        // then SEQEXP (U1/U2, the SQX-70) 256 KB
     std::vector<uint8_t> ram_ = std::vector<uint8_t>(kRamBytes, 0);
     bool overlay_ = true;  // reads of 0-7 come from the ROM until the first write there
     std::array<uint16_t, 8> mux_{};  // the POT multiplexer's inputs by select (DUART OP2..OP0), T8
