@@ -22,6 +22,7 @@ set(ENS_TEST_SOURCES
   test_otto_pot.cpp
   test_ts_roms.cpp
   test_ts_board.cpp
+  test_ts_machine.cpp
 )
 
 add_executable(ens_tests ${ENS_TEST_SOURCES})

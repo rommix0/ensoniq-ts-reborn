@@ -42,7 +42,7 @@ add_library(ens_duart STATIC src/duart/duart.cpp)
 target_link_libraries(ens_duart PUBLIC ens_common)
 
 # TS machine (Plan 3): ROM set, wave memory; the machine itself joins in later tasks.
-add_library(ens_ts STATIC src/ts/roms.cpp src/ts/board.cpp)
+add_library(ens_ts STATIC src/ts/roms.cpp src/ts/board.cpp src/ts/machine.cpp)
 target_link_libraries(ens_ts PUBLIC ens_otto ens_esp ens_m68k ens_duart)
 
 # Tom Harte's per-instruction tests (.m68t reader and runner); the data itself is not in the repo.
@@ -61,3 +61,8 @@ add_executable(m68k_harte tools/m68k_harte/main.cpp)
 target_link_libraries(m68k_harte PRIVATE ens_m68k_harte)
 target_compile_definitions(m68k_harte PRIVATE _CRT_SECURE_NO_WARNINGS)
 add_test(NAME m68k_suite COMMAND m68k_harte ${ENS_M68K_TESTS_DIR})
+
+# TS machine runner: boots the OS ROM in emulation and reports what it did.
+add_executable(tsemu tools/tsemu/main.cpp tools/common/files.cpp)
+target_link_libraries(tsemu PRIVATE ens_ts)
+target_compile_definitions(tsemu PRIVATE _CRT_SECURE_NO_WARNINGS)

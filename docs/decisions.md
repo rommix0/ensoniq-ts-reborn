@@ -695,3 +695,24 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Evidence: schematic sheets 1 and 3 (SER0-2 re-clocked to ESP SER0, SER2, SER3; SER3 to the analog board).
 - Confidence: Bit alignment medium-low (check levels by ear in Plan 4).
 - Status: implemented in `ens::ts::Board::route` (Plan 3 Task 2). Tests: tests/test_ts_board.cpp.
+
+## T1: Clocks and scheduling
+- Options: the CPU/OTTO crystal (the schematic's digit is unreadable); how the CPU, OTTO, DUART and ESP share time.
+- Choice: CPU = OTTO = 15 238 090 Hz (30.47618 MHz / 2, the KS-32's crystal), so a 32-voice frame is 512 CPU clocks (29 761.9 Hz). DUART X1 4 MHz, its serial clock 500 kHz on IP3/IP4. ESP 9 216 000 Hz (103 instructions per frame, T11). Per voice slot the CPU runs 16 clocks less the carried overshoot (a carry of 16 or more skips the CPU), then `Otto::stepVoice`, then the DUART by the exact rational accumulator `acc += 16 * 4 000 000; x1 = acc / 15 238 090`. `Machine::cycles()` is the CPU's total minus the carry, so a frame ends on a slot boundary whatever the instruction mix.
+- Evidence: schematic sheet 1 (crystals); notes §4 (16 CLKs per voice); the KS-32 scheduler.
+- Confidence: Low-medium for the CPU clock until the firmware's own timing checks pass (Task 4); the scheduling is exact.
+- Status: implemented in `ens::ts::Machine::slot` (Plan 3 Task 3). Test: ts_frame_cadence.
+
+## T7: DUART wiring
+- Options: which DUART pins carry which board signal.
+- Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (immediate conversion); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. Panel (OP4, OP5, OP7) and the rest are used from Task 5 on.
+- Evidence: schematic sheet 1 (DUART U10 pin list); the core's `outputPins()` returns the pin level, the inverse of OPR.
+- Confidence: High for the signals; the OP6 polarity is carried from the KS-32 (K15) and checked in Task 4.
+- Status: implemented in `Machine::updateLines` (Plan 3 Task 3).
+
+## T14: RESET instruction
+- Options: reset all devices, or only those on BRES/.
+- Choice: the OTTO only. The DUART and FDC are on the power-on-only BRES and are untouched.
+- Evidence: schematic sheet 1.
+- Confidence: Medium.
+- Status: implemented in `Machine::resetPeripherals` (Plan 3 Task 3).
