@@ -18,11 +18,12 @@ the confidence and the decision entry in `docs/decisions.md`.
   protocol itself is Task 5's.
 
 **Where the boot ends.** With the map below and the keyboard's answer ("Keyboard link"):
-- The last display byte comes at 3457 ms: the play screen ("Display and LEDs"). The ESP is released
-  at 3357 ms; the last new kind of device access is at 1819 ms.
+- The last display byte comes at 3491 ms: the play screen ("Display and LEDs"). The ESP is released
+  for the last time at 3376 ms; the last new kind of device access is at 1819 ms.
 - About 0.9 s of it is the wait for a floppy index pulse (empty drive), 0.5 s the OS's pause before
   "CALIBRATING KEYBOARD" and 1.5 s the "ENSONIQ TS-10" start-up screen.
-- `kBootMs` = 5200: 3457 ms plus 50 %, rounded up.
+- `kBootMs` = 5300: 3491 ms plus 50 %, rounded up. With the Volume slider at 0 (Task 5's inputs) the
+  boot ended at 3457 ms; at its resting maximum (T8) the OS spends 34 ms more before the play screen.
 - Before Task 5 the boot ended at 8076 ms on "KEYBOARD IS NOT RESPONDING" after a 5.5 s wait for the
   keyboard, and `kBootMs` was 12 200.
 
@@ -150,41 +151,155 @@ compared.
 ## ESPHALT (T7)
 
 **Fact.** DUART OP6 is ESPHALT, active high, as on the KS-32: the OS resets OPR bit 6 at 1.3 ms (pin
-high, ESP halted), loads and reads back the ESP's GPRs and program while it is halted, and sets OPR
-bit 6 at 8059.9 ms (ESP running). The ESP runs to the end of the boot.
+high, ESP halted) and loads and reads back the ESP's GPRs and program while it is halted. It sets OPR
+bit 6 (ESP running) at 1819 ms, halts the ESP again at 3301 ms, before the play screen, and releases
+it at 3376 ms. The ESP runs to the end of the boot. (Measured with `tsemu boot --trace duart` on the
+Task 6 machine; before the keyboard answered, Task 4 saw the release at 8.06 s.)
 
 **Alternatives.** The reverse polarity runs the ESP from 0.04 ms, during the OS's downloads, and leaves
 it halted at the end of the boot. No error text either way.
 
 **Confidence.** Medium.
 
-## Analog reference (T8, provisional)
+## Analog inputs (T8)
 
-**Fact.** The reference input (mux Y7, select 7) must read non-zero: with every mux input at 0 the OS
-reads PAR (OTTO register 13) and takes a divide by zero (vector 5) 10 µs later, at about 8.08 s, and
-shows "SYSTEM ERROR 130". Reference values 1, 200, 800 and 1023 all boot. The machine uses 800 until
-Task 6 finds the resting values.
+**Fact: the path.**
+- The analog mux U69 puts one input on the OTTO POT pin, selected by DUART OP2..OP0. The OS reads
+  the conversion as PAR (OTTO location 0x34, bytes 0x300069-0x30006F), the raw 10-bit value in the
+  low bits.
+- Every 2 ms the OS reads PAR, then writes OPR set = 0x07 (OP2..OP0 low) and OPR reset = n
+  (OP2..OP0 = n). The PAR read starts the OTTO's conversion (OT16), which ends 512 slots (0.54 ms)
+  later, after the new select: so each read returns the input selected 2 ms before. The mux switches
+  at once in the model; any settling time under about 1.9 ms would read the same.
+- Selects in the boot: 6 (battery) once at 1503 ms, 7 (reference) once at 1587 ms, 5 (data entry)
+  at 1768 ms, 0 (pitch wheel) from 1843 ms, then the cycle 0 2 5 3 4 (10 ms) for good. The Analog
+  Test page adds 7 and 6: 0 2 5 3 4 7 6 (14 ms). Select 1 (U69 Y1, not connected) is never used.
 
-**Confidence.** High that the reference must be non-zero; the value is a placeholder.
+**Fact: the Analog Test page.** Hold Presets and press Compare (service manual p28). Two rows:
+`ANALOG  PTCH=ppp MOD=mmm PED=ccc VOL=vvv` and `TESTS   KNOB=kkk REF=rrr BAT=bbb`. The readings are
+filtered: after a step they take up to about 2 s to settle. Each select was set alone to a series of
+raw values (the others at rest, REF 0x324) and the settled reading noted:
 
-## Floppy controller (T10, provisional)
+| Select | Input | Reading | Raw to reading (REF 0x324) |
+|---|---|---|---|
+| 0 | Pitch wheel | PTCH | Centred on the value seen at power-on (64 there). 0 at centre - 0x100, 24 at - 0x80, 93 at + 0x80, 127 at + 0x100. Further out the reading wraps (power-on 0, raw 0x300: 181). Powered on at raw 0 the centre reads 073 |
+| 2 | Mod wheel | MOD | 0 up to 0x40, 16 at 0x80, 56 at 0x100, 96 at 0x180, 127 from 0x200 |
+| 3 | Volume slider | VOL | 0 up to 0x20, 7 at 0x40, 47 at 0x100, 101 at 0x200, 127 from 0x280 |
+| 4 | CV pedal | PED | 0 at 0, 16 at 0x40, 98 at 0x100, 127 from 0x180 |
+| 5 | Data entry slider | KNOB | About (raw - 0x4A) / 2: 0 up to 0x4C, 127 at 0x14E, 255 from 0x24A. Shows 000 until the slider moves after the page opens |
+| 6 | Battery | BAT | About raw x 0.234: 7 at 0x20, 119 at 0x200, 238 at 0x3FF |
+| 7 | Reference | REF | raw / 4 - 1: 199 at 800, 200 at 804 |
 
-**Fact.** The uPD72069 sits at 0x280001 (A0 = 0: main status register) and 0x280003 (A0 = 1: data),
-polled. The OS writes 0x36, 0x0B, 0x4F, 0xC8, 0xE3, 0x1E to the A0 = 0 address (not uPD765 commands;
-ignored), and the uPD765 commands Sense Interrupt Status (0x08), Sense Drive Status (0x04 0x00) and
-Specify (0x03 0xC2 0x11). It then polls the DUART IPCR for about 0.9 s for a change on IP0..IP3 (the
-index pulse on IP0, DSTAT), and goes on without one (empty drive).
+- **The reference scales the others.** With REF at or below about 0x2D0 (reading 179) the readings
+  above do not change (VOL 52 at raw 0x100 for REF 0x80-0x2D0). Above it they shrink by about
+  750 / REF (VOL at raw 0x100: 48 at REF 0x320, 43 at 0x370, 36 at 0x3FF). REF 0 gives a divide by
+  zero (vector 5, "SYSTEM ERROR 130").
+- **Battery warning.** The OS reads the battery once in the boot, at 1503 ms. From raw 458 up the
+  boot stops at "WARNING -- LOW BATTERY VOLTAGE / SAVE DATA - SEE USER MANUAL *CONTINUE*" (bisected;
+  the same threshold at REF 0x2D0, 0x324 and 0x370). So a high reading is a bad battery, as the
+  service manual says (p19, p28: a good unit shows BAT below 010).
+- **Data entry at raw 0.** Exactly 0 is special: on a page with a selected value the OS keeps
+  rewriting it at its minimum (TUNE=-99), about 600 panel bytes a second, and on the Analog Test page
+  it shows "SYSTEM ERROR 144" about 5.4 s after the page opens. Raw 1 and above behave normally: no
+  panel bytes at rest on the play screen or the System page.
 
-**How it was found.**
-- Status reading 0: the OS polls the status for 34 ms, gives up and goes on.
-- Status 0x80 always (RQM): the OS sends Sense Interrupt Status and waits about 0.9 s for a result.
-- `src/ts/fdc.h`: RQM always, DIO and CB while result bytes wait, the uPD765 command lengths, and
-  results for an empty drive (Sense Interrupt Status: ST0 0x80; Sense Drive Status: ST3 with only the
-  drive bits; reads: not ready). The OS reads each result byte.
-- Toggling IP0 every 30 frames ends the 0.9 s wait at once; toggling IP1, IP2 or IP3 does not. Static
-  input levels (0x3F, 0x3E, 0x3D, 0x3B, 0x3C, 0x38) change nothing.
+**Resting values (T8).** `kAnalogRest` (`src/ts/machine.h`), set at power-on:
 
-**Confidence.** Low: enough for the boot; Task 6 settles the empty-drive behaviour.
+| Input | Raw | Reading | Basis |
+|---|---|---|---|
+| Pitch wheel | 0x200 | PTCH=064 | Centred: the power-on value reads 64. 0x200 leaves the wheel's full travel (+-0x100) on both sides without wrapping |
+| Mod wheel | 0x000 | MOD=000 | Wheel down (service manual p28: down value 000) |
+| Volume slider | 0x3FF | VOL=127 | Up, so a headless render is audible (at 0 the TS is silent) |
+| CV pedal | 0x3FF | PED=127 | Unplugged: "Check that the display shows: PED=127" (service manual p28, before the pedal is plugged in) |
+| Data entry | 0x14E | KNOB=127 | Middle of 0-255; not 0, which the OS takes as a slider held at its minimum |
+| Battery | 0x000 | BAT=000 | A good battery reads below 010 (p28); far from the warning at 458 |
+| Reference | 0x324 | REF=200 | The middle of the service manual's 180-220 (p28) |
+
+`setAnalog` clamps to 0-1023 (a request beyond 10 bits stays the maximum) and ignores an input outside
+the enum; `tsemu boot --analog NAME=raw` sets an input from power-on.
+
+**How it was found.** A scratch harness, not committed, linked against `ens_ts`: the OTTO and DUART
+accesses on the play screen and the Analog Test page (PAR reads and OPR writes, with times); one input
+at a time stepped through raw values with the page open, the settled rows read (1.5-2.5 s per step);
+a grid of REF values against fixed inputs; boots with the battery bisected for the warning; boots with
+the pitch wheel at 0, 0x100, 0x200 and 0x300; panel bytes counted over 1 s for data entry values
+0-0x3FF.
+
+**Alternatives.** Before Task 6 every input but REF (800) was 0: PTCH=073, PED=000, VOL=000 (silent),
+and the data entry flood above. Raising the mod wheel or the CV pedal at power-on changes nothing in
+the boot but the readings.
+
+**Confidence.** High for the path, the select order and the select table. Medium for the raw-to-reading
+values (read off settled displays) and the reference scaling. Medium for the resting values: the real
+voltages are unknown; each reads what the service manual expects.
+
+**Tests.** ts_cold_boot_is_clean, ts_analog_resting_values, ts_slider_moves_volume, ts_key_sounds.
+
+## IEXP port (T9)
+
+**Fact.** IEXP (U12/A, a 74HC244) is read as a byte at 0x2C0001 once per 1 ms tick from about 1 s:
+D0 FSW3B/, D1 FSW4B/, D2 PSRB/, D3 PSLB/, low = pressed. The OS ignores D4-D7: the boot, a page
+change and a patch select press give the same bus trace (IEXP values left out) with the upper nibble
+0xF, 0x0, 0x5, 0xA, 0x7 or 0xE. The model reads them high.
+- **Patch select.** Left (D3) sends MIDI controller 70 = 0x40, right (D2) 0x20, both 0x7F, none 0x00
+  (the Musician's Manual, "Using the Patch Select Buttons", names controller 70).
+- **Foot Switch 2.** Its contacts are FSW3B/ and FSW4B/ (Foot Switch 1 goes through the keyboard,
+  "Buttons"). With SW2-R=SUSTAIN on the second System page, D0 (FSW3B/) sends controller 64 and D1
+  does not; with SW2-L=SUSTAIN as well both do. So `footswitch(3)` is the right contact and
+  `footswitch(4)` the left, the same order as Foot Switch 1 (code 00 right, 01 left). Both are
+  *UNUSED* by default.
+
+**How it was found.** The scratch harness traced the IEXP reads and MIDI out while pressing each input
+from the play screen and the System page, and compared trace hashes across upper nibbles.
+
+**Confidence.** High for D0-D3 and the sides; high that D4-D7 are ignored (their real level is unknown).
+
+**Tests.** ts_iexp_inputs, ts_patch_select_is_read, ts_footswitch2_is_read.
+
+## Floppy controller and the empty drive (T10)
+
+**Fact.** The uPD72069 sits at 0x280001 (A0 = 0) and 0x280003 (A0 = 1), polled. The drive is empty.
+Register by register:
+- **Main status register (read, A0 = 0).** RQM (0x80) always; CB (0x10) from a command's first byte
+  to its last; DIO and CB (0xD0) while result bytes wait. The OS polls it before each byte.
+- **A0 = 0 writes.** 0x36, 0x0B, 0x4F, 0xC8, 0xE3 at boot (110 ms), then 0x1E before each drive check
+  and 0x0E after it (bit 4 set around the access: plausibly a motor or drive select bit of the 72069's
+  own control register). They are not uPD765 commands; the model ignores them, and nothing the OS
+  reads afterwards depends on them.
+- **Data register (A0 = 1).** The OS uses Sense Interrupt Status (0x08; result ST0 0x80, no interrupt
+  pending), Specify (0x03 0xC2 0x11; no result) and Sense Drive Status (0x04 0x00; result ST3 = the
+  drive bits only: not ready, not write protected, not track 0, one side). Nothing else is sent with
+  the drive empty.
+- **DUART IP0 (DSTAT, the index pulse).** No pulse: no disk is turning. After each Sense Drive Status
+  command the OS polls the IPCR 300 000 times (about 0.9 s at the modelled clock) for a change on
+  IP0..IP3 before it reads ST3. A check that sees no change is "no disk".
+- **DUART IP1 (DSKCHG) and IP2 (DENS).** Held high. No level of either changes anything the OS does
+  with an empty drive (below), so they stay at the idle level of the other inputs. The schematic names
+  them without a "/"; if active high, high reads as "disk changed" and "high density".
+- **What the OS does with it.** At boot: one drive check (110-1017 ms), then on with no message. On a
+  disk command (Storage twice: the disk page; or FORMAT): two drive checks, then "DISK DRIVE NOT
+  READY" for about 1 s and the DISK page. The Musician's Manual gives that message as "No disk in the
+  drive" (Storage, FORMAT DISK error messages).
+
+**How it was found.** The scratch harness logged every FDC access and the IPCR reads in the boot, in
+Storage-Storage and in FORMAT, and showed the settled display after each.
+
+**Alternatives tried.**
+- IP0 pulsing low for 2 ms every 200 ms (a turning disk): the boot's wait ends at once (play screen at
+  2702 ms) and Storage-Storage shows "DISK DRIVE NOT RESPONDING": the OS then expects a drive that
+  answers seeks and reads.
+- Static input levels 0x3F, 0x3D, 0x3B, 0x39 (IP1 and IP2 each high or low), with and without the IP0
+  pulses: the same messages at the same times.
+- ST3 = drive bits | 0x00, 0x08, 0x10, 0x20, 0x40, 0x60 or 0x70: the same "DISK DRIVE NOT READY" (with
+  pulses, "NOT RESPONDING") at the same times. The index pulse decides, not ST3.
+- Sense Interrupt Status answering ST0 0xC0 and a PCN byte: the same messages.
+- Task 4: a status of 0 makes the OS give up on the FDC after 34 ms; a static 0x80 makes it wait about
+  0.9 s for a result.
+
+**Confidence.** High that "no index pulse" is the empty drive and that the OS's answer is the manual's
+no-disk message. Low for ST3, ST0 and the IP1/IP2 levels, which an empty drive cannot show.
+
+**Tests.** ts_floppy_reports_no_disk, ts_cold_boot_is_clean.
 
 ## The ILLEGAL instructions at boot
 
@@ -219,9 +334,8 @@ fault. The boot test allows vector 4 only at an ILLEGAL opcode.
   start-up screen, the 16 LEDs and the play screen. The model answers `FF` to `FB FD` at once.
 - The OS sends `E7` and `FB FF FB F0` again before every disk access ("DISK DRIVE NOT READY" with the
   empty drive); keys and buttons work after it.
-- **Boot end.** With the answer the last display byte comes at 3457 ms, the ESP is released at
-  3357 ms and the last new kind of device access is at 1819 ms. `kBootMs` = 5200 (3457 ms + 50 %,
-  rounded up).
+- **Boot end.** With the answer the last display byte came at 3457 ms (3491 ms since Task 6's resting
+  analog values: "Where the boot ends"); the last new kind of device access is at 1819 ms.
 
 **How found.** A scratch harness, not committed, logged channel B's bytes with their times, the
 OP4/OP5/OP7 edges and the RHRB reads, and queued candidate bytes on RxDB.
@@ -382,7 +496,6 @@ a key down, so this does not affect the model.
 ts_panel_full_queue_drops_whole_events, ts_panel_lines (the model); ts_boot_shows_play_screen,
 ts_button_changes_page, ts_key_sounds, ts_poly_pressure_is_sent (the firmware).
 
-**Open for Task 6.** With the provisional analog inputs (T8: every input 0 but the reference):
-- the Volume slider at 0 silences the TS; `ts_key_sounds` raises it with `setAnalog`;
-- the Data Entry slider at 0 keeps rewriting the selected parameter at its minimum (TUNE=-99,
-  VEL-MAX=001), about one redraw per ms, which also delays what buttons show.
+**Settled in Task 6.** With Task 4's analog inputs (every input 0 but the reference) the Volume slider
+at 0 silenced the TS and the Data Entry slider at 0 kept rewriting the selected value at its minimum.
+Both now rest elsewhere ("Analog inputs").

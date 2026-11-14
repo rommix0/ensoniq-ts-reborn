@@ -230,13 +230,10 @@ TEST(ts_button_changes_page) {
     CHECK_EQ(m->panel().unknown, 0u);
 }
 
-// A key sounds and goes out on MIDI as note 60 (T17). The volume slider is raised first: at its
-// provisional 0 (T8) the TS is silent.
+// A key sounds and goes out on MIDI as note 60 (T17), with the volume slider at rest (up, T8).
 TEST(ts_key_sounds) {
     auto m = bootFresh();
     if (!m) return;
-    m->setAnalog(Analog::Volume, 0x3FF);
-    runMs(*m, 100);
     midiOut(*m);
     const int quiet = mainPeak(*m, 200);
     m->key(60, true, 127);
@@ -265,4 +262,162 @@ TEST(ts_poly_pressure_is_sent) {
     runMs(*m, 20);
     const std::vector<uint8_t> out = midiOut(*m);
     CHECK(contains(out, {0xA0, 0x40, 100, 0x40, 0}));
+}
+
+namespace {
+
+// Holds a while b is tapped (60 ms), then releases both: the firmware's two-button shortcuts.
+void chord(Machine& m, Button a, Button b) {
+    m.button(a, true);
+    runMs(m, 60);
+    tap(m, b);
+    m.button(a, false);
+    runMs(m, 300);
+}
+
+bool shows(const PanelState& p, const char* text) {
+    return rowText(p, 0).find(text) != std::string::npos || rowText(p, 1).find(text) != std::string::npos;
+}
+
+// Text that must never appear in normal operation: a low-battery warning, a SYSTEM ERROR, an
+// unexpected-event message, a missing keyboard or disk drive that answers wrongly.
+const char* badText(const PanelState& p) {
+    for (const char* t : {"BATTERY", "ERROR", "EVENT", "NOT RESPONDING"})
+        if (shows(p, t)) return t;
+    return nullptr;
+}
+
+// Runs ms; the first bad text seen on any frame (nullptr if none).
+const char* watchMs(Machine& m, uint32_t ms) {
+    const uint64_t end = m.cycles() + static_cast<uint64_t>(ms) * kCpuHz / 1000;
+    const char* bad = nullptr;
+    Audio a;
+    while (m.cycles() < end) {
+        m.runFrame(a);
+        if (!bad) bad = badText(m.panel());
+    }
+    return bad;
+}
+
+// The peak of Main L/R over 200 ms of a C4 struck at full strike, then released.
+int notePeak(Machine& m) {
+    m.key(60, true, 127);
+    const int peak = mainPeak(m, 200);
+    m.key(60, false, 0);
+    runMs(m, 600);
+    return peak;
+}
+
+}  // namespace
+
+// The analog resting values (T8) give a power-on with no warning or error text on any frame.
+TEST(ts_cold_boot_is_clean) {
+    auto m = loadTs();
+    if (!m) return;
+    const char* bad = watchMs(*m, kBootMs);
+    if (bad) std::printf("  saw \"%s\"\n", bad);
+    CHECK(bad == nullptr);
+    CHECK(rowText(m->panel(), 0).compare(0, 4, "U0-0") == 0);
+}
+
+// The Analog Test page (service manual p28: hold Presets, press Compare) with the inputs at rest
+// (T8): wheels centred and down, CV pedal unplugged (PED=127), volume up, a good battery (BAT below
+// 010) and REF in 180-220. KNOB shows 000 until the slider moves.
+TEST(ts_analog_resting_values) {
+    auto m = bootFresh();
+    if (!m) return;
+    chord(*m, Button::Presets, Button::Compare);
+    runMs(*m, 3000);  // the readings are filtered; REF settles in about 2.2 s
+    const std::string r0 = rowText(m->panel(), 0), r1 = rowText(m->panel(), 1);
+    std::printf("  |%s|\n  |%s|\n", r0.c_str(), r1.c_str());
+    CHECK(r0 == "ANALOG  PTCH=064 MOD=000 PED=127 VOL=127");
+    CHECK(r1.compare(0, 21, "TESTS   KNOB=000 REF=") == 0);
+    const int ref = std::atoi(r1.substr(21, 3).c_str());
+    CHECK(ref >= 180 && ref <= 220);
+    CHECK(r1.compare(24, 9, " BAT=000 ") == 0);
+}
+
+// The Volume slider scales a struck note: silent at 0, loud at 0x3FF; a request beyond 10 bits is
+// clamped to the maximum, not wrapped.
+TEST(ts_slider_moves_volume) {
+    auto m = bootFresh();
+    if (!m) return;
+    int peak[3];
+    const uint16_t raw[3] = {0x3FF, 0, 0x400};
+    for (int i = 0; i < 3; ++i) {
+        m->setAnalog(Analog::Volume, raw[i]);
+        runMs(*m, 300);
+        peak[i] = notePeak(*m);
+    }
+    std::printf("  peak at 0x3FF %d, 0 %d, 0x400 %d\n", peak[0], peak[1], peak[2]);
+    CHECK(peak[0] > 1000);
+    CHECK(peak[1] < 64);
+    CHECK(peak[2] > 1000);
+}
+
+// The patch select buttons are read on IEXP (T9): the OS sends them as MIDI controller 70 (Musician's
+// Manual, "Using the Patch Select Buttons"): left 0x40, right 0x20, both 0x7F, none 0.
+TEST(ts_patch_select_is_read) {
+    auto m = bootFresh();
+    if (!m) return;
+    midiOut(*m);
+    const auto step = [&m](int side, bool down) {
+        m->patchSelect(side, down);
+        runMs(*m, 50);
+        return midiOut(*m);
+    };
+    const std::vector<uint8_t> left = step(0, true), none = step(0, false), right = step(1, true),
+                               both = step(0, true);
+    CHECK(contains(left, {0xB0, 0x46, 0x40}));
+    CHECK(contains(none, {0x46, 0x00}));
+    CHECK(contains(right, {0x46, 0x20}));
+    CHECK(contains(both, {0x46, 0x7F}));
+}
+
+// Foot Switch 2 is read on IEXP (T9): with SW2-R=SUSTAIN on the System page, footswitch 3 (FSW3B/)
+// sends sustain and footswitch 4 (FSW4B/) does not, so 3 is the right contact.
+TEST(ts_footswitch2_is_read) {
+    auto m = bootFresh();
+    if (!m) return;
+    tap(*m, Button::System);
+    tap(*m, Button::System);  // FOOT-SW1-L, R, PEDAL, SW2-L, SW2-R
+    tap(*m, Button::Soft6);
+    tap(*m, Button::Up);
+    CHECK(rowText(m->panel(), 1).find("R=SUSTAIN") != std::string::npos);
+    midiOut(*m);
+    m->footswitch(3, true);
+    runMs(*m, 50);
+    CHECK(contains(midiOut(*m), {0xB0, 0x40, 0x7F}));
+    m->footswitch(3, false);
+    runMs(*m, 50);
+    CHECK(contains(midiOut(*m), {0x40, 0x00}));
+    m->footswitch(4, true);
+    runMs(*m, 50);
+    CHECK(midiOut(*m).empty());
+    m->footswitch(4, false);
+}
+
+// With the drive empty (T10) a disk command from the panel (Storage, Storage: the disk page and its
+// directory) gets the firmware's no-disk answer, DISK DRIVE NOT READY (Musician's Manual, "Storage":
+// "No disk in the drive"), then the disk page, with no error code.
+TEST(ts_floppy_reports_no_disk) {
+    auto m = bootFresh();
+    if (!m) return;
+    tap(*m, Button::Storage);
+    m->button(Button::Storage, true);
+    runMs(*m, 60);
+    m->button(Button::Storage, false);
+    bool notReady = false;
+    const char* bad = nullptr;
+    const uint64_t end = m->cycles() + static_cast<uint64_t>(5000) * kCpuHz / 1000;
+    Audio a;
+    while (m->cycles() < end) {
+        m->runFrame(a);
+        notReady = notReady || shows(m->panel(), "DISK DRIVE NOT READY");
+        if (!bad) bad = badText(m->panel());
+    }
+    std::printf("  |%s|\n", rowText(m->panel(), 0).c_str());
+    CHECK(notReady);
+    CHECK(bad == nullptr);
+    CHECK(rowText(m->panel(), 0).compare(0, 11, "DISK   FORM") == 0);
 }

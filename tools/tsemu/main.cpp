@@ -1,6 +1,6 @@
 // tsemu: runs the emulated TS-10 (OS v3.10 on the 68000 with the DUART and the OTTO/ESP board).
 //   tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] [--last <n>]
-//              [--display-only] [--press <ms>:<name>[+<name>...]]...
+//              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...
 // --trace takes a comma list of otto,esp,duart,fdc,iexp,scsi,unmapped,iack; matching bus events are
 // printed as "<cycle> <DEV> <R|W><size> <addr> <value>". --last <n> prints the last n instruction
 // addresses disassembled, to see where a run stops (the disassembler is a debugging aid).
@@ -11,6 +11,8 @@
 // each time they change; --display-only leaves out the summary.
 // --press presses the named buttons (kButtons names, e.g. SYSTEM, BANK5, SOFT1) in order at <ms> from
 // power-on, holds them 100 ms and releases them in reverse order; it may be repeated.
+// --analog sets an analog input to a raw 10-bit value (0-1023) from power-on instead of its resting
+// value (kAnalogRest): PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF; it may be repeated.
 // Errors print "error: <msg>" and exit 2.
 #include <cctype>
 #include <cstdint>
@@ -42,7 +44,15 @@ struct Options {
     uint32_t last = 0;
     bool displayOnly = false;
     std::vector<std::pair<uint64_t, std::vector<Button>>> presses;  // --press: ms, buttons
+    std::vector<std::pair<Analog, uint16_t>> analog;                  // --analog: input, raw
 };
+
+constexpr struct {
+    Analog input;
+    const char* name;
+} kAnalogNames[] = {{Analog::PitchWheel, "PITCH"}, {Analog::ModWheel, "MOD"},     {Analog::Volume, "VOLUME"},
+                    {Analog::CvPedal, "CV"},       {Analog::DataEntry, "DATA"},  {Analog::Battery, "BATTERY"},
+                    {Analog::Reference, "REF"}};
 
 uint64_t parseNum(const std::string& opt, const std::string& v) {
     char* end = nullptr;
@@ -155,6 +165,21 @@ void printBytes(const std::vector<uint8_t>& b) {
     std::printf("\n");
 }
 
+// "<name>=<raw>", raw 0-1023.
+std::pair<Analog, uint16_t> parseAnalog(const std::string& v) {
+    const size_t eq = v.find('=');
+    std::string name = v.substr(0, eq);
+    for (char& c : name) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (eq != std::string::npos)
+        for (const auto& a : kAnalogNames)
+            if (name == a.name) {
+                const uint64_t raw = parseNum("--analog", v.substr(eq + 1));
+                if (raw > 1023) fail("bad value '" + v + "' for --analog (raw 0-1023)");
+                return {a.input, static_cast<uint16_t>(raw)};
+            }
+    fail("bad value '" + v + "' for --analog (PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF=<raw>)");
+}
+
 int boot(const Options& o) {
     std::set<Device> traced;
     if (!parseTrace(o.trace, traced))
@@ -169,6 +194,7 @@ int boot(const Options& o) {
     std::string err;
     auto m = Machine::create(roms, err);
     if (!m) fail(err);
+    for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
 
     std::set<uint32_t> unmapped;
     std::map<int, uint8_t> duartLast;  // register -> last value written
@@ -280,7 +306,7 @@ int main(int argc, char** argv) {
     try {
         if (argc < 2 || std::string(argv[1]) != "boot")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
-                 "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]...");
+                 "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...");
         Options o;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
@@ -298,6 +324,7 @@ int main(int argc, char** argv) {
             else if (a == "--count") o.count = parseNum(a, v);
             else if (a == "--last") o.last = static_cast<uint32_t>(parseNum(a, v));
             else if (a == "--press") o.presses.push_back(parsePress(v));
+            else if (a == "--analog") o.analog.push_back(parseAnalog(v));
             else fail("unknown option " + a);
         }
         return boot(o);

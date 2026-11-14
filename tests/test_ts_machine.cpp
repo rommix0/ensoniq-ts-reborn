@@ -118,3 +118,22 @@ TEST(ts_ram_alias_and_sample_window) {
     CHECK_EQ(m->peek16(0x600002), 0);
     CHECK_EQ(m->peek16(0x400002), 0x5678);
 }
+
+// IEXP (T9): D0 FSW3B/, D1 FSW4B/, D2 PSRB/, D3 PSLB/, active low; the upper bits read high.
+TEST(ts_iexp_inputs) {
+    auto m = machineWith({kBraSelf});
+    CHECK_EQ(m->read8(0x2C0001), 0xFF);
+    m->patchSelect(0, true);
+    CHECK_EQ(m->read8(0x2C0001), 0xF7);
+    m->patchSelect(1, true);
+    CHECK_EQ(m->read8(0x2C0001), 0xF3);
+    m->footswitch(3, true);
+    m->footswitch(4, true);
+    CHECK_EQ(m->read8(0x2C0001), 0xF0);
+    m->footswitch(1, true);   // Foot Switch 1 goes through the keyboard, not IEXP
+    m->patchSelect(2, true);  // no such side
+    CHECK_EQ(m->read8(0x2C0001), 0xF0);
+    m->patchSelect(0, false);
+    m->footswitch(3, false);
+    CHECK_EQ(m->read8(0x2C0001), 0xF9);  // FSW4 and the right patch select still down
+}

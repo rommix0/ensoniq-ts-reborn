@@ -1,6 +1,7 @@
 #pragma once
-// The floppy controller U20 (uPD72069) as far as the boot needs it: the uPD765 command/result
-// handshake on its two registers, with an empty drive. DECISION T10: provisional until Task 6.
+// The floppy controller U20 (uPD72069) with an empty drive: the uPD765 command/result handshake on its
+// two registers. DECISION T10: the answers below; "no disk" itself is the missing index pulse on DUART
+// IP0, which no ST3 value changes (docs/ts-hardware-interface.md, "Floppy controller and the empty drive").
 #include <cstdint>
 
 namespace ens::ts {

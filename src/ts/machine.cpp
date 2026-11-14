@@ -12,7 +12,7 @@ constexpr uint32_t kRamLowTop = 0x040000, kRamHighBase = 0xFC0000;  // OSRAM at 
 constexpr uint32_t kIo1Base = 0x200000, kIo1Window = 0x100000;      // A19:A18 = DUART, SCSI, FDC, IEXP
 constexpr uint32_t kIo2Base = 0x300000, kIo2Window = 0x100000;      // A19 = OTTO, ESP
 constexpr uint32_t kHostBase = 0x400000, kHostWindow = 0x800000;    // DECISION T4: OTTO banks 2-3
-constexpr uint16_t kReferenceRest = 800;  // DECISION T8 (provisional, Task 6): mux Y7, the reference
+constexpr uint8_t kMuxSelect[kAnalogCount] = {0, 2, 3, 4, 5, 6, 7};  // Hardware facts: U69 Y0, Y2-Y7 (Y1 n.c.)
 }  // namespace
 
 Machine::Region Machine::decode(uint32_t a) {
@@ -37,8 +37,8 @@ std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err) {
     m->duart_.setExternalClock(4, 500'000);
     m->duart_.setExternalClock(5, 1'000'000);
     m->duart_.setExternalClock(2, 1'000'000);
-    m->duart_.setInputPins(0x3F);
-    m->mux_[7] = kReferenceRest;
+    m->duart_.setInputPins(0x3F);  // DECISION T10: empty drive: no index pulse on IP0 (DSTAT); IP1, IP2 high
+    for (int i = 0; i < kAnalogCount; ++i) m->mux_[kMuxSelect[i]] = kAnalogRest[i];
     m->powerOn();
     return m;
 }
@@ -57,9 +57,23 @@ void Machine::powerOn() {
 }
 
 void Machine::setAnalog(Analog a, uint16_t raw10) {
-    static constexpr uint8_t kSelect[] = {0, 2, 3, 4, 5, 6, 7};  // Hardware facts: U69 Y0, Y2-Y7 (Y1 n.c.)
-    mux_[kSelect[static_cast<int>(a)]] = static_cast<uint16_t>(raw10 & 0x3FF);
+    const int i = static_cast<int>(a);
+    if (i < 0 || i >= kAnalogCount) return;
+    mux_[kMuxSelect[i]] = std::min<uint16_t>(raw10, 0x3FF);  // a "max" request beyond 10 bits stays max
     updateLines();
+}
+
+// Hardware facts: IEXP (U12/A) D0 FSW3B/, D1 FSW4B/, D2 PSRB/, D3 PSLB/, active low.
+void Machine::footswitch(int n, bool down) {
+    if (n != 3 && n != 4) return;
+    const uint8_t bit = static_cast<uint8_t>(1u << (n - 3));
+    iexpDown_ = static_cast<uint8_t>(down ? iexpDown_ | bit : iexpDown_ & ~bit);
+}
+
+void Machine::patchSelect(int side, bool down) {
+    if (side != 0 && side != 1) return;
+    const uint8_t bit = side == 0 ? 0x08 : 0x04;
+    iexpDown_ = static_cast<uint8_t>(down ? iexpDown_ | bit : iexpDown_ & ~bit);
 }
 
 uint8_t Machine::romByte(uint32_t off) const {
@@ -137,8 +151,8 @@ uint8_t Machine::ioRead(Region r, uint32_t a) {
     case Region::Otto: return odd ? board_.otto().read(static_cast<uint8_t>((a >> 1) & 0x3F)) : 0;
     case Region::Esp: return odd ? board_.esp().hostRead(static_cast<uint8_t>((a >> 1) & 0xFF)) : 0;
     case Region::Fdc: return odd ? fdc_.read((a & 2) != 0) : 0;  // FDC A0 = CPU A1
-    case Region::Iexp: return 0xFF;  // DECISION T9 (provisional, Task 6): nothing pressed, upper bits high
-    default: return 0;               // DECISION T12: SCSI (no board) and unmapped space read 0
+    case Region::Iexp: return static_cast<uint8_t>(0xFF & ~iexpDown_);  // DECISION T9: upper bits high
+    default: return 0;  // DECISION T12: SCSI (no board) and unmapped space read 0
     }
 }
 

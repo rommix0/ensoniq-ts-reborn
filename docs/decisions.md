@@ -707,7 +707,7 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: which DUART pins carry which board signal.
 - Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (immediate conversion); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. OP3 is SEQLED/, the Seqs/Songs LED (T15); OP4 KRES, OP5 DRES and OP7 SACK/ go to the panel (T19).
 - Evidence: schematic sheet 1 (DUART U10 pin list); the core's `outputPins()` returns the pin level, the inverse of OPR.
-- Confidence: High for the signals. Medium for the OP6 polarity: with it the OS halts the ESP at 1.3 ms, downloads to it while halted and releases it at 8.06 s; the reverse polarity runs the ESP during the downloads and leaves it halted after the boot (Task 4).
+- Confidence: High for the signals. Medium for the OP6 polarity: with it the OS halts the ESP at 1.3 ms, downloads to it while halted and releases it at 1819 ms (halted again from 3301 to 3376 ms, then running; Task 6 measurement); the reverse polarity runs the ESP during the downloads and leaves it halted after the boot (Task 4).
 - Status: implemented in `Machine::updateLines` (Plan 3 Task 3).
 
 ## T14: RESET instruction
@@ -738,26 +738,26 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Confidence: Low (nothing in the boot needs them; a later timing-sensitive path might).
 - Status: Plan 3 Task 4: nothing implemented.
 
-## T8: Analog inputs (provisional)
-- Options: the resting raw value of each mux input.
-- Choice: until Task 6: the reference (Y7, select 7) reads 800, every other input 0.
-- Evidence: with the reference at 0 the OS divides by the PAR reading (vector 5, "SYSTEM ERROR 130") at about 8.08 s; 1, 200, 800 and 1023 all boot. 800 is 200 in the top 8 bits, the middle of the service manual's 180-220.
-- Confidence: Placeholder.
-- Status: `kReferenceRest` in `Machine::create` (Plan 3 Task 4); Task 6 settles all resting values. `Machine::setAnalog` (Task 6's interface) arrived in Task 5 so `ts_key_sounds` can raise the Volume slider: at 0 the TS is silent, and the Data Entry slider at 0 keeps rewriting the selected value at its minimum.
+## T8: Analog inputs
+- Options: the resting raw value of each mux input; how the mux select reaches the conversion; what `setAnalog` does with a value beyond 10 bits.
+- Choice: `kAnalogRest`: pitch wheel 0x200 (PTCH=064), mod wheel 0 (MOD=000), volume 0x3FF (VOL=127), CV pedal 0x3FF (PED=127, unplugged), data entry 0x14E (KNOB=127), battery 0 (BAT=000), reference 0x324 (REF=200). The mux switches at once; the OTTO's conversion (OT16) takes the select in force when it ends. `setAnalog` clamps to 0-1023 and ignores an input outside the enum.
+- Evidence: the Analog Test page (hold Presets, press Compare; service manual p28) read with one input stepped at a time (docs/ts-hardware-interface.md, "Analog inputs"). The manual's expected readings: wheels and sliders 000 down / 127 (KNOB 255) up, PED=127 with no pedal, BAT below 010, REF 180-220. The OS reads PAR every 2 ms and changes the select 30 µs after the read, so the conversion (0.54 ms) ends on the new select and each read returns the input selected 2 ms before. The pitch wheel's centre is its power-on value. A battery raw of 458 or more stops the boot at the low-battery warning. Data entry at exactly 0 makes the OS rewrite the selected value at its minimum (and "SYSTEM ERROR 144" on the Analog Test page); 1 and up are quiet. Volume at 0 is silent. Clamping: a host asking for 1024 or 0xFFFF means "all the way up".
+- Confidence: High for the path and the select table; medium for the resting values (real voltages unknown; each gives the manual's reading).
+- Status: implemented in `kAnalogRest`, `Machine::create`, `Machine::setAnalog` (Plan 3 Task 6); `tsemu boot --analog NAME=raw`. Tests: ts_cold_boot_is_clean, ts_analog_resting_values, ts_slider_moves_volume, ts_key_sounds.
 
-## T9: IEXP port (provisional)
-- Options: the value read at 0x2C0001 with nothing pressed.
-- Choice: 0xFF until Task 6 (D0-D3 high = nothing pressed, active low; upper bits high).
-- Evidence: schematic (D0-D3 active low); the OS reads it once per 1 ms tick from about 1 s.
-- Confidence: Low for the upper bits.
-- Status: `Machine::ioRead` (Plan 3 Task 4); Task 6 settles it.
+## T9: IEXP port
+- Options: the value read at 0x2C0001; D4-D7 high, low or floating; which footswitch number is which contact.
+- Choice: `0xFF & ~down`: D0 FSW3B/ (`footswitch(3)`, Foot Switch 2 right), D1 FSW4B/ (`footswitch(4)`, Foot Switch 2 left), D2 PSRB/ (`patchSelect(1)`), D3 PSLB/ (`patchSelect(0)`), low = pressed; D4-D7 high.
+- Evidence: schematic (U12/A, D0-D3 active low). The OS sends the patch selects as MIDI controller 70 (left 0x40, right 0x20, both 0x7F, none 0) and, with SW2-R=SUSTAIN, D0 as controller 64 while D1 needs SW2-L. Upper nibbles 0x0, 0x5, 0x7, 0xA, 0xE and 0xF give the same bus trace apart from the IEXP values: the OS masks them (docs/ts-hardware-interface.md, "IEXP port").
+- Confidence: High for D0-D3; D4-D7's real level unknown but unobservable.
+- Status: implemented in `Machine::footswitch`, `Machine::patchSelect`, `Machine::ioRead` (Plan 3 Task 6). Tests: ts_iexp_inputs, ts_patch_select_is_read, ts_footswitch2_is_read.
 
-## T10: Floppy controller (provisional)
-- Options: no FDC (status 0), a static status, a uPD765 command/result handshake.
-- Choice: until Task 6: `ens::ts::Fdc`, RQM always, DIO/CB while result bytes wait, uPD765 command lengths, empty-drive results (Sense Interrupt Status ST0 0x80, Sense Drive Status ST3 = drive bits only, reads "not ready"); writes to A0 = 0 ignored. No index pulse on IP0 (empty drive).
-- Evidence: status 0 makes the OS time out after 34 ms; a static 0x80 makes it wait about 0.9 s for a result; with the handshake the OS reads its results and then waits about 0.9 s for an IP0..IP3 change in IPCR (toggling IP0 ends it at once). The OS's two ILLEGAL instructions come in every variant (docs/ts-hardware-interface.md, "Floppy controller").
-- Confidence: Low.
-- Status: `src/ts/fdc.h` (Plan 3 Task 4); Task 6 settles the empty drive.
+## T10: Floppy controller and the empty drive
+- Options: no FDC (status 0), a static status, a uPD765 command/result handshake; index pulses or none; the DSKCHG and DENS levels; the ST3 and ST0 an empty drive gives.
+- Choice: `ens::ts::Fdc`: RQM always, CB while a command is open, DIO/CB while result bytes wait; uPD765 command lengths; Sense Interrupt Status ST0 0x80 (no interrupt), Sense Drive Status ST3 = drive bits only, reads "not ready"; A0 = 0 writes (the 72069's own registers) ignored. No index pulse on IP0 (DSTAT); IP1 (DSKCHG) and IP2 (DENS) high.
+- Evidence: with no index pulse the OS's drive check (Sense Drive Status, then 300 000 IPCR polls for a change on IP0-IP3) fails, and a disk command from the panel shows "DISK DRIVE NOT READY", the Musician's Manual's "No disk in the drive", then the disk page; at boot it goes on silently. Index pulses give "DISK DRIVE NOT RESPONDING" instead. IP1/IP2 levels, ST3 values (0x00-0x70) and ST0 0xC0 + PCN change nothing with the drive empty. Status 0 or a static 0x80 make the OS time out (Task 4). Details: docs/ts-hardware-interface.md, "Floppy controller and the empty drive".
+- Confidence: High for the empty-drive behaviour (no index pulse, the no-disk message); low for ST3, ST0 and the IP1/IP2 levels, which an empty drive cannot show.
+- Status: `src/ts/fdc.h`, `Machine::create` (input pins) (Plan 3 Tasks 4 and 6). Tests: ts_floppy_reports_no_disk, ts_cold_boot_is_clean.
 
 ## T12: SCSI and unmapped space
 - Options: reads of the SCSI block (no board) and of unmapped space return 0 or open-bus 0xFF.

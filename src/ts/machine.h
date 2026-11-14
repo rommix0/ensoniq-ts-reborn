@@ -29,12 +29,15 @@ struct BusEvent {
     Device dev;
 };
 
-// The analog mux inputs (U69 Y0-Y7 without the unconnected Y1); the interface of plan 3 Task 6, which
-// settles their resting values (T8).
+// The analog mux inputs (U69 Y0-Y7 without the unconnected Y1); resting values in kAnalogRest (T8).
 enum class Analog : uint8_t { PitchWheel, ModWheel, Volume, CvPedal, DataEntry, Battery, Reference };
+constexpr int kAnalogCount = 7;
+// DECISION T8: the raw 10-bit value each input holds from power-on, in Analog order (docs/ts-hardware-interface.md,
+// "Analog inputs").
+constexpr uint16_t kAnalogRest[kAnalogCount] = {0x200, 0x000, 0x3FF, 0x3FF, 0x14E, 0x000, 0x324};
 
 constexpr uint32_t kCpuHz = 15'238'090, kDuartHz = 4'000'000;  // DECISION T1
-constexpr uint32_t kBootMs = 5'200;                            // firmware tests: boot end (3457 ms) + 50 %
+constexpr uint32_t kBootMs = 5'300;                            // firmware tests: boot end (3491 ms) + 50 %
 constexpr int kSlotClocks = 16;                                // OTTO: 16 CLKs per voice (notes §4)
 constexpr int kPanelChannel = 1;                               // DECISION T7: DUART B is the display/keyboard link
 constexpr int kMidiChannel = 0;                                // DECISION T7: DUART A is MIDI
@@ -55,7 +58,11 @@ public:
     void button(Button b, bool down) { panel_.button(b, down); }
     void key(int note, bool down, int velocity) { panel_.key(note, down, velocity); }
     void pressure(int note, int amount) { panel_.pressure(note, amount); }
-    void setAnalog(Analog a, uint16_t raw10);  // a raw 10-bit conversion, 0-1023, from the next mux select
+    void setAnalog(Analog a, uint16_t raw10);  // a raw 10-bit conversion, clamped to 0-1023 (T8)
+    // IEXP inputs (T9): n = 3 or 4 (Foot Switch 2's contacts; 1 and 2 go through the keyboard as buttons),
+    // side 0 = left, 1 = right patch select button. Read by the OS on its next IEXP poll.
+    void footswitch(int n, bool down);
+    void patchSelect(int side, bool down);
     m68k::Cpu& cpu() { return cpu_; }
     Board& board() { return board_; }
     duart::Duart& duart() { return duart_; }
@@ -99,8 +106,8 @@ private:
     static constexpr uint32_t kRamBytes = 0x40000;  // DECISION T13: OSRAM 256 KB (SEQEXP, the SQX-70, not fitted)
     std::vector<uint8_t> ram_ = std::vector<uint8_t>(kRamBytes, 0);
     bool overlay_ = true;  // reads of 0-7 come from the ROM until the first write there
-    // The POT multiplexer's inputs by select (DUART OP2..OP0); only the reference is set (T8), Task 6 does the rest.
-    std::array<uint16_t, 8> mux_{};
+    std::array<uint16_t, 8> mux_{};  // the POT multiplexer's inputs by select (DUART OP2..OP0), T8
+    uint8_t iexpDown_ = 0;           // IEXP D0-D3 held low (pressed), T9
     int ottoLevel_ = 1, duartLevel_ = 3;
     int carry_ = 0;  // CPU cycles run past the end of the last slot
     uint32_t duartAcc_ = 0;
