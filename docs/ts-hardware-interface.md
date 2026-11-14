@@ -597,14 +597,21 @@ Both now rest elsewhere ("Analog inputs").
   not for later ones; why is not known.
 - A warm boot (the battery RAM kept) keeps the System settings but always starts on U0-0, as a cold
   boot does.
+- Aux output: after the boot, Track Effects shows row 0 `BUS    GENESIS     GENESIS     GENESIS`
+  and row 1 `VOICE` for tracks 1-3, track 1's underlined. Up steps track 1's Effects Bus Routing
+  through `-FX1-`, `-FX2-`, `-DRY-` to `-AUX-`. Then `90 3C 7F` on channel 1 sounds on Aux (machine
+  `auxL`/`auxR`, OTTO ch3) at peaks 0.2207 L and 0.0406 R (engine floats at 48 kHz), with Main at
+  0.0001. With the boot's VOICE routing, Aux stays silent for programs 0-59.
 
 **How found.** The MIDI tests (`tests/test_ts_firmware.cpp`) and the scratch harness, sending each
 program change and reading the display. The selection bytes by pressing the buttons through the
-engine and reading MIDI out (`tests/test_app_engine.cpp`); the warm boot by loading a booted
+engine and reading MIDI out (`tests/test_app_engine.cpp`); the Aux route by pressing Track Effects
+and Up through the processor and reading the display and Aux (`app/tests/app_tests.cpp`); the warm boot by loading a booted
 machine's RAM image into a fresh one and reading its pages.
 
 **Confidence.** High; low for when the OS answers a MIDI-in program change. **MAME.** Not compared.
 
 **Tests.** ts_midi_rate, ts_midi_note_sounds, ts_midi_burst_no_overrun,
 ts_program_change_changes_display, ts_render_is_deterministic, engine_tracks_panel_pick,
-engine_restores_bank_and_preset, engine_restores_program_after_warm_boot, engine_program_seq_and_adopt.
+engine_restores_bank_and_preset, engine_restores_program_after_warm_boot, engine_program_seq_and_adopt,
+processor_aux_bus_off_mixes_into_main (app_tests).

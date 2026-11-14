@@ -13,6 +13,7 @@
 #include "../source/MemoryFile.h"
 #include "../source/Processor.h"
 #include "../source/RomFolder.h"
+#include "ts/panel.h"
 
 namespace {
 
@@ -188,9 +189,11 @@ void romsBesideApp(const juce::File& dir) {
     beside.deleteRecursively();
 }
 
-// processor_aux_bus_off_mixes_into_main (A109): two processors get the same blocks and, after the boot,
-// 90 3C 7F; the one with Aux disabled plays on Main exactly the other's Main + Aux. A 1000-frame block,
-// over the 480 prepared, takes the Aux-off path's pieces.
+// processor_aux_bus_off_mixes_into_main (A109): two processors get the same blocks. After the boot the
+// running OS routes track 1 to the Aux outputs (Track Effects, Effects Bus Routing stepped with Up from
+// VOICE to -AUX-), then both get 90 3C 7F. The one with Aux disabled plays on Main exactly the other's
+// Main + Aux, and Aux sounds on both sides. A 1000-frame block, over the 480 prepared, takes the Aux-off
+// path's pieces.
 void auxBusOff(const juce::File& dir) {
     if (!haveRoms()) return;
     setSettingsDir(dir);
@@ -199,13 +202,12 @@ void auxBusOff(const juce::File& dir) {
     CHECK(on.getBusCount(false) == 2 && on.getTotalNumOutputChannels() == 4);  // both enabled outside the Standalone
     CHECK(off.disableNonMainBuses() && off.getTotalNumOutputChannels() == 2);
     CHECK(off.engine() != nullptr && on.engine() != nullptr);
-    if (!off.engine()) std::printf("  rom error: %s\n", off.romError().toRawUTF8());
     if (!off.engine() || !on.engine() || off.getTotalNumOutputChannels() != 2) return;
     off.prepareToPlay(48000, 480);
     on.prepareToPlay(48000, 480);
 
     int mismatches = 0;
-    float mainPeak = 0, auxPeak = 0;
+    float mainPeak = 0, auxPeak[2] = {0, 0};
     const auto block = [&](int frames, bool note) {
         juce::AudioBuffer<float> a(2, frames), b(4, frames);
         a.clear();
@@ -222,16 +224,31 @@ void auxBusOff(const juce::File& dir) {
             for (int c = 0; c < 2; ++c) {
                 mismatches += a.getSample(c, i) != b.getSample(c, i) + b.getSample(c + 2, i);
                 mainPeak = std::max(mainPeak, std::abs(b.getSample(c, i)));
-                auxPeak = std::max(auxPeak, std::abs(b.getSample(c + 2, i)));
+                auxPeak[c] = std::max(auxPeak[c], std::abs(b.getSample(c + 2, i)));
             }
+    };
+    const auto press = [&](ens::ts::Button button) {  // held 100 ms, then 300 ms for the display
+        for (bool down : {true, false}) {
+            for (auto* p : {&off, &on})
+                p->engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(button), down, 0});
+            for (int i = 0; i < (down ? 10 : 30); ++i) block(480, false);
+        }
     };
     for (int i = 0; i < 550; ++i) block(480, false);  // the boot: kBootMs 5300 plus a margin
     CHECK(off.engine()->snapshot().booted && on.engine()->snapshot().booted);
+    press(ens::ts::Button::TrackEffects);
+    for (int k = 0; k < 4; ++k) press(ens::ts::Button::Up);  // VOICE, -FX1-, -FX2-, -DRY-, -AUX-
+    for (auto* p : {&off, &on}) {
+        const auto row1 = ens::ts::rowText(p->engine()->snapshot().panel, 1);
+        std::printf("  track effects: [%s]\n", row1.c_str());
+        CHECK(row1.find("-AUX-") != std::string::npos);
+    }
     block(480, true);
     for (int i = 0; i < 49; ++i) block(480, false);  // 500 ms from the note
     block(1000, false);
-    std::printf("  aux bus: mismatches %d, Main peak %.4f, Aux peak %.4f\n", mismatches, mainPeak, auxPeak);
-    CHECK(mismatches == 0 && mainPeak > 0.001f);
+    std::printf("  aux bus: mismatches %d, Main peak %.4f, Aux peak %.4f %.4f\n", mismatches, mainPeak, auxPeak[0],
+                auxPeak[1]);
+    CHECK(mismatches == 0 && auxPeak[0] > 0.001f && auxPeak[1] > 0.001f);
 }
 
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
