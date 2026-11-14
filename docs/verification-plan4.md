@@ -59,11 +59,12 @@ WSL Ubuntu, GCC 13.3, CMake and Ninja. `build-linux` (core) and `build-linux-app
 with no missing package. JUCE's configure reported libcurl and webkit2gtk as not found; the app does not
 use them.
 
-The app's build on Linux uses stricter flags than `-Wall -Wextra` and prints warnings from our own files
-that the MSVC build does not: `-Wfloat-equal` at `app/source/PanelEditor.cpp:331` and in
-`app/tests/app_tests.cpp` (five places), `-Wswitch-enum` at `PanelEditor.cpp:368` (`Battery`, `DataEntry`
-and `Reference` not named), and `-Wsign-conversion` at `src/otto/otto.h:37` (9 times). None changes
-behaviour. See "Left open".
+The Linux app build uses stricter flags than `-Wall -Wextra` (`-Wfloat-equal`, `-Wswitch-enum`,
+`-Wsign-conversion`). It first printed warnings from our own files; they were fixed without changing
+behaviour (`PanelEditor.cpp`, `app_tests.cpp`, `src/otto/otto.h`). After the fix the Linux core and app
+builds print 0 warnings, and so do the MinGW, MSVC and MSVC app builds. `ens_tests` was re-run on all three:
+321 passed, and the boot and render hashes are unchanged. `TSReborn_AppTests` passes on Windows and Linux
+again.
 
 ## Reference hashes
 
@@ -131,8 +132,6 @@ attributes `E7` and `7F`, SACK/, wait states, the CPU clock, the levels.
 
 ## Left open
 
-- The Linux build prints warnings from our own files under the stricter flags (above). The global
-  constraint is none; the fix is small and was not made in this documentation task.
 - The OS's MIDI-out answer to a MIDI-in program change.
 - The disk drive (empty) and the TS-12.
 - Deferred minors of the review rounds, none changing behaviour. Code: the editor test does not check

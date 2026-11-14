@@ -25,6 +25,9 @@
 
 namespace {
 
+// Exact float equality is meant where two identical computations are compared; this form does not trip -Wfloat-equal.
+inline bool feq(float a, float b) { return !(a < b) && !(a > b); }
+
 int failures = 0;
 #define CHECK(c)                                                     \
     do {                                                             \
@@ -191,7 +194,7 @@ void parameters(const juce::File& dir) {
         CHECK(q != nullptr && q->getName(64) == name);
     }
     auto* sound = p.params().getParameter("sound");
-    CHECK(sound != nullptr && sound->convertFrom0to1(0.0f) == 0.0f && sound->convertFrom0to1(1.0f) == 127.0f);
+    CHECK(sound != nullptr && feq(sound->convertFrom0to1(0.0f), 0.0f) && feq(sound->convertFrom0to1(1.0f), 127.0f));
     using ens::ts::Analog;
     const std::pair<Analog, const char*> analogs[] = {{Analog::Volume, "volume"},
                                                       {Analog::DataEntry, "dataEntry"},
@@ -307,7 +310,7 @@ juce::MemoryBlock stateRoundTrip(const juce::File& dir) {
     CHECK(b.engine() != nullptr && rowStarts(b, 0, "U0-5"));
     if (!b.engine()) return s;
     using ens::ts::Analog;
-    CHECK(*b.params().getRawParameterValue("volume") == 0.5f &&
+    CHECK(feq(*b.params().getRawParameterValue("volume"), 0.5f) &&
           b.engine()->machine().analog(Analog::Volume) == ens::app::analogRaw(Analog::Volume, 0.5f));
     press(b, Button::System);
     CHECK(rowStarts(b, 0, "SYSTEM  TUNE=+02"));
@@ -713,7 +716,7 @@ void auxBusOff(const juce::File& dir) {
         on.processBlock(b, mb);
         for (int i = 0; i < frames; ++i)
             for (int c = 0; c < 2; ++c) {
-                mismatches += a.getSample(c, i) != b.getSample(c, i) + b.getSample(c + 2, i);
+                mismatches += !feq(a.getSample(c, i), b.getSample(c, i) + b.getSample(c + 2, i));
                 mainPeak = std::max(mainPeak, std::abs(b.getSample(c, i)));
                 auxPeak[c] = std::max(auxPeak[c], std::abs(b.getSample(c + 2, i)));
             }
@@ -873,7 +876,7 @@ void editor(const juce::File& dir) {
     wheel.mouseDrag(mouse(wheel, to, from));
     CHECK(bend->getValue() > 0.7f);
     wheel.mouseUp(mouse(wheel, to, from));
-    CHECK(bend->getValue() == 0.5f);
+    CHECK(feq(bend->getValue(), 0.5f));
 
     // A115: the front of a key is louder than its back.
     const float back = keyPeak(p, *ed, 60, 5), front = keyPeak(p, *ed, 60, 340);
