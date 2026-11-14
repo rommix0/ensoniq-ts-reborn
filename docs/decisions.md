@@ -526,7 +526,40 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## OTTO
 
-(None yet.)
+## OT1: Host byte latching
+- Options: one latch shared by all registers, or one per register; which byte triggers the read.
+- Choice: byte 0 of a read performs the 32-bit read into one shared latch and returns bits 31:24; bytes 1-3 return the latch. Bytes 0-2 of a write go into one shared latch; a byte-3 write commits latch + byte to the register it addresses on the current page. Latches are 0 after reset and keep their bytes after a commit.
+- Evidence: notes §1 (§13/p39). Whether the latches are shared is not stated.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 1); test otto_byte3_commits_shared_latch.
+
+## OT2: Pages and unused bits
+- Options: PS ignored or not with TEST; what unused bits and the test page read.
+- Choice: PAGE keeps 7 bits; TEST=1 selects the test page whatever PS is. Writes keep each register's implemented bits; reads return them with other bits 0. Test-page reads and EMPTY return 0. Filter temps read back their 18 bits, not sign-extended. PAR and IRQV ignore writes.
+- Evidence: notes §1, §2, §9.11, §9.15.
+- Confidence: Low-medium.
+- Status: implemented (Plan 2 Task 1).
+
+## OT3: Reset state
+- Options: only ACTV and MODE are documented.
+- Choice: ACTV 0x1F, MODE 0x17, PAGE 0, IRQV 0x80 (free), PAR 0, W_ST/W_END/LR_END 0. Each voice: CR 0x0003 (STOP1|STOP0), every other voice register and filter temp 0, FILTCOUNT 0. Channel sums, test-page values and latches 0.
+- Evidence: notes §8; the rest follows KS-32 O10.
+- Confidence: Low.
+- Status: implemented (Plan 2 Task 1).
+
+## OT17: Write timing
+- Options: model the 3-voice pipeline that can overwrite CPU writes, or apply writes at once.
+- Choice: host writes take effect at once.
+- Evidence: notes §4 (§4.1.9/p10, §8/p21 advise writing twice, so firmware tolerates either).
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 1).
+
+## OT18: Serial port and MODE
+- Options: bit-level serial model, or whole frames.
+- Choice: MODE, W_ST, W_END and LR_END are stored and read back; output is whole frames. Dual-OTTO and slave modes are not modelled.
+- Evidence: notes §4, §7. The TS has one OTTO.
+- Confidence: High for the TS.
+- Status: implemented (Plan 2 Task 1).
 
 ## TS machine
 

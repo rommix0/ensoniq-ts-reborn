@@ -1,0 +1,54 @@
+#pragma once
+// ES5506 "OTTO" wave chip core, written from its datasheet
+// (docs/reference/es5506-otto-datasheet-notes.md). Integer-only, no OS calls, no globals.
+#include <cstdint>
+
+namespace ens {
+
+// Sound memory as the chip sees it: four banks of 2M 16-bit words. The board implements it.
+struct OttoMemory {
+    virtual ~OttoMemory() = default;
+    virtual uint16_t read(int bank, uint32_t addr21) = 0;  // bank 0-3, 21-bit word address
+};
+
+struct OttoFrame {
+    int32_t ch[6][2];  // 20-bit signed, [channel][0=L,1=R]
+};
+
+class Otto {
+public:
+    explicit Otto(OttoMemory& mem);
+    void reset();
+
+    // Host bus, notes §1. ha = HA5..HA0: register = ha >> 2 (location / 8), byte = ha & 3, 0 = MSB.
+    uint8_t read(uint8_t ha);
+    void write(uint8_t ha, uint8_t data);
+
+    bool irqAsserted() const { return irqPin_; }  // true = IRQB low
+    int activeVoices() const { return actv_ + 1; }
+    static uint32_t sampleRateHz(uint32_t clkHz, int voices) {  // notes §4: 16 CLKs per voice
+        return clkHz / (16u * static_cast<uint32_t>(voices));
+    }
+
+private:
+    struct Voice {
+        uint32_t cr, fc, lvol, lvramp, rvol, rvramp, ecount, k2, k2ramp, k1, k1ramp;  // pages 00-1F
+        uint32_t start, end, accum;                                                   // pages 20-3F
+        uint32_t o4_1, o3_1, o3_2, o2_1, o2_2, o1_1;  // filter temps, 18 bits as stored
+        uint32_t filtcount;                           // OT15: 3-bit slow-ramp counter
+    };
+
+    uint32_t readReg(uint8_t reg);  // the 32-bit read a byte-0 access performs (with side effects)
+    void writeReg(uint8_t reg, uint32_t v);
+    uint32_t* voiceReg(uint8_t reg, uint32_t& mask);  // the current page's voice register, or nullptr
+
+    OttoMemory& mem_;
+    Voice voice_[32];
+    uint32_t actv_, mode_, wst_, wend_, lrend_, page_, par_, irqv_;
+    uint32_t chTest_[12];  // test-page CH0L..CH5R, 23 bits (OT13)
+    uint8_t wlatch_[3];    // OT1: shared write latch for bytes 0-2
+    uint32_t rlatch_;      // OT1: shared read latch
+    bool irqPin_;
+};
+
+}  // namespace ens

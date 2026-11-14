@@ -33,6 +33,10 @@ add_library(ens_m68k STATIC src/m68k/m68k_decode.cpp src/m68k/m68k_cpu.cpp src/m
   src/m68k/m68k_ops_logic.cpp src/m68k/m68k_ops_flow.cpp src/m68k/m68k_dis.cpp)
 target_link_libraries(ens_m68k PUBLIC ens_common)
 
+# ES5506 OTTO (Plan 2): the TS's wave chip.
+add_library(ens_otto STATIC src/otto/otto.cpp)
+target_link_libraries(ens_otto PUBLIC ens_common)
+
 # MC68681 DUART: the TS's serial and timer chip.
 add_library(ens_duart STATIC src/duart/duart.cpp)
 target_link_libraries(ens_duart PUBLIC ens_common)

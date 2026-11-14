@@ -15,10 +15,11 @@ set(ENS_TEST_SOURCES
   test_m68k_irq.cpp
   test_m68k_dis.cpp
   test_duart.cpp
+  test_otto_regs.cpp
 )
 
 add_executable(ens_tests ${ENS_TEST_SOURCES})
-target_link_libraries(ens_tests PRIVATE ens_esp ens_m68k_harte ens_m68k ens_duart ens_common)
+target_link_libraries(ens_tests PRIVATE ens_otto ens_esp ens_m68k_harte ens_m68k ens_duart ens_common)
 target_compile_definitions(ens_tests PRIVATE ENS_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
   ENS_ROM_DIR="${ENS_ROM_DIR}" _CRT_SECURE_NO_WARNINGS)
 add_test(NAME ens_tests COMMAND ens_tests)
