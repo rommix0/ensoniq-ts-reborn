@@ -182,6 +182,29 @@ From the plan's ledger, with the cost if wrong:
 - Display attributes `E7` and `7F` (effect unknown); SACK/'s role (low confidence); wait states (T6)
   if a timing-sensitive path shows up; the CPU clock (T1) is loosely pinned.
 - Levels: the bit alignment of the OTTO-to-ESP and Aux paths (T11) is a guess until heard.
+- A threading contract in `machine.h`: every `Machine` call from one thread.
+
+## Deferred minors
+
+Review findings judged safe to leave; none changes emulation output.
+
+- Code: the osLow size error names only 524288 though 262144 is valid; `sat16` clamp unreachable for
+  20-bit input; `kAnalogCount` not `static_assert`ed to the enum, no `DECISION T8` tag at the clamp; the
+  keyboard's FF reply bypasses the panel queue's drop count; SACK/ sampled only at byte boundaries;
+  display bytes written while DRES is high; on a stock machine a loaded image's SEQEXP half is kept
+  as-is (harmless).
+- Tests: SER2/SER3 routing untested; `drops_ch4_ch5` passes trivially; the vector-4 check allows any
+  count of 0x4AFC (2 would catch a reboot loop); no boot test scans channel B for SYSTEM ERROR text;
+  the warm-boot test lacks the fault-vector check; `ts_footswitch2_is_read` does not prove FSW4 is the
+  left contact; `machineWith` dereferences null when `create` fails; a wrong-size load does not assert
+  `read() == 0`; the byte-order test passes silently without ROMs; `ts_firmware.h` includes
+  `ts_render.h` only for `runMs`.
+- Docs: several hardware-doc sections lack the Alternatives heading; T entries out of id order; OT9
+  confidence "low" vs "medium-low"; D1 confidence differs between the doc and T18; T13 should cite
+  the 621001 (128K x 8) for 256 KB; the play-screen test's BABY-GRAND comment; the stale
+  `CMakeLists.txt:44` comment; a "Battery RAM" sentence on the kept SEQEXP half.
+- `tsemu`: boot always prints display and LED lines; the cold-start line says the image is written at
+  the end of a full run though `bench` never writes back; a few lines over 120 columns.
 
 ## User to run
 
