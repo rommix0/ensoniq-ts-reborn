@@ -515,14 +515,14 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Choice: (b), 1024 bytes per DUART channel (`ByteRing<1024> pending`, `src/common/ring.h`). A byte that finds the queue full is dropped and counted in `Duart::rxDropped(ch)`; the count clears on reset, like `overruns`.
 - Evidence: Plan 7's real-time constraint and ruling F-1 of `docs/verification-plan6.md`. At 31 250 baud the line carries about 3 125 bytes a second, so 1024 bytes is about 330 ms of back-to-back MIDI, far more than one audio block brings. The queue stands for the MIDI cable, which has no buffer of its own, so the bound is an emulator choice, not a hardware fact.
 - Confidence: High.
-- Status: settled, Plan 7 Task 1. `// DECISION A1` at `Channel::pending` (`src/duart/duart.h`) and in the test. Test: duart_rx_queue_is_bounded; Plan 6's hashes are unchanged.
+- Status: settled, Plan 7 Task 1. `// DECISION A1` at `Channel::pending` (`src/duart/duart.h`) and in the test. Test: duart_rx_queue_is_bounded; rt_machine_runframe_does_not_allocate (`tests/rt_main.cpp`) shows the TS machine allocates nothing after the boot.
 
 ## A2: Transmit and panel rings
 - Options: (a) take-by-swap vectors (Plan 6), which allocate every slot; (b) fixed rings that drop the newest byte when full and count it.
 - Choice: (b). The DUART's sent-characters ring holds 256 per channel (`Duart::popTransmitted`, `Duart::txDropped`), and the panel's bytes for the firmware 256 (`Panel::popToCpu`). `Machine::slot` drains the panel channel both ways every slot; the caller pops MIDI out with `Machine::popMidiOut` (the engine every block, Task 2; `ks32emu` every frame).
 - Evidence: a slot is 16 CPU clocks (about 1 us), and one character takes about 300 slots at 31 250 baud, so the panel rings never hold more than a few bytes; 256 bytes of MIDI out is about 80 ms of the line. The order is the old FIFO's, so the boot trace, render and smoke PCM hashes are unchanged (d2afd0fed8861cbd, 2bae46b3acc34cd0, a479ba867298cc55).
 - Confidence: High.
-- Status: settled, Plan 7 Task 1. `// DECISION A2` at `Channel::sent` (`src/duart/duart.h`), `Panel::toCpu_` (`src/ks32/panel.h`) and `Machine::slot` (`src/ks32/machine.cpp`). Tests: duart_pop_transmitted_in_order, panel_pop_to_cpu, rt_machine_runframe_does_not_allocate.
+- Status: settled, Plan 7 Task 1. `// DECISION A2` at `Channel::sent` (`src/duart/duart.h`), `Panel::toCpu_` (`src/ts/panel.h`) and `Machine::slot` (`src/ts/machine.cpp`). Tests: duart_pop_transmitted_in_order, panel_pop_to_cpu, rt_machine_runframe_does_not_allocate (`tests/rt_main.cpp`).
 
 ## OTTO
 

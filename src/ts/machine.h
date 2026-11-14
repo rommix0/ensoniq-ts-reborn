@@ -42,6 +42,8 @@ constexpr int kSlotClocks = 16;                                // OTTO: 16 CLKs 
 constexpr int kPanelChannel = 1;                               // DECISION T7: DUART B is the display/keyboard link
 constexpr int kMidiChannel = 0;                                // DECISION T7: DUART A is MIDI
 
+// Threading: every call on one Machine comes from one thread at a time; the engine owns it on the audio
+// thread after the boot. Nothing in runFrame or the input calls allocates (tests/rt_main.cpp).
 class Machine : public m68k::Bus {
 public:
     // nullptr on a wrong ROM size, with err naming the file. DECISION T13: a stock TS-10 (design section 4)
