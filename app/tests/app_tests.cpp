@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <thread>
 
 #include "../source/AppSettings.h"
@@ -495,6 +496,165 @@ void soundFollowsPanel(const juce::File& dir) {
     CHECK(snap.program == 1 && snap.programsSent == 0);
 }
 
+// Runs a hook when a gesture on the parameter starts. tick() opens its gesture after it has read the
+// snapshot and stored the marker, and before it writes `sound`, so the hook stands in for an audio thread
+// that runs blocks inside tick()'s writes.
+struct GestureHook : juce::AudioProcessorParameter::Listener {
+    std::function<void()> onBegin;
+    void parameterValueChanged(int, float) override {}
+    void parameterGestureChanged(int, bool starting) override {
+        if (!starting || !onBegin) return;
+        const auto f = std::move(onBegin);
+        onBegin = nullptr;
+        f();
+    }
+};
+
+// follow (A111, as KS-32 A18) on the real ROMs: panel and MIDI picks are followed into `sound` and never
+// sent back, also when the machine moves on while tick() writes; two host changes of `sound` a block
+// apart are sent exactly twice and a tick against the stale snapshot does not undo them.
+void follow(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    juce::AudioBuffer<float> buf(4, 480);
+    juce::MidiBuffer midi;
+    auto* sound = p.params().getParameter("sound");
+    const auto block = [&](int n, bool tick = true) {  // n blocks of 10 ms, tick() after each
+        for (int i = 0; i < n; ++i) {
+            buf.clear();
+            p.processBlock(buf, midi);
+            midi.clear();
+            if (tick) p.tick();
+        }
+    };
+    const auto snap = [&] { return p.engine()->snapshot(); };
+    block(kBoot / 10);
+    CHECK(snap().program == 0);
+
+    // (i) The panel: Soft2, then Soft3 (U0-0's second and third sounds, programs 1 and 2).
+    for (const auto b : {ens::ts::Button::Soft2, ens::ts::Button::Soft3}) {
+        p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), true, 0});
+        block(10);
+        p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), false, 0});
+        block(30);
+    }
+    CHECK(snap().programsSent == 0 && soundOf(p) == 2 && snap().program == 2);
+    // MIDI in: two program changes one block apart; program 6 is U0-1's first sound.
+    midi.addEvent(juce::MidiMessage(0xC0, 5), 0);
+    block(1);
+    midi.addEvent(juce::MidiMessage(0xC0, 6), 0);
+    block(1);
+    block(50);
+    CHECK(snap().programsSent == 0 && soundOf(p) == 6 && rowStarts(p, 0, "U0-1"));
+
+    // (ii) The machine moves on inside tick()'s writes: C0 07 has landed and tick() follows it, but before
+    // `sound` reads 7 the hook runs blocks in which C0 08 lands. The block after takes 7 with its marker
+    // and adopts it: nothing is sent, the machine stays on 8, and the next ticks follow 8.
+    GestureHook hook;
+    sound->addListener(&hook);
+    midi.addEvent(juce::MidiMessage(0xC0, 7), 0);
+    block(30, false);
+    CHECK(snap().program == 7 && soundOf(p) == 6);
+    hook.onBegin = [&] {
+        midi.addEvent(juce::MidiMessage(0xC0, 8), 0);
+        block(30, false);
+    };
+    p.tick();
+    CHECK(soundOf(p) == 7 && snap().program == 8);
+    block(1, false);
+    std::printf("  follow race: sent %u, program %d\n", snap().programsSent, snap().program);
+    CHECK(snap().programsSent == 0 && snap().program == 8);
+    block(30);
+    CHECK(snap().programsSent == 0 && soundOf(p) == 8 && snap().program == 8);
+    sound->removeListener(&hook);
+
+    // (iii) The host: sound 13, then 14 (U0-2's second and third sounds), a block apart.
+    const auto host = [&](int n) { sound->setValueNotifyingHost(sound->convertTo0to1(static_cast<float>(n))); };
+    host(13);
+    block(1, false);  // no tick yet: the snapshot says 13 while the host is about to say 14
+    host(14);
+    p.tick();  // a stale snapshot (program 13) must not write `sound` back
+    CHECK(soundOf(p) == 14);
+    block(1);
+    CHECK(soundOf(p) == 14);
+    block(80);
+    std::printf("  follow host: sent %u, sound %d, program %d\n", snap().programsSent, soundOf(p), snap().program);
+    CHECK(snap().programsSent == 2 && soundOf(p) == 14 && snap().program == 14 && rowStarts(p, 0, "U0-2"));
+}
+
+// A state on R2-2 with TUNE=+02. R2-2 is `B0 00 00 20 02 C0 0E`: program 14 in bank LSB 2. Program 14
+// alone is U0-2's third sound, so a restore that drops the bank lands on U0-2 and one that keeps it on
+// R2-2. Returns the state for the checks after it (empty when skipped).
+juce::MemoryBlock bankState(const juce::File& dir) {
+    if (!realRoms(dir)) return {};
+    using ens::ts::Button;
+    TsProcessor a;
+    if (!a.engine()) return {};
+    a.prepareToPlay(48000, 480);
+    run(a, kBoot);
+    press(a, Button::System);
+    press(a, Button::Up);
+    press(a, Button::Up);
+    CHECK(rowStarts(a, 0, "SYSTEM  TUNE=+02"));
+    press(a, Button::Sounds);
+    press(a, Button::BankSet);
+    press(a, Button::BankSet);
+    press(a, Button::Bank2);
+    press(a, Button::Soft3);
+    const auto s = stateOf(a);
+    std::printf("  bank state: [%s], select %s\n", ens::ts::rowText(a.engine()->snapshot().panel, 0).c_str(),
+                selectOf(s).toRawUTF8());
+    CHECK(rowStarts(a, 0, "R2-2") && selectOf(s).equalsIgnoreCase("b000002002c00e"));
+    return s;
+}
+
+// bank_survives_restarts (A105, A117; as KS-32 int00Restarts): R2-2 comes back from a state, across a
+// ROM-folder change and across a new memory file; Erase then gives a cold machine on U0-0 with `sound` 0,
+// nothing sent.
+void bankRestores(const juce::File& dir, const juce::MemoryBlock& s) {
+    if (s.isEmpty() || !realRoms(dir)) return;
+    TsProcessor b;
+    b.prepareToPlay(48000, 480);
+    b.setStateInformation(s.getData(), static_cast<int>(s.getSize()));
+    run(b, kRestored);
+    CHECK(rowStarts(b, 0, "R2-2"));
+    juce::String err;
+    CHECK(b.setRomFolder(juce::File(TSR_ROM_DIR), err));  // restart(Keep)
+    run(b, kRestored);
+    CHECK(rowStarts(b, 0, "R2-2"));
+    const auto file = dir.getChildFile("r2.bin");
+    CHECK(saveMemoryFile(file, ramOf(s)) && b.setMemoryFile(file, err));  // restart(File)
+    run(b, kRestored);
+    CHECK(rowStarts(b, 0, "R2-2"));
+    if (!b.engine()) return;
+
+    auto* sound = b.params().getParameter("sound");
+    sound->setValueNotifyingHost(sound->convertTo0to1(5.0f));
+    run(b, 500);
+    CHECK(b.engine()->snapshot().program == 5);
+    b.eraseMemory();
+    CHECK(soundOf(b) == 0);
+    run(b, kRestored);
+    CHECK(rowStarts(b, 0, "U0-0") && b.engine()->snapshot().programsSent == 0);
+}
+
+// standalone_state_before_boot (A117, as KS-32 A23): a File processor given a Project state (R2-2,
+// TUNE=+02) before its first block comes back on R2-2, its memory still the file's (none here: cold, so
+// TUNE=+00).
+void standaloneStateBeforeBoot(const juce::File& dir, const juce::MemoryBlock& s) {
+    if (s.isEmpty() || !realRoms(dir)) return;
+    TsProcessor p(MemoryMode::File);
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    p.setStateInformation(s.getData(), static_cast<int>(s.getSize()));
+    run(p, kRestored);
+    CHECK(rowStarts(p, 0, "R2-2"));
+    press(p, ens::ts::Button::System);
+    CHECK(rowStarts(p, 0, "SYSTEM  TUNE=+00"));
+}
+
 // rom_folder_beside_app: with no folder chosen, a "roms" folder beside the app is taken and stored
 // (the dist layout); a chosen folder wins over it.
 void romsBesideApp(const juce::File& dir) {
@@ -649,6 +809,10 @@ int main() {
     stateThreads(dir.getChildFile("threads"));
     standaloneNoRam(dir.getChildFile("standalone"));
     soundFollowsPanel(dir.getChildFile("follow"));
+    follow(dir.getChildFile("follow2"));
+    const auto r2 = bankState(dir.getChildFile("bank"));
+    bankRestores(dir.getChildFile("bank-restores"), r2);
+    standaloneStateBeforeBoot(dir.getChildFile("standalone-state"), r2);
     romsBesideApp(dir.getChildFile("beside"));
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     vst3(dir.getChildFile("vst3"));
