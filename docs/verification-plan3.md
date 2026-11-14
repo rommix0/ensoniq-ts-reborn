@@ -167,22 +167,24 @@ From the plan's ledger, with the cost if wrong:
 
 ## Left for Plan 4 (the engine and the app)
 
-- The real-time engine around `Machine::runFrame`, with the allocation counter test (no allocation in
-  `runFrame` and below is a rule now, not yet a test).
-- **Data Entry slider never at raw 0**: the OS then rewrites the selected value at its minimum and the
-  Analog Test page shows SYSTEM ERROR 144. The app's slider must map to 1-1023.
-- **MIDI in bursts over 1024 bytes** (a large sysex) are dropped beyond DUART A's wire queue and
-  counted in `duart().rxDropped`, but nothing surfaces them. The engine must pace MIDI in or report it.
-- The battery RAM: the app keeps the image (`ramImage`, `loadRamImage`) in its state and on disk.
-  Loading clears the sample DRAM and the ESP delay DRAM, as a power cycle does.
-- Whether the app offers the SQX-70 (`create(..., sqx70)`) is a Plan 4 choice; the default is stock.
-- Disk: the drive is empty; FDC register writes (A0 = 0, the 72069's own registers) are not modelled.
-  SCSI is absent.
-- An empty SEQEXP socket reads 0, not the board's open bus.
-- Display attributes `E7` and `7F` (effect unknown); SACK/'s role (low confidence); wait states (T6)
-  if a timing-sensitive path shows up; the CPU clock (T1) is loosely pinned.
-- Levels: the bit alignment of the OTTO-to-ESP and Aux paths (T11) is a guess until heard.
-- A threading contract in `machine.h`: every `Machine` call from one thread.
+Status after Plan 4 (`docs/verification-plan4.md`), added when Plan 4 closed:
+
+- The real-time engine around `Machine::runFrame`, with the allocation counter test: **closed.**
+  `rt_machine_runframe_does_not_allocate` and `rt_engine_render_does_not_allocate`.
+- **Data Entry slider never at raw 0**: **closed.** `analogRaw` floors it at 1 (A110;
+  `analog_map_data_entry_never_zero`).
+- **MIDI in bursts over 1024 bytes**: **closed for the app.** The engine's block store holds 1024 bytes,
+  drops and counts the rest, and the tests check the count (A101). A host that sends a large sysex still
+  loses the excess; nothing shows it to the player.
+- The battery RAM kept in the app's state and on disk: **closed** (A116, A117; the memory file and the
+  project state).
+- Whether the app offers the SQX-70: **closed, not offered.** The app runs a stock TS-10.
+- Disk: **still open.** The drive is empty and SCSI is absent.
+- An empty SEQEXP socket reads 0: **still open.**
+- Display attributes `E7` and `7F`, SACK/'s role, wait states (T6) and the CPU clock (T1): **still open.**
+- Levels (T11): **still open**, a listening check.
+- A threading contract in `machine.h`: **closed.** The engine owns the machine on the audio thread and the
+  GUI reads a snapshot (A102, A103).
 
 ## Deferred minors
 
