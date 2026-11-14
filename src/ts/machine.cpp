@@ -48,10 +48,17 @@ void Machine::powerOn() {
     board_.esp().reset();
     duart_.reset();
     fdc_.reset();
+    panel_.reset();
     carry_ = 0;
     duartAcc_ = 0;
     overlay_ = true;
     cpu_.reset();  // the 40 reset cycles count in cycles() and are not slot carry
+    updateLines();
+}
+
+void Machine::setAnalog(Analog a, uint16_t raw10) {
+    static constexpr uint8_t kSelect[] = {0, 2, 3, 4, 5, 6, 7};  // Hardware facts: U69 Y0, Y2-Y7 (Y1 n.c.)
+    mux_[kSelect[static_cast<int>(a)]] = static_cast<uint16_t>(raw10 & 0x3FF);
     updateLines();
 }
 
@@ -106,6 +113,7 @@ void Machine::updateLines() {
     const uint8_t pins = duart_.outputPins();
     board_.esp().setHaltPin((pins & 0x40) != 0);
     board_.otto().setPot(mux_[pins & 7]);
+    panel_.setLines((pins & 0x10) != 0, (pins & 0x20) != 0, (pins & 0x80) != 0);  // DECISION T19: KRES, DRES, SACK/
 }
 
 int Machine::interruptAcknowledge(int level) {
@@ -233,6 +241,14 @@ void Machine::slot(int i, int n) {
     const uint32_t x1 = duartAcc_ / kCpuHz;
     duartAcc_ %= kCpuHz;
     if (x1) duart_.advance(x1);
+    // DECISION T19: the panel takes the bytes that finished leaving TxDB in this slot; the keyboard puts
+    // its next byte on RxDB only when the line is idle, so SACK/ can hold it between bytes.
+    uint8_t byte = 0;
+    while (duart_.popTransmitted(kPanelChannel, byte)) {
+        panel_.fromCpu(byte);
+        if (onPanelByte) onPanelByte(byte);
+    }
+    if (duart_.rxQueued(kPanelChannel) == 0 && panel_.popToCpu(byte)) duart_.receive(kPanelChannel, byte);
     // DECISION T11: while the ESP is halted slot i gets its share of the frame's idle steps.
     Esp& esp = board_.esp();
     if (esp.halted()) {

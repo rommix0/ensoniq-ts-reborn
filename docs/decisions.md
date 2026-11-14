@@ -705,7 +705,7 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## T7: DUART wiring
 - Options: which DUART pins carry which board signal.
-- Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (immediate conversion); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. Panel (OP4, OP5, OP7) and the rest are used from Task 5 on.
+- Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (immediate conversion); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. OP3 is SEQLED/, the Seqs/Songs LED (T15); OP4 KRES, OP5 DRES and OP7 SACK/ go to the panel (T19).
 - Evidence: schematic sheet 1 (DUART U10 pin list); the core's `outputPins()` returns the pin level, the inverse of OPR.
 - Confidence: High for the signals. Medium for the OP6 polarity: with it the OS halts the ESP at 1.3 ms, downloads to it while halted and releases it at 8.06 s; the reverse polarity runs the ESP during the downloads and leaves it halted after the boot (Task 4).
 - Status: implemented in `Machine::updateLines` (Plan 3 Task 3).
@@ -743,7 +743,7 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Choice: until Task 6: the reference (Y7, select 7) reads 800, every other input 0.
 - Evidence: with the reference at 0 the OS divides by the PAR reading (vector 5, "SYSTEM ERROR 130") at about 8.08 s; 1, 200, 800 and 1023 all boot. 800 is 200 in the top 8 bits, the middle of the service manual's 180-220.
 - Confidence: Placeholder.
-- Status: `kReferenceRest` in `Machine::create` (Plan 3 Task 4); Task 6 settles all resting values.
+- Status: `kReferenceRest` in `Machine::create` (Plan 3 Task 4); Task 6 settles all resting values. `Machine::setAnalog` (Task 6's interface) arrived in Task 5 so `ts_key_sounds` can raise the Volume slider: at 0 the TS is silent, and the Data Entry slider at 0 keeps rewriting the selected value at its minimum.
 
 ## T9: IEXP port (provisional)
 - Options: the value read at 0x2C0001 with nothing pressed.
@@ -765,3 +765,38 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Evidence: the OS's SCSI probe at 110 ms (write 0x02 to 0x240001, write and read 0x240003) reads 0, then writes 0x55 and reads 0, and goes on; with 0xFF it stops after the first read. Both boot the same way after that: neither reads as a SCSI board. Nothing unmapped is read in the boot.
 - Confidence: Medium.
 - Status: implemented in `Machine::ioRead` (Plan 3 Task 4).
+
+## T15: LED states
+- Options: what the parameter of `FF nn` carries beyond the LED number (bits 3-0); how `PanelState` holds a flashing LED.
+- Choice: bit 7 = lit, bit 6 = flashing; `PanelState::leds` bit n = LED n lit, bit 16 + n = LED n flashing. 16 LEDs: 0 Bank 0, 1 Presets, 2-5 Bank 2/4/6/8, 6 Replace Track Sound, 7 Seq/Song Tracks 1-6, 8 Bank 1, 9 Sounds, 10-13 Bank 3/5/7/9, 14 Compare, 15 Seq/Song Tracks 7-12. The Seqs/Songs LED is DUART OP3 (SEQLED/), not on the link.
+- Evidence: every page refreshes all 16 (`FF 0F` ... `FF 00`) with bit 7 on the lit ones; `FF C9` appears exactly where the manual says the Sounds LED flashes (Replace Track Sound). OP3 goes low on Seqs/Songs and high on Sounds (docs/ts-hardware-interface.md, "Display and LEDs").
+- Confidence: High for lit and the numbering; medium for flashing.
+- Status: implemented in `Panel::run` (Plan 3 Task 5). Tests: ts_panel_commands, ts_boot_shows_play_screen, ts_button_changes_page.
+
+## T16: Button codes
+- Options: the byte forms of a button event; which code is which button.
+- Choice: press `code | 0x80, 00`, release `code, 00`, codes 0x00-0x3F. `Button` holds the 62 panel buttons and the two Foot Switch 1 contacts (00 right, 01 left), which fill all 64 codes.
+- Evidence: from the play screen every first byte followed by `00` was sent and the display, LEDs and MIDI out compared; each code was named by the page, LED or MIDI message it gives, checked against the Musician's Manual and the service manual's self-test chart (p11); Up/Down on the System page, Record with Play, the foot switch on the System foot-switch page (docs/ts-hardware-interface.md, "Buttons").
+- Confidence: High for the forms and the codes with a page or MIDI message; medium for Compare and the foot switch naming.
+- Status: implemented in `Panel::button`, `kButtons` (Plan 3 Task 5). Tests: ts_panel_button_bytes, ts_panel_button_table, ts_button_changes_page.
+
+## T17: Keys and Poly-Key pressure
+- Options: the byte forms of key and pressure events; what `key()`'s velocity argument is.
+- Choice: key down `0x80 | k, strike`, key up `k, 0x40`, pressure `0x40 | k, amount`, k = note - 36 for the 61 keys C2-C7 (others ignored). `key()` takes the strike value the keyboard sends, clamped to 1-127; the OS maps it through its TOUCH table (VELTBL-4: strike 64 gives velocity 92 on a white key, 84 on a black one, 112 and up give 127).
+- Evidence: MIDI out: note-on `90 (k+36) vel`, note-off `80 (k+36) 40` for any nonzero release byte, aftertouch `A0 (k+36) amount` (docs/ts-hardware-interface.md, "Keys and pressure"). A strike of 0 reads as a button press, so 0 is clamped to 1.
+- Confidence: High for the forms and the mapping; low for what the strike value is physically.
+- Status: implemented in `Panel::key`, `Panel::pressure` (Plan 3 Task 5). Tests: ts_panel_button_bytes, ts_key_sounds, ts_poly_pressure_is_sent.
+
+## T18: Display command set
+- Options: which bytes are characters and which commands; their parameters; what each attribute byte does to the cells written after it.
+- Choice: 0x00-0x7E characters; 0x80-0xCF cursor to position 0-79; `D6` clear; `F5`/`F6` save/restore the cursor; `D4`/`D5` cursor right/left; `D0` flashing, `D1` plain, `D2` flashing underline, `D3` underline for the characters written after them; `E8` lets later characters keep their cells' attributes; `D9`/`DB` set/remove the underline of the cell at the cursor; `7F` and `E7` no effect; `FF nn` LED (T15); `FB nn` keyboard command (T19); anything else counted in `unknown` with no parameter. Past position 79 the cursor wraps to 0 (never seen).
+- Evidence: the boot and a sweep of every button code with the six soft buttons on each page it opens decode with `unknown` 0; field widths fix the zero-width bytes and `D5`; the manual's descriptions of the screens fix the attributes (docs/ts-hardware-interface.md, "Display and LEDs").
+- Confidence: High for text, positions, `D6`, `F5`/`F6`, `D3`, `D5`; medium for `D0`, `D1`, `D2`, `E8`, `D4`, `D9`, `DB`; low for `7F` and `E7` (effect unknown) and 0x00-0x1F (never seen).
+- Status: implemented in `Panel::fromCpu` (Plan 3 Task 5). Tests: ts_panel_commands, ts_boot_shows_play_screen.
+
+## T19: Keyboard start-up and the link lines
+- Options: what the keyboard must send for the OS to accept it; when; what KRES, DRES and SACK/ do.
+- Choice: the keyboard answers `FF` at once to `FB FD` and ignores its other commands (`FB FF`, `FB F0`, `FB DD`, `FB FC`). KRES (OP4) and DRES (OP5) are active-high resets: KRES empties the keyboard's queue and mutes it, DRES blanks the display and LEDs. The keyboard sends only while SACK/ (OP7) is low, one byte at a time when RxDB is idle.
+- Evidence: of all 256 single bytes during "CALIBRATING KEYBOARD", only `FF` ends the OS's wait, and only from the moment it queues `FB FF FB FD` to its next `FB F0`. The OS holds OP4/OP5 high only until 0.24 ms (active-low resets would keep the keyboard in reset). SACK/ goes low just before the first keyboard command and stays low; it pulses high only under a continuous line-rate flood (docs/ts-hardware-interface.md, "Keyboard link").
+- Confidence: High for the `FF` answer and the reset polarity; low for SACK/'s role (ignoring it changes no firmware test) and for what the other keyboard commands mean.
+- Status: implemented in `Panel::run`, `Panel::setLines`, `Panel::popToCpu`, `Machine::slot` and `Machine::updateLines` (Plan 3 Task 5). Tests: ts_panel_lines, ts_boot_shows_play_screen.

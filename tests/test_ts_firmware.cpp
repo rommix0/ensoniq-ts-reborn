@@ -1,8 +1,12 @@
 // The TS-10 OS v3.10 booting on the machine. The firmware is run, never studied: these tests look
-// only at device accesses, exception counts and device state after kBootMs.
+// only at device accesses, exception counts, device state, the panel and MIDI out.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "check.h"
 #include "ts_firmware.h"
@@ -20,7 +24,7 @@ constexpr uint16_t kIllegalOpcode = 0x4AFC;  // ILLEGAL
 
 // What the shared boot did, besides the machine's own counters.
 struct BootSeen {
-    uint32_t txBytes[2] = {0, 0};   // characters sent on DUART channels A and B
+    uint32_t txBytes[2] = {0, 0};   // characters sent on DUART channels A (MIDI) and B (to the panel)
     uint32_t badIllegal = 0;        // vector 4 taken at an opcode other than ILLEGAL
     uint32_t actvWrites = 0;        // byte-3 writes to ACTV (location 0x58 while PAGE < 0x20)
     int lastActv = -1;              // the last value written there
@@ -56,15 +60,16 @@ Machine* bootedTs() {
                 bootSeen.lastActv = e.value;
             }
         };
+        mc.onPanelByte = [](uint8_t) { ++bootSeen.txBytes[kPanelChannel]; };
         const uint64_t end = mc.cycles() + static_cast<uint64_t>(kBootMs) * kCpuHz / 1000;
         Audio a;
         while (mc.cycles() < end) {
             mc.runFrame(a);
-            for (int ch = 0; ch < 2; ++ch)
-                for (uint8_t byte; mc.duart().popTransmitted(ch, byte);) ++bootSeen.txBytes[ch];
+            for (uint8_t byte; mc.duart().popTransmitted(kMidiChannel, byte);) ++bootSeen.txBytes[kMidiChannel];
         }
         mc.cpu().onInstruction = nullptr;
         mc.onBusEvent = nullptr;
+        mc.onPanelByte = nullptr;
         return b;
     }();
     return m.get();
@@ -153,4 +158,111 @@ TEST(ts_two_machines_are_independent) {
     }
     CHECK_EQ(ha.h, bootHash());
     CHECK_EQ(hb.h, bootHash());
+}
+
+// The play screen at kBootMs, as observed from OS v3.10 (docs/ts-hardware-interface.md, "Display and
+// LEDs"): Sounds mode, bank U0-0, its six sounds with BABY-GRAND selected; LEDs 0 (Bank 0) and
+// 9 (Sounds). Every byte of the boot is decoded.
+TEST(ts_boot_shows_play_screen) {
+    Machine* m = bootedTs();
+    if (!m) return;
+    const PanelState& p = m->panel();
+    std::printf("  |%s|\n  |%s|\n", rowText(p, 0).c_str(), rowText(p, 1).c_str());
+    CHECK(rowText(p, 0) == "U0-0 BABY-GRAND   FULL-BODY   BRITE-PNO ");  // as observed
+    CHECK(rowText(p, 1) == "     STEREO-PNO  WARM-GRAND  ALL-PURPOSE");  // as observed
+    CHECK_EQ(p.leds, (1u << 0) | (1u << 9));
+    CHECK_EQ(p.unknown, 0u);
+}
+
+namespace {
+
+// A machine booted for kBootMs on its own, for tests that press buttons or keys; nullptr without ROMs.
+std::unique_ptr<Machine> bootFresh() {
+    auto m = loadTs();
+    if (m) runMs(*m, kBootMs);
+    return m;
+}
+
+void tap(Machine& m, Button b) {
+    m.button(b, true);
+    runMs(m, 60);
+    m.button(b, false);
+    runMs(m, 300);
+}
+
+std::vector<uint8_t> midiOut(Machine& m) {
+    std::vector<uint8_t> out;
+    for (uint8_t b; m.duart().popTransmitted(kMidiChannel, b);) out.push_back(b);
+    return out;
+}
+
+bool contains(const std::vector<uint8_t>& v, std::initializer_list<uint8_t> seq) {
+    return std::search(v.begin(), v.end(), seq.begin(), seq.end()) != v.end();
+}
+
+// Runs ms and returns the largest |sample| of Main L/R.
+int mainPeak(Machine& m, uint32_t ms) {
+    const uint64_t end = m.cycles() + static_cast<uint64_t>(ms) * kCpuHz / 1000;
+    int peak = 0;
+    Audio a;
+    while (m.cycles() < end) {
+        m.runFrame(a);
+        peak = std::max({peak, std::abs(int{a.mainL}), std::abs(int{a.mainR})});
+    }
+    return peak;
+}
+
+}  // namespace
+
+// Mode and page buttons show their pages (T16).
+TEST(ts_button_changes_page) {
+    auto m = bootFresh();
+    if (!m) return;
+    tap(*m, Button::System);
+    std::printf("  |%s|\n", rowText(m->panel(), 0).c_str());
+    CHECK(rowText(m->panel(), 0).compare(0, 12, "SYSTEM  TUNE") == 0);
+    tap(*m, Button::Bank5);
+    std::printf("  |%s|\n", rowText(m->panel(), 0).c_str());
+    CHECK(rowText(m->panel(), 0).compare(0, 4, "U0-5") == 0);
+    CHECK_EQ(m->panel().leds, (1u << 9) | (1u << 11));  // Sounds, Bank 5
+    tap(*m, Button::Presets);
+    CHECK(rowText(m->panel(), 1).compare(0, 4, "PSET") == 0);
+    CHECK_EQ(m->panel().unknown, 0u);
+}
+
+// A key sounds and goes out on MIDI as note 60 (T17). The volume slider is raised first: at its
+// provisional 0 (T8) the TS is silent.
+TEST(ts_key_sounds) {
+    auto m = bootFresh();
+    if (!m) return;
+    m->setAnalog(Analog::Volume, 0x3FF);
+    runMs(*m, 100);
+    midiOut(*m);
+    const int quiet = mainPeak(*m, 200);
+    m->key(60, true, 127);
+    const int loud = mainPeak(*m, 200);
+    const std::vector<uint8_t> on = midiOut(*m);
+    m->key(60, false, 0);
+    runMs(*m, 50);
+    const std::vector<uint8_t> off = midiOut(*m);
+    std::printf("  peak before %d, during %d\n", quiet, loud);
+    CHECK(quiet < 64);
+    CHECK(loud > 1000);
+    CHECK(contains(on, {0x90, 0x3C, 0x7F}));
+    CHECK(contains(off, {0x80, 0x3C, 0x40}));
+}
+
+// Poly-Key pressure of a held key goes out as MIDI polyphonic aftertouch (T17).
+TEST(ts_poly_pressure_is_sent) {
+    auto m = bootFresh();
+    if (!m) return;
+    midiOut(*m);
+    m->key(64, true, 64);
+    runMs(*m, 20);
+    m->pressure(64, 100);
+    runMs(*m, 20);
+    m->pressure(64, 0);
+    runMs(*m, 20);
+    const std::vector<uint8_t> out = midiOut(*m);
+    CHECK(contains(out, {0xA0, 0x40, 100, 0x40, 0}));
 }

@@ -6,7 +6,7 @@ trace, the interrupt acknowledges, the exception counts and what the firmware se
 firmware is run, never studied. Each section gives the fact, how it was found, the alternatives tried,
 the confidence and the decision entry in `docs/decisions.md`.
 
-**How the evidence was gathered (Plan 3 Task 4).**
+**How the evidence was gathered (Plan 3 Tasks 4 and 5).**
 - `tsemu boot --ms N --trace unmapped,iack,duart,otto,esp,fdc,scsi,iexp` on the machine, one change at
   a time.
 - A scratch harness, not committed, linked against `ens_ts`. It printed a time line in ms: the first
@@ -17,14 +17,14 @@ the confidence and the decision entry in `docs/decisions.md`.
   "SYSTEM ERROR n" text on channel B. The display text is plain ASCII between control bytes; the
   protocol itself is Task 5's.
 
-**Where the boot ends.** With the map below:
-- The last new kind of device access comes at 8060 ms (the ESP is released at 8059.9 ms).
-- The last display byte comes at 8076 ms. The display shows "CALIBRATING KEYBOARD - DO NOT TOUCH"
-  from about 1.6 s and "KEYBOARD IS NOT RESPONDING" from 8.0 s; nothing changes in the 25 s after.
-- Most of the time is two timeouts: about 0.9 s waiting for a floppy index pulse (empty drive), and
-  about 5.5 s waiting for the keyboard microcontroller on channel B RX (Task 5).
-- `kBootMs` = 12 200: 8076 ms plus 50 %, rounded up. The tests expect it to shrink once Task 5
-  answers for the keyboard.
+**Where the boot ends.** With the map below and the keyboard's answer ("Keyboard link"):
+- The last display byte comes at 3457 ms: the play screen ("Display and LEDs"). The ESP is released
+  at 3357 ms; the last new kind of device access is at 1819 ms.
+- About 0.9 s of it is the wait for a floppy index pulse (empty drive), 0.5 s the OS's pause before
+  "CALIBRATING KEYBOARD" and 1.5 s the "ENSONIQ TS-10" start-up screen.
+- `kBootMs` = 5200: 3457 ms plus 50 %, rounded up.
+- Before Task 5 the boot ended at 8076 ms on "KEYBOARD IS NOT RESPONDING" after a 5.5 s wait for the
+  keyboard, and `kBootMs` was 12 200.
 
 ## Memory map (T13, T4)
 
@@ -143,8 +143,8 @@ from an OTTO interrupt. **MAME.** Not compared.
   0x0003F800); 3.4 MHz (0x00057C00) stops sending display text during "CALIBRATING KEYBOARD". So the
   boot tolerates an X1 rate from -7 % to +17 % of 4 MHz and constrains the CPU clock only loosely.
 
-**Confidence.** Medium for channel B's rate (from the schematic's 1 MHz on IP5/IP6; the keyboard
-replies in Task 5 will test RX). Low-medium for the CPU clock (unchanged from T1). **MAME.** Not
+**Confidence.** Medium-high for channel B's rate (from the schematic's 1 MHz on IP5/IP6; in Task 5
+every byte the keyboard sends at this rate is read as sent). Low-medium for the CPU clock (unchanged from T1). **MAME.** Not
 compared.
 
 ## ESPHALT (T7)
@@ -196,10 +196,193 @@ fault. The boot test allows vector 4 only at an ILLEGAL opcode.
 
 **Confidence.** Medium-high.
 
-## Keyboard link (Task 5)
+## Keyboard link (T19)
 
-**Fact so far.** After "CALIBRATING KEYBOARD" the OS waits about 5.5 s for the keyboard
-microcontroller on channel B RX (IMR has RxRDYB), pulsing SACK/ (OP7) once at 1033 ms, and then shows
-"KEYBOARD IS NOT RESPONDING". Each of the 256 single bytes queued on channel B RX at 1100 ms is read by
-the RxRDYB interrupt and changes nothing else. No stub is modelled: the boot goes on by itself after
-the timeout. Task 5 finds the protocol.
+**Fact.**
+- Channel B carries two directions. TxDB goes to the keypad/display board (the display and LEDs,
+  below) and also carries the OS's commands for the keyboard, `FB nn`. RxDB comes from the keyboard
+  microcontroller: its keys, its pressure sensors, the Foot Switch 1 jack and the panel buttons,
+  which reach it from the display board (service manual p5-6, Figure 5).
+- **KRES (OP4) and DRES (OP5) are active-high resets.** They are high from the DUART's reset (OPR
+  = 0) until the OS sets OPR bits 4 and 5 at 0.24 ms, and stay low after that. With an active-low
+  reset the keyboard would stay in reset from 0.24 ms on and could never answer.
+- **SACK/ (OP7)** goes low at 1033.8 ms, just before the OS's first `FB FF`, and stays low in normal
+  use. Under a continuous stream of key events at the line rate the OS pulses it high for about
+  33 µs every few ms. The model reads it as "the keyboard may send while SACK/ is low": the keyboard
+  puts its next byte on RxDB only when the line is idle and SACK/ is low.
+- **Start-up.** At 1030.4 ms the OS reads RHRB 11 times (a flush), sends `E7` and `FB FF FB F0`,
+  waits 500 ms, shows "CALIBRATING KEYBOARD - DO NOT TOUCH", then queues `FB FF FB FD` and waits about
+  1.5 s for the keyboard. On a timeout it repeats `FB FF FB F0`, then 100 ms later `FB FF FB FD`, every
+  1.6 s, four times in all, and then shows "KEYBOARD IS NOT RESPONDING".
+- **The answer is one byte, `FF`.** It is taken from the moment the OS queues `FB FF FB FD` until its
+  next `FB FF FB F0`. The OS then sends `FB FF FB F0`, 100 ms later `FB DD FB FC`, the "ENSONIQ TS-10"
+  start-up screen, the 16 LEDs and the play screen. The model answers `FF` to `FB FD` at once.
+- The OS sends `E7` and `FB FF FB F0` again before every disk access ("DISK DRIVE NOT READY" with the
+  empty drive); keys and buttons work after it.
+- **Boot end.** With the answer the last display byte comes at 3457 ms, the ESP is released at
+  3357 ms and the last new kind of device access is at 1819 ms. `kBootMs` = 5200 (3457 ms + 50 %,
+  rounded up).
+
+**How found.** A scratch harness, not committed, logged channel B's bytes with their times, the
+OP4/OP5/OP7 edges and the RHRB reads, and queued candidate bytes on RxDB.
+- Every single byte 0x00-0xFF was queued at 1700 ms, during "CALIBRATING": only `FF` changes what
+  the OS sends (the boot goes on to the play screen); the other 255 give the baseline stream.
+- When `FF` is taken was bisected to 0.05 ms: from 1597.24, 3201.80 and 4806.60 ms. These are the
+  moments the OS queues `FB FF FB FD`; the bytes themselves leave later (at 1608-1611 ms behind the
+  calibration text, 1.4 ms later in the other rounds). `FF` at 1040-1590 ms, at 3200 ms and at
+  4750-4800 ms (between an `F0` and its `FD`) is read and ignored. Task 4's sweep at 1100 ms fell
+  outside the window, which is why it found nothing.
+- At 1100 ms the bytes fall into two classes by the instructions the OS runs after them:
+  0xC0-0xFF except 0xFC, and the rest. No byte of 0xC0-0xFE other than `FF` was found to do anything
+  (pairs with a second byte 00 or 40 at 4000 ms change nothing visible).
+
+**Alternatives.**
+- A keyboard that sends `FF` by itself, once or repeatedly, would also boot if the byte fell in the
+  window. A reply to the request is the simplest model that fits the window.
+- A calibration delay before the reply is not modelled: the OS waits up to 1.5 s, and an immediate
+  reply makes the boot shortest and deterministic.
+- SACK/ ignored (as the KS-32 does): the boot and every test are unchanged, because the keyboard never
+  has anything to send before SACK/ goes low. Flow control at byte level does not prevent overruns in a
+  continuous line-rate flood (3172 overruns in 3000 pressure events with or without it), so its role
+  is not settled.
+
+**Confidence.** High for the `FF` answer and when it is taken; high for the reset polarity. Low for
+SACK/'s role and for what `F0`, `DD`, `FC` and `E7` tell the keyboard. **MAME.** Not compared.
+
+## Display and LEDs (T18, T15)
+
+**Fact.**
+- The display is 2 rows of 40 characters, positions 0-79 (row = position / 40). Bytes 0x00-0x7E are
+  characters (only 0x20-0x7E were ever seen); 0x7F and 0x80 up are commands.
+- **Steady state at `kBootMs`:** row 0 `U0-0 BABY-GRAND   FULL-BODY   BRITE-PNO `, row 1
+  `     STEREO-PNO  WARM-GRAND  ALL-PURPOSE`, LEDs 0 (Bank 0) and 9 (Sounds). No column is
+  underlined (the OS marks the selected sound only after a soft button selects one). Every byte of
+  the boot is decoded. `ts_boot_shows_play_screen` pins this.
+- The OS sends about one byte per ms.
+
+**Command table.** "Effect" is what `Panel` does.
+
+| Bytes | Effect | Evidence | Confidence |
+|---|---|---|---|
+| 0x00-0x7E | A character at the cursor; the cursor moves on, from column 39 of row 0 into row 1 and from 79 to 0 | All text; 32- and 34-character messages run on without a position | High for 0x20-0x7E; 0x00-0x1F never seen |
+| 0x80 + p (0x80-0xCF) | Cursor to position p | `8D` "ENSONIQ  TS-10" (14 characters centred in 40), `AB` row 1; the sound names at 0x85, 0x91, 0x9D, 0xAD, 0xB9, 0xC5: three 11-character fields per row, one per soft button | High |
+| `D6` | Blank the display and its attributes; cursor to 0 | Every page starts with it; text follows with no position ("U0-0") | High |
+| `F5` / `F6` | Save the cursor / move it back there | "TUNE" `D1` "=" `F5 D3` "+00" `E8`, then many `F6 D3` "-99" `E8`: the value redrawn in place as the slider moves it. Without the restore the redraws run across the display | High |
+| `D3` | Characters written from here on are underlined | Before the selected sound's name and the selected parameter's value, and only there: the manual's "the currently selected parameter is always underlined" | High |
+| `D2` | ... have a flashing underline | Before the second sound after a double-click on its soft button, the primary one keeping `D3`: the manual's "the underline beneath the name of the layered sound will flash" (PDF p9) | Medium |
+| `D0` | ... flash | `7F D0` "SAVE" `D1` when a Bank button is pressed on the Write page: the manual's "SAVE is flashing" (PDF p6 of section 8) | Medium |
+| `D1` | ... are plain (no underline, no flash) | Before "=" and the value of every parameter. When another parameter is selected the old value is redrawn after `D1` with no `D6`, so `D1` must remove the underline | Medium-high |
+| `E8` | ... keep the attributes their cells have | Ends every field. On the Write page's name editor the OS sets the cursor's underline with `D9`, then `E8`, then rewrites the letter under it every few ms; the underline must survive that (the manual: "a cursor, or underline, beneath the first letter") | Medium |
+| `D9` / `DB` | Underline the cell at the cursor / remove it; the cursor stays | Name editor: `F6 D9` at the first letter; RIGHT gives `7F F6 DB 7F D4 7F D9 F5 F6` and the letter at the next position | Medium |
+| `D4` / `D5` | Cursor right / left by one | RIGHT gives `D4`, LEFT the same sequence with `D5`. On the track pages each field is `D1 D5` " " `D3`/`7F` name: with `D5` moving left the 12-character fields start at columns 4, 16, 28 and end at 39; with `D5` taking a parameter or doing nothing they would overrun into "TRAX" and "STOP" | High for `D5`; medium for `D4` |
+| `7F` | None | Comes before positions and modes (`D6 7F 82`, `7F D0`, `7F F6 DB`), and in the track lists where `D3` would mark the selected track. It takes no column (the 12-column track fields fit only so) | Low (effect unknown) |
+| `E7` | None | Before each keyboard start-up: the boot and every disk access | Low (effect unknown) |
+| `FF nn` | LED nn & 0x0F: lit if bit 7, flashing if bit 6 | Every page sends all 16, `FF 0F` down to `FF 00`, with bit 7 on the lit ones. `FF C9` (LED 9 lit and flashing) with Replace Track Sound: the manual's "the Sounds LED will be flashing" | High for lit; medium for flashing |
+| `FB nn` | A command for the keyboard (Keyboard link); nothing on the display | `FB FF`, `FB F0`, `FB FD`, `FB DD`, `FB FC` only, always in pairs | High |
+| other 0x80-0xFF | Counted in `PanelState::unknown`, no parameter | None seen in a sweep of every button code and every soft button on each page they open | - |
+
+**LEDs.** 16, numbered by `FF nn`:
+
+| LED | Control | LED | Control |
+|---|---|---|---|
+| 0 | Bank 0 | 8 | Bank 1 |
+| 1 | Presets | 9 | Sounds |
+| 2-5 | Bank 2, 4, 6, 8 | 10-13 | Bank 3, 5, 7, 9 |
+| 6 | Replace Track Sound | 14 | Compare |
+| 7 | Seq/Song Tracks 1-6 | 15 | Seq/Song Tracks 7-12 |
+
+The Seqs/Songs LED is not on the link: it is DUART OP3 (SEQLED/, active low), which goes low when
+Seqs/Songs is pressed and high again on Sounds.
+
+**How found.** The bytes were read from the boot and from every page the buttons open (the scratch
+harness above, then the `Panel` decoder itself: a sweep of all 64 codes, each followed by the six soft
+buttons and Sounds, leaves `unknown` at 0). The meaning of each attribute byte comes from where the
+OS puts it and the manual's description of that screen; whether "flash" means blinking text or a
+blinking underline on the real display is not observable here.
+
+**Alternatives.** `D1`, `E8` and `7F` all as "plain": the name editor's underline would vanish as
+soon as the OS redraws the letter. `D5` with one parameter: the track fields overrun the display.
+`D4`/`D9`/`DB` with a parameter: the name editor writes its letter one column left of the cursor.
+
+**Confidence.** As per row. **MAME.** Not compared.
+
+## Buttons (T16)
+
+**Fact.**
+- A press is `code | 0x80`, then `00`; a release is `code`, then `00`. Codes are 0x00-0x3F. A
+  single byte does nothing.
+- The 62 panel buttons and the two contacts of the Foot Switch 1 jack fill all 64 codes:
+
+| Control | Code | Evidence |
+|---|---|---|
+| Bank 0-9 | 06 07 18 19 20 21 28 29 30 31 | In Sounds mode, from U0-5, Bank n shows bank page U0-n and lights its LED |
+| Soft 1-3 (above the display) | 1E 26 2E | On a bank page, each selects the sound of its column on row 0 (MIDI program change 0, 1, 2; `D3` moves) |
+| Soft 4-6 (below) | 1F 27 2F | The same for row 1 (programs 3, 4, 5) |
+| Seqs/Songs | 0E | "SEQ0 $SONG-00 SEQUENCE-01 ..."; OP3 low |
+| Presets | 0F | A preset bank page, "PSET" at the bottom left; LED 1 |
+| Sounds | 10 | Back to the last sound bank page; LED 9 |
+| BankSet | 11 | U0-5 to U1-5; held with Bank 2: R2-0 (the manual's direct dial) |
+| Up / Down | 16 / 17 | TUNE +00 to +01 and back on the System page |
+| Mix/Pan, Attack/Release, Brightness/Timbre, Key Zone/Velocity, Tuning | 36 3E 02 37 3F | Track pages "MIX", "ATCK", "BRIT", "ZONE", "XPOS" |
+| Controllers On/Off, Performance Options, Track/MIDI, Track/Effects | 03 38 08 04 | "SUST" (ON per track), "PSEL" (patch select modes), "STAT" (SEND/RECV), "BUS" (VOICE) |
+| Replace Track Sound | 39 | LED 6 lit, the Sounds LED (9) flashing: the manual's description |
+| Seq/Song Tracks 1-6 / 7-12 | 09 / 05 | "TRAX" pages, the first with the sequence's track 1 (BEST-PAD), the second all undefined; LED 7 / 15 |
+| System, Storage, MIDI Control | 0A 12 1A | "SYSTEM", "SELECT STORAGE OPTION", "MIDI" |
+| Edit Song, Edit Sequence, Edit Track | 0B 13 1B | "SONG NOT SELECTED", "EDIT SEQUENCE", "EDIT TRACK" |
+| Click, Sequencer Control, Locate | 0C 14 1C | "CLICK", "CONTROL", "LOCATE" |
+| Record, Stop/Continue, Play | 0D 15 1D | Record held with Play: "REC" on the Locate page; Stop/Continue sends MIDI Stop (FC), Play MIDI Start (FA) |
+| LFO, Env 1-3, Pitch, Pitch Mods, Filters, Output, Wave, Mod Mixer | 22 2A 32 3A 23 2B 33 3B 24 2C | Program pages "LFO", "ENV1"-"ENV3", "PITCH" (OCTAVE), "PITCH" (MODSRC), "FILTER1", "OUTPUT", "WAVE", "MOD MIXER" |
+| Program Control, Program Effects, Select Voice, Copy | 34 3C 25 2D | "PROGRAM", "EFFECT", "SELV", "COPY" |
+| Write (Write Program) | 35 | "WRITE EDIT PROGRAM NAME=..." with the name editor; LED 14 |
+| Compare | 3D | LED 14 on, off on the next press, the page unchanged |
+| Foot Switch 1 right / left | 00 / 01 | 00 sends MIDI controller 64 (127, then 0 on release) with the default FOOT-SW1-R=SUSTAIN; 01 does the same once FOOT-SW1-L is set to SUSTAIN on the second System page |
+
+**How found.** From the play screen at 4000 ms, every first byte 0x00-0xFF was followed by `00`
+and by `40`, and the display, LEDs and MIDI out of the next 300 ms were compared. With `00`, bytes
+0x80-0xBF open pages, light LEDs or send MIDI (buttons); 0x00-0x3F with `00` do nothing (releases).
+The codes that did nothing on the bank page were tried on the System page (Up/Down), with Record's
+manual combination (hold, then Play) and on the System foot-switch page. Up/Down need the Data Entry
+slider away from 0 (see "Open").
+
+**Confidence.** High for the byte forms and the codes with a page or MIDI message; medium for
+Compare (LED only) and the foot switch's left/right naming (from the System page's labels).
+**MAME.** Not compared.
+
+## Keys and pressure (T17)
+
+**Fact.**
+- Key down: `0x80 | k`, then the strike value (1-0x7F). Key up: `k`, then any nonzero byte; the OS
+  sends note-off velocity 64 whatever it is. `k` = note - 36: the 61 keys C2-C7 are k = 0-60. A
+  strike value of 0 makes the pair a button press.
+- The strike value goes through the TOUCH table (VELTBL-4 by default). MIDI velocity out, white keys
+  (C2, C4, C7) and black keys (C#4):
+
+  | Strike | 1-8 | 16 | 24 | 32 | 40 | 48 | 56 | 64 | 72 | 80 | 88 | 96 | 104 | 112 | 120 | 127 |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | White | 1 | 7 | 19 | 32 | 46 | 62 | 78 | 92 | 97 | 100 | 102 | 106 | 112 | 127 | 127 | 127 |
+  | Black | 1 | 25 | 32 | 43 | 53 | 65 | 74 | 84 | 91 | 94 | 98 | 100 | 102 | 106 | 110 | 127 |
+
+  `Panel::key` takes the strike value, clamped to 1-127. What it is physically (the keyboard times
+  the gap between a key's two contacts, service manual p14) is not known.
+- Poly-Key pressure: `0x40 | k`, then the amount (0-127). The OS sends it as MIDI polyphonic
+  aftertouch (`A0 note amount`).
+- Codes 61-63 (0xBD-0xBF, 0x7D-0x7F) play and send notes 97-99, but no key sends them.
+
+**How found.** The sweep of "Buttons" with `40` as the second byte: 0x80-0xBF send note-on
+`90 (code - 0x5C) vel` and 0x40-0x7F send `A0 (code - 0x1C) 40`. Key up and the velocity table by
+sending the pairs one at a time and reading MIDI out.
+
+**Open.** Pressure for k = 4, 12, 20, ... 60 (every eighth key) sent while the key is up gives no MIDI
+out; with the key down it does. The other keys send pressure while up. Real pressure only comes with
+a key down, so this does not affect the model.
+
+**Confidence.** High for the byte forms, the note mapping and pressure. **MAME.** Not compared.
+
+**Tests.** ts_panel_commands, ts_panel_button_bytes, ts_panel_button_table,
+ts_panel_full_queue_drops_whole_events, ts_panel_lines (the model); ts_boot_shows_play_screen,
+ts_button_changes_page, ts_key_sounds, ts_poly_pressure_is_sent (the firmware).
+
+**Open for Task 6.** With the provisional analog inputs (T8: every input 0 but the reference):
+- the Volume slider at 0 silences the TS; `ts_key_sounds` raises it with `setAnalog`;
+- the Data Entry slider at 0 keeps rewriting the selected parameter at its minimum (TUNE=-99,
+  VEL-MAX=001), about one redraw per ms, which also delays what buttons show.

@@ -13,6 +13,7 @@
 #include "m68k/m68k.h"
 #include "ts/board.h"
 #include "ts/fdc.h"
+#include "ts/panel.h"
 #include "ts/roms.h"
 
 namespace ens::ts {
@@ -28,8 +29,12 @@ struct BusEvent {
     Device dev;
 };
 
+// The analog mux inputs (U69 Y0-Y7 without the unconnected Y1); the interface of plan 3 Task 6, which
+// settles their resting values (T8).
+enum class Analog : uint8_t { PitchWheel, ModWheel, Volume, CvPedal, DataEntry, Battery, Reference };
+
 constexpr uint32_t kCpuHz = 15'238'090, kDuartHz = 4'000'000;  // DECISION T1
-constexpr uint32_t kBootMs = 12'200;                           // firmware tests: boot end (8076 ms) + 50 %
+constexpr uint32_t kBootMs = 5'200;                            // firmware tests: boot end (3457 ms) + 50 %
 constexpr int kSlotClocks = 16;                                // OTTO: 16 CLKs per voice (notes §4)
 constexpr int kPanelChannel = 1;                               // DECISION T7: DUART B is the display/keyboard link
 constexpr int kMidiChannel = 0;                                // DECISION T7: DUART A is MIDI
@@ -44,6 +49,13 @@ public:
     uint64_t cycles() const { return cpu_.totalCycles(); }  // CPU clocks since the machine was created (T1)
     uint16_t peek16(uint32_t addr) const;                   // memory only (devices read 0), no side effects
     std::function<void(const BusEvent&)> onBusEvent;        // the bus trace; off when empty
+    std::function<void(uint8_t)> onPanelByte;               // each byte the panel receives on TxDB; off when empty
+    const PanelState& panel() const { return panel_.state(); }
+    // Panel and keyboard input (T16, T17): queued in the keyboard and sent on RxDB from the next slot.
+    void button(Button b, bool down) { panel_.button(b, down); }
+    void key(int note, bool down, int velocity) { panel_.key(note, down, velocity); }
+    void pressure(int note, int amount) { panel_.pressure(note, amount); }
+    void setAnalog(Analog a, uint16_t raw10);  // a raw 10-bit conversion, 0-1023, from the next mux select
     m68k::Cpu& cpu() { return cpu_; }
     Board& board() { return board_; }
     duart::Duart& duart() { return duart_; }
@@ -81,6 +93,7 @@ private:
     Board board_{waves_};
     duart::Duart duart_{kDuartHz};
     Fdc fdc_;
+    Panel panel_;
     m68k::Cpu cpu_{*this};
     std::vector<uint16_t> os_;  // 256K words, T2
     static constexpr uint32_t kRamBytes = 0x40000;  // DECISION T13: OSRAM 256 KB (SEQEXP, the SQX-70, not fitted)
