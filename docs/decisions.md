@@ -526,7 +526,145 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## OTTO
 
-(None yet.)
+## OT1: Host byte latching
+- Options: one latch shared by all registers, or one per register; which byte triggers the read.
+- Choice: byte 0 of a read performs the 32-bit read into one shared latch and returns bits 31:24; bytes 1-3 return the latch. Bytes 0-2 of a write go into one shared latch; a byte-3 write commits latch + byte to the register it addresses on the current page. Latches are 0 after reset and keep their bytes after a commit.
+- Evidence: notes §1 (§13/p39). Whether the latches are shared is not stated.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 1); test otto_byte3_commits_shared_latch.
+
+## OT2: Pages and unused bits
+- Options: PS ignored or not with TEST; what unused bits and the test page read.
+- Choice: PAGE keeps 7 bits; TEST=1 selects the test page whatever PS is. Writes keep each register's implemented bits; reads return them with other bits 0. Test-page reads and EMPTY return 0. Filter temps read back their 18 bits, not sign-extended. PAR and IRQV ignore writes.
+- Evidence: notes §1, §2, §9.11, §9.15.
+- Confidence: Low-medium.
+- Status: implemented (Plan 2 Task 1).
+
+## OT3: Reset state
+- Options: only ACTV and MODE are documented.
+- Choice: ACTV 0x1F, MODE 0x17, PAGE 0, IRQV 0x80 (free), PAR 0, W_ST/W_END/LR_END 0. Each voice: CR 0x0003 (STOP1|STOP0), every other voice register and filter temp 0, FILTCOUNT 0. Channel sums, test-page values and latches 0.
+- Evidence: notes §8; the rest follows KS-32 O10.
+- Confidence: Low.
+- Status: implemented (Plan 2 Task 1).
+
+## OT17: Write timing
+- Options: model the 3-voice pipeline that can overwrite CPU writes, or apply writes at once.
+- Choice: host writes take effect at once.
+- Evidence: notes §4 (§4.1.9/p10, §8/p21 advise writing twice, so firmware tolerates either).
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 1).
+
+## OT18: Serial port and MODE
+- Options: bit-level serial model, or whole frames.
+- Choice: MODE, W_ST, W_END and LR_END are stored and read back; output is whole frames. Dual-OTTO and slave modes are not modelled.
+- Evidence: notes §4, §7. The TS has one OTTO.
+- Confidence: High for the TS.
+- Status: implemented (Plan 2 Task 1).
+
+## OT4: Address generation and loop modes
+- Options: FC added once or twice (§11.1 steps 3 and 5); >= or > at END; DIR polarity; reverse and bidirectional arithmetic; LEI and the IRQ; the accumulator after a one-shot stop.
+- Choice: only when STOP0 = STOP1 = 0. DIR=0 forward: n = acc + FC, boundary when n > END32 (strict). DIR=1: n = acc - FC, boundary when n < START32. Computed in 64 bits, stored mod 2^32. At a boundary (unless LEI): no loop: set STOP0, acc = END32 (fwd) / START32 (rev); uni loop: acc = START32 + (n - END32) / END32 - (START32 - n); bidirectional: acc = END32 - (n - END32) / START32 + (START32 - n) and DIR toggles; transwave (BLE=1, LPE=0): as uni loop, then BLE cleared and LEI set. LEI: acc = n, no boundary, no IRQ. START32 = START & 0xFFFFF800, END32 = END & 0xFFFFFF80.
+- Evidence: notes §3, §9.2-9.4. The §4.1.5 text (0 = forward) wins over the poorly printed bit map; the p29 strict-compare note wins over step 5.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 2); tests in tests/test_otto_addr.cpp.
+
+## OT5: Fetch addresses
+- Options: S2 at int + 1 or int - 1 in reverse; fetch before or after the update.
+- Choice: S1 at acc >> 11, S2 at (acc >> 11) + 1 wrapped to 21 bits, in both directions, same bank (CR.BS1:BS0), fetched with the accumulator before this slot's update.
+- Evidence: notes §3 steps 1-2.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 2).
+
+## OT14: Interrupts and IRQV
+- Options: as the datasheet's §14 text, with the timing of the CR.IRQ clear left open.
+- Choice: a boundary with IRQE sets CR.IRQ. At a voice's slot, if its CR.IRQ is set and IRQV is free (bit 7 = 1), IRQV = voice number with bit 7 = 0 and the pin asserts. A byte-0 read of IRQV with bit 7 = 0 returns it, sets bit 7, releases the pin and marks the voice; its CR.IRQ is cleared at the start of its next slot (so a new request later in that slot is kept). A read with bit 7 = 1 has no effect. A host write of CR with IRQE|IRQ forces a request. IRQV reads bits 4:0 and bit 7, others 0.
+- Evidence: notes §5.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 2); tests otto_irq_sequence, otto_forced_irq, otto_irqv_read_without_pending_is_harmless.
+
+## OT6: Compressed sample decoder
+- Options: the datasheet gives only the encoder.
+- Choice: e = word >> 13, m = word & 0x1FFF. e >= 1: v = (int16)(((m >> 12 ^ 1) << 15) | (m << 2)) >> (7 - e). e = 0: v = (int16)(m << 3) >> 7. Unused low bits are whatever the memory returns (the board forces them to 0).
+- Evidence: notes §3; reproduces the p31 examples (7FFF->FF, 8000->E0, FFF0->1F, 00FF->0F) and re-encodes to the same code for all 65536 words.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3); tests otto_decompress_examples, otto_decompress_roundtrip.
+
+## OT8: Interpolation
+- Options: which 9 of the 11 fraction bits; rounding; output units.
+- Choice: f9 = ACCUM bits 10:2 (F10..F2). otto_interp = (s1 << 1) + (((s2 - s1) * f9) >> 8), rounding down; the result is in half-LSB units (one fraction bit, as the filter registers' FDF0).
+- Evidence: notes §3, §9.5.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3).
+
+## OT9: Filter arithmetic
+- Options: K scaling; the HP "+0.5"; saturation.
+- Choice: k12 = K >> 4. LP: sat18(y1 + ((k12 * (x - y1)) >> 12)). HP: sat18(x - x1 + (((k12 + 2048) * y1) >> 12)). sat18 clamps to [-131072, 131071]; floor rounding (a decaying HP can rest at -1).
+- Evidence: notes §3, §9.7. LP medium. The HP scale is the datasheet's formula read literally: gain above 1 for K above 0x7FF0, which the coefficient formula never produces.
+- Confidence: LP medium; HP low.
+- Status: implemented (Plan 2 Task 3); revisit by ear in Plan 3/4.
+
+## OT10: Filter routing
+- Options: the p9 table and the p34 diagram disagree on pole 3's coefficient in modes 10 and 11.
+- Choice: the p9 table: pole 3 = 00 HP K2, 01 LP K1, 10 LP K2, 11 LP K1; pole 4 LP K2 (LP4=1) or HP K2. Poles 1-2 LP K1. HP poles take Xn-1 from O2(n-2) (pole 3) and O3(n-2) (pole 4), which hold the previous output of the pole before.
+- Evidence: notes §3; the ES5505 datasheet's table is identical to p9.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3); test otto_filter_mode_routing.
+
+## OT11: Filter output to the pan stage
+- Options: which 16 of the 18 bits.
+- Choice: x16 = sat16(O4 >> 1): the integer part, dropping the fraction bit.
+- Evidence: notes §3, §9.7.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 3).
+
+## OT7: Stopped voices
+- Options: a stopped voice is fully idle; or it fetches and filters but is muted.
+- Choice: STOP0 or STOP1: the voice still fetches, interpolates and filters (its filter temps keep updating), adds nothing to its channel, and its envelope, address and loop/IRQ check are frozen. FILTCOUNT still advances.
+- Evidence: notes §3 (§4.6, §4.8 force volume 0); fetching and filtering on a stopped voice are unstated (§9.6). Kept as the KS-32 OTIS did, whose firmware read a stopped voice's O1(n-1) (KS-32 O7).
+- Confidence: Low.
+- Status: implemented (Plan 2 Task 4); check against the running TS firmware in Plan 3.
+
+## OT12: Volume
+- Options: rounding; what exponent 0 does.
+- Choice: otto_vol(x16, vol) = ((x16 * (0x100 | M)) >> 5) >> (15 - EX), arithmetic shifts, M = vol bits 11:4, EX = bits 15:12. Exponent 0 is a shift of 15, not a mute.
+- Evidence: notes §3 (§11.6/p36).
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 4).
+
+## OT13: Channels and saturation
+- Options: 23-bit accumulators that wrap, or sums that saturate; CA 6/7; TEST mode.
+- Choice: CA 0-5 add L/R into that channel; CA 6/7 add nothing. Sums are kept in 32 bits and saturated to 20 bits ([-524288, 524287]) into the frame at the end of the frame, then cleared. With PAGE.TEST set the frame carries the host-written CH values (23-bit, sign-extended, saturated to 20 bits) and voice sums are dropped.
+- Evidence: notes §3, §9.10, §9.15. The datasheet's 3 guard bits allow 8 full-scale voices; past that a listener expects clipping, not wrap noise.
+- Confidence: Low (saturating sums), medium (the rest).
+- Status: implemented (Plan 2 Task 4); test otto_channel_saturates_not_wraps.
+
+## OT15: Envelopes
+- Options: ramp alignment; FILTCOUNT width and scope; the K2 line testing K1SLOW; stopped voices.
+- Choice: per voice, while running: if ECOUNT != 0, LVOL and RVOL ramp; K1 ramps unless K1RAMP bit 0 (SLOW) is set and FILTCOUNT != 0; K2 likewise with K2RAMP's own SLOW; ECOUNT -= 1. FILTCOUNT is 3 bits per voice, advanced every slot. otto_ramp(v, r8) = clamp(v + (int8)r8, 0, 0xFFFF): the ramp adds at the register's LSB.
+- Evidence: notes §3 (§11.5, §11.7), §9.8.
+- Confidence: Medium-low.
+- Status: implemented (Plan 2 Task 4); tests otto_volume_ramp, otto_filter_ramp_slow.
+
+## OT19: Fewer than five voices
+- Options: refuse, clamp to 5, or run ACTV+1 slots.
+- Choice: ACTV 0-3 is allowed and runs ACTV+1 slots per frame.
+- Evidence: notes §4 says at least 5 voices (for the serial port).
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 4); test otto_actv_below_4_still_produces_frames.
+
+## OT16: Pot A/D
+- Options: conversion started by the PAR read, or by a free-running 2^13-CLK clock; when the value lands.
+- Choice: a byte-0 read of PAR returns PAR, sets it to 0x3FF and starts a conversion; 512 slots later PAR = the pin's value at that moment (setPot). A read during a conversion restarts it.
+- Evidence: notes §6 (512 us at 16 MHz = 512 slots of 16 CLKs, so the same in slots at any clock); §9.13 conflicts.
+- Confidence: Medium.
+- Status: implemented (Plan 2 Task 5); tests in tests/test_otto_pot.cpp.
+
+## OT20: Host transfers to sound memory
+- Options: model the chip's host-to-memory slots, or leave sound memory to the board.
+- Choice: not in the core. The TS machine owns sound memory and the CPU's path to it (Plan 3).
+- Evidence: notes §1: OTTO has no DMA address register; the address comes through external latches.
+- Confidence: High.
+- Status: no code (by design).
 
 ## TS machine
 
