@@ -135,13 +135,11 @@ manual:
 - **CPU (U17):** 68000-class, 16-bit data bus, A1-A23, MODE pin tied high. Not a 68EC020 (that is
   the KT-76; MAME also uses a 68000 for the TS). The KS-32 68000 core is expected to run it
   unmodified. Clock from the schematic's crystals (builder to read).
-- **OS ROM (U5, U6):** both sockets are 27C4001 (512 KB, A1-A18), h on D8-15, l on D0-7, so the OS
-  space is 1 MB. In OS v3.x the l EPROM is a real 4 Mbit part and h a 2 Mbit part (the user's own
-  TS-12 v3.05 dump: HI was a TMS27C020, LO an M27C4001). A 27C020 ignores A18 in that socket (its
-  pin 1 is VPP), so a 256 KB h image mirrors into the upper 256 KB. *My call:* the loader mirrors any
-  256 KB half to 512 KB, then interleaves; the builder confirms the mirror with bus traces. The upper
-  half of the l images is identical across v3.05/v3.10 and TS-10/TS-12; what the OS does with it is
-  seen in traces, not by reading it.
+- **OS ROM (U5, U6):** both sockets are 27C4001 (512 KB, A1-A18), h on D8-15, l on D0-7. In OS v3.x the l
+  EPROM is a real 4 Mbit part and h a 2 Mbit part. The schematic shows A18 tied high, but in every
+  512 KB l dump the reset vector and all version differences are in the lower 256 KB, and the upper half
+  is identical across v3.05/v3.10 and TS-10/TS-12. *Decision T2:* the image is the h file (even bytes) and
+  the first 256 KB of the l file (odd bytes), 512 KB in all; a 256 KB l file (v1.20, v2.02) is used whole.
 - **RAM:** four 621001 (128 K x 8) SRAMs: U3/U4 on OSRAM/ (256 KB of OS RAM), U1/U2 on SEQEXP/
   (likely the sequence-expansion RAM). Battery-backed (+VB). Which of them the OS uses, and where,
   comes from the schematic decode and traces.

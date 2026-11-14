@@ -530,8 +530,8 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: one latch shared by all registers, or one per register; which byte triggers the read.
 - Choice: byte 0 of a read performs the 32-bit read into one shared latch and returns bits 31:24; bytes 1-3 return the latch. Bytes 0-2 of a write go into one shared latch; a byte-3 write commits latch + byte to the register it addresses on the current page. Latches are 0 after reset and keep their bytes after a commit.
 - Evidence: notes §1 (§13/p39). Whether the latches are shared is not stated.
-- Confidence: Medium.
-- Status: implemented (Plan 2 Task 1); test otto_byte3_commits_shared_latch.
+- Confidence: High for the byte order and for reads (TS OS v3.10); medium for the shared latch, which that firmware cannot show.
+- Status: implemented (Plan 2 Task 1); test otto_byte3_commits_shared_latch. Checked against TS OS v3.10 (Plan 3 Task 7, bus trace of a boot and of notes on all 60 bank programs): every OTTO access is a byte access at an odd address, never a word. Reads are always bytes 0, 1, 2, 3 in that order. Writes are bytes 0-1-2-3, bytes 2-3 (only to registers of 16 bits or fewer: CR, volumes, ramps, ECOUNT, K1, K2) or byte 3 alone (only PAGE, ACTV, MODE, W_ST, W_END, LR_END). A partial write always covers every implemented bit, so shared and per-register latches give the same result with this firmware. Byte 0 = MSB agrees with those patterns and with the boot's ACTV and PAGE writes (docs/verification-plan2.md, "Left for Plan 3").
 
 ## OT2: Pages and unused bits
 - Options: PS ignored or not with TEST; what unused bits and the test page read.
@@ -597,18 +597,18 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Status: implemented (Plan 2 Task 3).
 
 ## OT9: Filter arithmetic
-- Options: K scaling; the HP "+0.5"; saturation.
-- Choice: k12 = K >> 4. LP: sat18(y1 + ((k12 * (x - y1)) >> 12)). HP: sat18(x - x1 + (((k12 + 2048) * y1) >> 12)). sat18 clamps to [-131072, 131071]; floor rounding (a decaying HP can rest at -1).
-- Evidence: notes §3, §9.7. LP medium. The HP scale is the datasheet's formula read literally: gain above 1 for K above 0x7FF0, which the coefficient formula never produces.
-- Confidence: LP medium; HP low.
-- Status: implemented (Plan 2 Task 3); revisit by ear in Plan 3/4.
+- Options: K scaling; the HP pole's feedback: the datasheet's "+0.5" read literally (K/65536 + 0.5, above 1 for K above 0x7FF0), K/65536 with no 0.5, K read as signed, or 0.5 + K/131072; saturation.
+- Choice: k12 = K >> 4. LP: sat18(y1 + ((k12 * (x - y1)) >> 12)). HP: sat18(x - x1 + (((k12 + 4096) * y1) >> 13)): feedback 0.5 + K/131072, from 0.5 at K = 0 to just under 1 at K = 0xFFF0. sat18 clamps to [-131072, 131071]; floor rounding (a decaying HP can rest at -1).
+- Evidence: notes §3, §9.7 (HP `Yn = Xn - Xn-1 + K*Yn-1`, `K_H = 65535*{cosW - 0.5 - ...}`: the 0.5 "caps one HP pole near 8 kHz"). TS OS v3.10 (Plan 3 Task 7) writes K2 up to 0xFF00 on sounding voices whose CR selects a high-pass pole (LP4:LP3 = 00 or 01). With the literal reading (Plan 2's choice) the feedback reaches 1.5 and pole 4's output sat on the 18-bit rail (+-131071) in 20 of the 60 bank programs, one note each; with 0.5 + K/131072 none does (largest |O4| on an HP voice 67 825; LP-only voices stay within +-65 491). So the firmware uses the whole K range for HP poles. 0.5 + K/131072 is the one reading that keeps the datasheet's 0.5 floor and is stable over that range; K/65536 and a signed K both lose the floor.
+- Confidence: LP medium; HP medium-low (stable and consistent with the firmware's K range; the exact scale is not heard yet).
+- Status: implemented in `otto_hp` (Plan 2 Task 3; HP changed in Plan 3 Task 7, controller ruling). Tests: otto_hp_values, ts_hp_voices_stay_off_the_rail. User to run: listen to `tsemu render tests/data/filtered_patch.mid` (WOW-SWEEP) and program 8 (HONKY-TONK) for a high-pass layer that sounds right.
 
 ## OT10: Filter routing
 - Options: the p9 table and the p34 diagram disagree on pole 3's coefficient in modes 10 and 11.
 - Choice: the p9 table: pole 3 = 00 HP K2, 01 LP K1, 10 LP K2, 11 LP K1; pole 4 LP K2 (LP4=1) or HP K2. Poles 1-2 LP K1. HP poles take Xn-1 from O2(n-2) (pole 3) and O3(n-2) (pole 4), which hold the previous output of the pole before.
 - Evidence: notes §3; the ES5505 datasheet's table is identical to p9.
 - Confidence: Medium.
-- Status: implemented (Plan 2 Task 3); test otto_filter_mode_routing.
+- Status: implemented (Plan 2 Task 3); test otto_filter_mode_routing. TS OS v3.10 (Plan 3 Task 7) uses mode 11 for nearly every voice (6986 of 7124 CR writes in a run of notes on all 60 bank programs) and mode 10 in 12 of the 60 programs; on sounding voices K1 and K2 differ (12 MSBs) in 89 % of mode-11 and 86 % of mode-10 samples, so the table-versus-drawing choice changes most sounds. Not settled by the firmware; user to run: listen to `tsemu render tests/data/filtered_patch.mid` (WOW-SWEEP) and other sounds.
 
 ## OT11: Filter output to the pan stage
 - Options: which 16 of the 18 bits.
@@ -621,22 +621,22 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: a stopped voice is fully idle; or it fetches and filters but is muted.
 - Choice: STOP0 or STOP1: the voice still fetches, interpolates and filters (its filter temps keep updating), adds nothing to its channel, and its envelope, address and loop/IRQ check are frozen. FILTCOUNT still advances.
 - Evidence: notes §3 (§4.6, §4.8 force volume 0); fetching and filtering on a stopped voice are unstated (§9.6). Kept as the KS-32 OTIS did, whose firmware read a stopped voice's O1(n-1) (KS-32 O7).
-- Confidence: Low.
-- Status: implemented (Plan 2 Task 4); check against the running TS firmware in Plan 3.
+- Confidence: Low, and not observable with TS OS v3.10.
+- Status: implemented (Plan 2 Task 4). Checked against TS OS v3.10 (Plan 3 Task 7): the boot reads no filter temp; a run of notes on all 60 bank programs and a 32-note chord reads only O1(n-1), 26 times, always of a running voice. The firmware writes the six temps as 0 (1272 writes, none non-zero), so it does not depend on what a stopped voice's filter does, unlike the KS-32's.
 
 ## OT12: Volume
 - Options: rounding; what exponent 0 does.
 - Choice: otto_vol(x16, vol) = ((x16 * (0x100 | M)) >> 5) >> (15 - EX), arithmetic shifts, M = vol bits 11:4, EX = bits 15:12. Exponent 0 is a shift of 15, not a mute.
 - Evidence: notes §3 (§11.6/p36).
-- Confidence: Medium.
-- Status: implemented (Plan 2 Task 4).
+- Confidence: Medium; the exponent-0 case is inaudible either way.
+- Status: implemented (Plan 2 Task 4). TS OS v3.10 (Plan 3 Task 7) writes LVOL/RVOL with exponent 0 and a non-zero mantissa 18 times in 4894 volume writes of a run of notes on all 60 bank programs, none at boot. A shift of 15 leaves at most 16 LSB of a full-scale voice (below -66 dBFS), so mute versus shift cannot be heard.
 
 ## OT13: Channels and saturation
 - Options: 23-bit accumulators that wrap, or sums that saturate; CA 6/7; TEST mode.
 - Choice: CA 0-5 add L/R into that channel; CA 6/7 add nothing. Sums are kept in 32 bits and saturated to 20 bits ([-524288, 524287]) into the frame at the end of the frame, then cleared. With PAGE.TEST set the frame carries the host-written CH values (23-bit, sign-extended, saturated to 20 bits) and voice sums are dropped.
 - Evidence: notes §3, §9.10, §9.15. The datasheet's 3 guard bits allow 8 full-scale voices; past that a listener expects clipping, not wrap noise.
 - Confidence: Low (saturating sums), medium (the rest).
-- Status: implemented (Plan 2 Task 4); test otto_channel_saturates_not_wraps.
+- Status: implemented (Plan 2 Task 4); test otto_channel_saturates_not_wraps. Plan 3 Task 7: the TS reaches the limit. `tests/data/full_chord.mid` (16 notes at velocity 127 on BABY-GRAND) drives OTTO channel 0 to the 20-bit limit in 123 samples, where wrapping sums would give full-scale steps; Main peaks at 32767. User to run: listen to `tsemu render tests/data/full_chord.mid` for clipping that does not belong.
 
 ## OT15: Envelopes
 - Options: ramp alignment; FILTCOUNT width and scope; the K2 line testing K1SLOW; stopped voices.
@@ -656,8 +656,8 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Options: conversion started by the PAR read, or by a free-running 2^13-CLK clock; when the value lands.
 - Choice: a byte-0 read of PAR returns PAR, sets it to 0x3FF and starts a conversion; 512 slots later PAR = the pin's value at that moment (setPot). A read during a conversion restarts it.
 - Evidence: notes §6 (512 us at 16 MHz = 512 slots of 16 CLKs, so the same in slots at any clock); §9.13 conflicts.
-- Confidence: Medium.
-- Status: implemented (Plan 2 Task 5); tests in tests/test_otto_pot.cpp.
+- Confidence: Medium-high: the TS firmware's timing rules out a sample taken at the read; where between about 128 and 1024 slots after it the pin is sampled is not pinned.
+- Status: implemented (Plan 2 Task 5); tests in tests/test_otto_pot.cpp. TS OS v3.10 (Plan 3 Task 7): the OS reads PAR every 1024-8191 slots (about 2 ms) and changes the mux select (DUART OP2-OP0) within 127 slots after a read in 24 388 of 24 398 changes (the rest within 511, or before the first read). So each conversion a read starts ends on the newly selected input, and the next read returns it: the Analog Test page pairs every reading with its own input (ts_analog_resting_values). A conversion that sampled the pin when it starts would pair each reading with the input before.
 
 ## OT20: Host transfers to sound memory
 - Options: model the chip's host-to-memory slots, or leave sound memory to the board.
@@ -668,4 +668,142 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## TS machine
 
-(None yet.)
+## T2: OS ROM image
+- Options: (a) even bytes from h, odd bytes from the first 256 KB of l, a 512 KB image; (b) treat the l upper half as mapped (A18 tied high, as the schematic shows).
+- Choice: (a). A 256 KB l file (v1.20, v2.02) is used whole.
+- Evidence: in every 512 KB l dump the reset vector (SSP 0xFF80A0, PC 0xC0073E) and all version differences are in the lower half; the upper half is identical in TS-10 3.05/3.10 and TS-12 3.05/3.10 and 69 % 0xFF. The dumps win over the schematic.
+- Confidence: Medium-high.
+- Status: Implemented in `ens::ts::buildOsImage` (Plan 3 Task 1). Tests: ts_os_image_interleaves_lower_half, ts_roms_wrong_size_named.
+
+## T3: Wave memory layout
+- Options: bank 0 and bank 1 layouts from the schematic; word byte order of U45/U46 either way.
+- Choice: bank 0 word = `u41[a] << 8 | nib << 4`, `nib = (a & 0x100000) ? u43[a & 0xFFFFF] >> 4 : u43[a & 0xFFFFF] & 0xF`, `a` = 21-bit address. Bank 1: `a < 0x100000` is U45 word `a`; `0x100000 <= a < 0x180000` is U46 word `a - 0x100000`; above is 0 (empty socket). U45/U46 words are read with the first file byte as the high byte.
+- Evidence: schematic sheet 2 for the layout. Byte order measured on the files (mean |s[i+1]-s[i]| over 16-bit signed words): U45 first-byte-high 1387.7, first-byte-low 21351.7; U46 first-byte-high 1431.8, first-byte-low 21464.8 (factor 15). Test: ts_word_rom_byte_order.
+- Confidence: Medium (layout), high (byte order).
+- Status: Implemented in `ens::ts::WaveMemory` (Plan 3 Task 1). Tests: ts_bank0_builds_12_bit_samples, ts_bank1_regions.
+
+## T4: Sample RAM
+- Options: 2 MB (one 1M x 8 pair), 4 MB, none.
+- Choice: 2 MB: OTTO bank 2 words 0-0xFFFFF; the rest of bank 2 and bank 3 read 0 and ignore writes (empty sockets). The CPU sees banks 2-3 at 0x400000-0xBFFFFF, word (a - 0x400000) / 2 (CPU A22..A1); a byte access reads or writes one half of the word. `WaveMemory::sampleRam` wraps its index; the machine bounds it first, so an empty socket never aliases the installed pair.
+- Evidence: design section 4; service manual SIMM text; the OS's socket probe at boot (words written at 0x400000, 0x600000, 0x800000, 0xA00000 and read back: steps of one 1M x 8 pair). None, 2 MB, 2 MB aliased over the window, and empty sockets reading 0xFFFF all boot with the same event sequence and no "WRONG SOCKETS" text (docs/ts-hardware-interface.md, "Memory map").
+- Confidence: Medium for the window base; low for the installed size and empty-socket reads (the boot cannot tell).
+- Status: Storage in `WaveMemory::sampleRam` (Task 1); window in `Machine::hostWord` and `Machine::write8` (Task 4). Tests: ts_sample_ram_bank2, ts_ram_alias_and_sample_window.
+
+## T11: Audio routing
+- Options: how the 20-bit OTTO values enter the 16-bit ESP ports; which channels feed what; ESP instructions per frame.
+- Choice: OTTO ch0-2 to ESP SER0, SER2, SER3 as `sat16(v20 >> 4)`. Main L/R = ESP SER1. Aux L/R = OTTO ch3 as `sat16(v20 >> 4)`. ch4/5 dropped. `Esp::advance(103)` per frame (9 216 000 / 3 / 29 761.9 = 103.2, E30's 3 clocks per instruction); 0 while the ESP is halted.
+- Evidence: schematic sheets 1 and 3 (SER0-2 re-clocked to ESP SER0, SER2, SER3; SER3 to the analog board).
+- Confidence: Bit alignment medium-low (check levels by ear in Plan 4).
+- Status: implemented in `ens::ts::Board::route` (Plan 3 Task 2). Tests: tests/test_ts_board.cpp.
+
+## T1: Clocks and scheduling
+- Options: the CPU/OTTO crystal (the schematic's digit is unreadable); how the CPU, OTTO, DUART and ESP share time.
+- Choice: CPU = OTTO = 15 238 090 Hz (30.47618 MHz / 2, the KS-32's crystal), so a 32-voice frame is 512 CPU clocks (29 761.9 Hz). DUART X1 4 MHz; 16x serial clocks 500 kHz on IP3/IP4 (channel A, 31 250 baud) and 1 MHz on IP5/IP6 (channel B, 62 500 baud). The board's 2681 takes RxCB from IP6, the core (68681) from IP2, so the 1 MHz RxCB clock is set on the core's IP2 clock input; the IP2 level (DENS) stays a separate input. ESP 9 216 000 Hz (103 instructions per frame, T11). Per voice slot the CPU runs 16 clocks less the carried overshoot (a carry of 16 or more skips the CPU), then `Otto::stepVoice`, then the DUART by the exact rational accumulator `acc += 16 * 4 000 000; x1 = acc / 15 238 090`. `Machine::cycles()` is the raw CPU total (the time base of `BusEvent.cycle`): 40 reset clocks + 16 per slot, plus up to one instruction's overshoot still carried.
+- Evidence: schematic sheet 1 (crystals); notes §4 (16 CLKs per voice); the KS-32 scheduler. Task 4: the OS writes CSRA = CSRB = 0xEE; without a clock on channel B it never sends (it polls TxRDYB). Its boot clock check (a 10 ms DUART timer, then a read of a running OTTO voice's ACCUM) passes; the boot is unchanged for X1 rates from 3.7 to 4.7 MHz relative to the CPU and stalls at 3.4 MHz, so the check pins the CPU clock only loosely.
+- Confidence: Low-medium for the CPU clock (the firmware's check is loose); medium for the serial clocks; the scheduling is exact.
+- Status: implemented in `ens::ts::Machine::slot` and `Machine::create` (Plan 3 Tasks 3-4). Test: ts_frame_cadence.
+
+## T7: DUART wiring
+- Options: which DUART pins carry which board signal.
+- Choice: channel A = MIDI (`kMidiChannel` 0), channel B = the display/keyboard link (`kPanelChannel` 1). OP0-2 select the analog mux input on the OTTO POT pin (the mux switches at once; the OTTO conversion, OT16, samples it when it ends); OP6 is ESPHALT, active high (the ESP's HALT pin is high while OPR bit 6 is 0, i.e. `outputPins()` bit 6 set). IP0-5 rest high. OP3 is SEQLED/, the Seqs/Songs LED (T15); OP4 KRES, OP5 DRES and OP7 SACK/ go to the panel (T19).
+- Evidence: schematic sheet 1 (DUART U10 pin list); the core's `outputPins()` returns the pin level, the inverse of OPR.
+- Confidence: High for the signals. Medium for the OP6 polarity: with it the OS halts the ESP at 1.3 ms, downloads to it while halted and releases it at 1819 ms (halted again from 3301 to 3376 ms, then running; Task 6 measurement); the reverse polarity runs the ESP during the downloads and leaves it halted after the boot (Task 4).
+- Status: implemented in `Machine::updateLines` (Plan 3 Task 3).
+
+## T14: RESET instruction
+- Options: reset all devices, or only those on BRES/.
+- Choice: the OTTO only. The DUART and FDC are on the power-on-only BRES and are untouched.
+- Evidence: schematic sheet 1.
+- Confidence: Medium.
+- Status: implemented in `Machine::resetPeripherals` (Plan 3 Task 3).
+
+## T13: Address map and RAM
+- Options: RAM size (128 KB, 256 KB, 512 KB) and windows; whether the top window (reset SSP 0xFF80A0) is the RAM at 0 or a separate RAM; the reset overlay; where the I/O1 and I/O2 devices sit; the ROM mirror. SEQEXP (U1/U2, the SQX-70 kit): fitted or not, and where. The battery image's layout. What a power cycle keeps.
+- Choice: OSRAM (U3/U4) 256 KB: 0x000000-0x037FFF, and its top 32 KB again at 0xFF8000-0xFFFFFF (the window 0xFC0000-0xFFFFFF aliases all 256 KB; only 0xFF8000 up is seen in use). SEQEXP (U1/U2) 256 KB at 0x038000-0x077FFF; nothing above it. **Default: a stock TS-10, SEQEXP not fitted** (design section 4 lists the SQX-70 as a non-goal): SEQEXP/ is decoded but its sockets are empty, so 0x038000-0x077FFF reads 0 and ignores writes, untraced (as T4's empty sample-RAM sockets), the OS's probe fails and it offers the stock 31 775 events. `Machine::create(roms, err, sqx70 = true)` (`tsemu --sqx70`) fits the expander: 97 311 events. Reads of 0-7 come from the ROM until the first write into 0-7 (the KS-32 K1 rule). I/O1 at 0x200000 + 0x40000 n (n = 0 DUART, 1 SCSI, 2 FDC, 3 IEXP), I/O2 at 0x300000 (OTTO) and 0x380000 (ESP); each device decoded over its whole block. ROM 0xC00000-0xC7FFFF, mirrored to 0xCFFFFF. The battery image (`Machine::ramImage`, 512 KB, the same layout with or without the expander, so the file format does not depend on the option) is OSRAM in CPU order (0xFF8000 at offset 0x38000) then SEQEXP in CPU order (0x038000 at offset 0x40000); on a stock TS the SEQEXP half is unused. `loadRamImage` is a power cycle with the battery: the RAM is replaced, the sample DRAM (T4) and the ESP delay DRAM (no battery) are cleared, the CPU and every device restart, the analog and IEXP inputs keep their values; a wrong size fails and changes nothing.
+- Evidence: the OS's first accesses land in exactly these blocks, in the schematic's U7 decoder order, with 0 unmapped accesses in the boot. 512 KB at 0 with the top aliasing offset 0 crashes at 203 ms ("SYSTEM ERROR 12"). SEQEXP (Task 8): the boot's only RAM access between 0x020000 and 0xFF8000 is a word written and read back at 0x038000 (RAM mapped everywhere in a scratch build to see it). With RAM there the Sequencer Control page shows FREE=97311, without it FREE=31775: 32 768 and 98 304 four-byte events less the same 993, the manual's "30,000 notes" and "over 97,000 notes with the SQX-70" (the difference is 65 536 events, 256 KB). A kept sequence is stored from the top of sequencer memory down: 0x077FFF with the probe answered, 0x037FFF without, so the sequencer memory ends at 0x078000 with the SQX-70 and 0x038000 without; 0x038000-0x03FFFF is never used through the low window, and 0xFF8000-0xFFFFFF (the stack, used from 0.2 ms) is OSRAM's top 32 KB. So OSRAM cannot also answer at 0x038000 (a stock TS would then report the SQX-70), and SEQEXP's 256 KB sit at 0x038000-0x077FFF, a 32 KB-aligned window PAL U68 can decode. Before Task 8 OSRAM answered at 0x038000: the OS reported the SQX-70 and a kept sequence went to unmapped space (lost). With the expander absent (the default) the probe fails, FREE is 31 775 and a kept sequence lands at 0x037FFF down, in OSRAM. A power cycle on a running machine and on a fresh one give the same audio from power-on (ts_power_cycle_on_the_same_machine). Warm and garbage power-ons: docs/ts-hardware-interface.md, "Battery RAM". Details: docs/ts-hardware-interface.md, "Memory map".
+- Confidence: High for the device windows and the low RAM window; medium for the top window and the OSRAM size; medium-high for SEQEXP's window (the probe, the free counts and where the data lands agree); low for what an empty SEQEXP socket reads (open bus on the board; 0 makes the probe fail, which is what a stock TS must do).
+- Status: implemented in `Machine::decode`, `Machine::ramIndex`, `Machine::ramImage`, `Machine::loadRamImage` (Plan 3 Tasks 4 and 8); `tsemu --ram`. Tests: ts_boot_is_fully_mapped, ts_ram_alias_and_sample_window, ts_seqexp_window_and_ram_image, ts_stock_has_no_seqexp, ts_ram_image_load_clears_volatile_memory, ts_ram_image_keeps_settings, ts_garbage_ram_boots, ts_stock_sequence_is_kept_in_osram, ts_sqx70_sequence_is_kept_in_seqexp, ts_power_cycle_on_the_same_machine.
+
+## T5: Interrupt levels
+- Options: DUART, OTTO and the disk line on levels 1-3 in any order; vectored or autovectored.
+- Choice: OTTO level 1, DUART level 3, every level autovectored (AVEC); level 2 (DISKIRQ/, pull-up only) has no source.
+- Evidence: schematic (IPL2 tied high, AVEC from U67). Booting each placement: DUART on 3 boots (all acknowledges level 3, vector 27); DUART on 1 gives "SYSTEM ERROR 17" (unexpected OTTO interrupt) at its first interrupt, DUART on 2 gives "SYSTEM ERROR 139". The OTTO never asserts IRQB in the boot, so its level comes from the OS's level-1 handler. The OS writes IVR = 0x1B (27, the level-3 autovector), which AVEC ignores.
+- Confidence: High for the DUART; medium-high for the OTTO.
+- Status: implemented in `Machine::updateLines` and `interruptAcknowledge` (Plan 3 Task 4); `setIrqLevels` keeps the levels switchable for experiments. Tests: ts_boot_takes_no_fault_vectors.
+
+## T6: Wait states
+- Options: model the DTACK delays (I/O1 +3 clocks, OTTO +2) or not.
+- Choice: not modelled.
+- Evidence: no firmware timing check fails without them: the boot's clock check passes and the boot reaches its steady state with no error text.
+- Confidence: Low (nothing in the boot needs them; a later timing-sensitive path might).
+- Status: Plan 3 Task 4: nothing implemented.
+
+## T8: Analog inputs
+- Options: the resting raw value of each mux input; how the mux select reaches the conversion; what `setAnalog` does with a value beyond 10 bits.
+- Choice: `kAnalogRest`: pitch wheel 0x200 (PTCH=064), mod wheel 0 (MOD=000), volume 0x3FF (VOL=127), CV pedal 0x3FF (PED=127, unplugged), data entry 0x14E (KNOB=127), battery 0 (BAT=000), reference 0x324 (REF=200). The mux switches at once; the OTTO's conversion (OT16) takes the select in force when it ends. `setAnalog` clamps to 0-1023 and ignores an input outside the enum.
+- Evidence: the Analog Test page (hold Presets, press Compare; service manual p28) read with one input stepped at a time (docs/ts-hardware-interface.md, "Analog inputs"). The manual's expected readings: wheels and sliders 000 down / 127 (KNOB 255) up, PED=127 with no pedal, BAT below 010, REF 180-220. The OS reads PAR every 2 ms and changes the select 30 µs after the read, so the conversion (0.54 ms) ends on the new select and each read returns the input selected 2 ms before. The pitch wheel's centre is its power-on value. A battery raw of 458 or more stops the boot at the low-battery warning. Data entry at exactly 0 makes the OS rewrite the selected value at its minimum (and "SYSTEM ERROR 144" on the Analog Test page); 1 and up are quiet. Volume at 0 is silent. Clamping: a host asking for 1024 or 0xFFFF means "all the way up".
+- Confidence: High for the path and the select table; medium for the resting values (real voltages unknown; each gives the manual's reading).
+- Status: implemented in `kAnalogRest`, `Machine::create`, `Machine::setAnalog` (Plan 3 Task 6); `tsemu boot --analog NAME=raw`. Tests: ts_cold_boot_is_clean, ts_analog_resting_values, ts_slider_moves_volume, ts_key_sounds.
+
+## T9: IEXP port
+- Options: the value read at 0x2C0001; D4-D7 high, low or floating; which footswitch number is which contact.
+- Choice: `0xFF & ~down`: D0 FSW3B/ (`footswitch(3)`, Foot Switch 2 right), D1 FSW4B/ (`footswitch(4)`, Foot Switch 2 left), D2 PSRB/ (`patchSelect(1)`), D3 PSLB/ (`patchSelect(0)`), low = pressed; D4-D7 high.
+- Evidence: schematic (U12/A, D0-D3 active low). The OS sends the patch selects as MIDI controller 70 (left 0x40, right 0x20, both 0x7F, none 0) and, with SW2-R=SUSTAIN, D0 as controller 64 while D1 needs SW2-L. Upper nibbles 0x0, 0x5, 0x7, 0xA, 0xE and 0xF give the same bus trace apart from the IEXP values: the OS masks them (docs/ts-hardware-interface.md, "IEXP port").
+- Confidence: High for D0-D3; D4-D7's real level unknown but unobservable.
+- Status: implemented in `Machine::footswitch`, `Machine::patchSelect`, `Machine::ioRead` (Plan 3 Task 6). Tests: ts_iexp_inputs, ts_patch_select_is_read, ts_footswitch2_is_read.
+
+## T10: Floppy controller and the empty drive
+- Options: no FDC (status 0), a static status, a uPD765 command/result handshake; index pulses or none; the DSKCHG and DENS levels; the ST3 and ST0 an empty drive gives.
+- Choice: `ens::ts::Fdc`: RQM always, CB while a command is open, DIO/CB while result bytes wait; uPD765 command lengths; Sense Interrupt Status ST0 0x80 (no interrupt), Sense Drive Status ST3 = drive bits only, reads "not ready"; A0 = 0 writes (the 72069's own registers) ignored. No index pulse on IP0 (DSTAT); IP1 (DSKCHG) and IP2 (DENS) high.
+- Evidence: with no index pulse the OS's drive check (Sense Drive Status, then 300 000 IPCR polls for a change on IP0-IP3) fails, and a disk command from the panel shows "DISK DRIVE NOT READY", the Musician's Manual's "No disk in the drive", then the disk page; at boot it goes on silently. Index pulses give "DISK DRIVE NOT RESPONDING" instead. IP1/IP2 levels, ST3 values (0x00-0x70) and ST0 0xC0 + PCN change nothing with the drive empty. Status 0 or a static 0x80 make the OS time out (Task 4). Details: docs/ts-hardware-interface.md, "Floppy controller and the empty drive".
+- Confidence: High for the empty-drive behaviour (no index pulse, the no-disk message); low for ST3, ST0 and the IP1/IP2 levels, which an empty drive cannot show.
+- Status: `src/ts/fdc.h`, `Machine::create` (input pins) (Plan 3 Tasks 4 and 6). Tests: ts_floppy_reports_no_disk, ts_cold_boot_is_clean.
+
+## T12: SCSI and unmapped space
+- Options: reads of the SCSI block (no board) and of unmapped space return 0 or open-bus 0xFF.
+- Choice: 0; writes ignored; every access traced (SCSI as `Device::Scsi`, the rest as `Device::Unmapped`).
+- Evidence: the OS's SCSI probe at 110 ms (write 0x02 to 0x240001, write and read 0x240003) reads 0, then writes 0x55 and reads 0, and goes on; with 0xFF it stops after the first read. Both boot the same way after that: neither reads as a SCSI board. Nothing unmapped is read in the boot.
+- Confidence: Medium.
+- Status: implemented in `Machine::ioRead` (Plan 3 Task 4).
+
+## T15: LED states
+- Options: what the parameter of `FF nn` carries beyond the LED number (bits 3-0); how `PanelState` holds a flashing LED.
+- Choice: bit 7 = lit, bit 6 = flashing; `PanelState::leds` bit n = LED n lit, bit 16 + n = LED n flashing. 16 LEDs: 0 Bank 0, 1 Presets, 2-5 Bank 2/4/6/8, 6 Replace Track Sound, 7 Seq/Song Tracks 1-6, 8 Bank 1, 9 Sounds, 10-13 Bank 3/5/7/9, 14 Compare, 15 Seq/Song Tracks 7-12. The Seqs/Songs LED is DUART OP3 (SEQLED/), not on the link.
+- Evidence: every page refreshes all 16 (`FF 0F` ... `FF 00`) with bit 7 on the lit ones; `FF C9` appears exactly where the manual says the Sounds LED flashes (Replace Track Sound). OP3 goes low on Seqs/Songs and high on Sounds (docs/ts-hardware-interface.md, "Display and LEDs").
+- Confidence: High for lit and the numbering; medium for flashing.
+- Status: implemented in `Panel::run` (Plan 3 Task 5). Tests: ts_panel_commands, ts_boot_shows_play_screen, ts_button_changes_page.
+
+## T16: Button codes
+- Options: the byte forms of a button event; which code is which button.
+- Choice: press `code | 0x80, 00`, release `code, 00`, codes 0x00-0x3F. `Button` holds the 62 panel buttons and the two Foot Switch 1 contacts (00 right, 01 left), which fill all 64 codes.
+- Evidence: from the play screen every first byte followed by `00` was sent and the display, LEDs and MIDI out compared; each code was named by the page, LED or MIDI message it gives, checked against the Musician's Manual and the service manual's self-test chart (p11); Up/Down on the System page, Record with Play, the foot switch on the System foot-switch page (docs/ts-hardware-interface.md, "Buttons").
+- Confidence: High for the forms and the codes with a page or MIDI message; medium for Compare and the foot switch naming.
+- Status: implemented in `Panel::button`, `kButtons` (Plan 3 Task 5). Tests: ts_panel_button_bytes, ts_panel_button_table, ts_button_changes_page.
+
+## T17: Keys and Poly-Key pressure
+- Options: the byte forms of key and pressure events; what `key()`'s velocity argument is.
+- Choice: key down `0x80 | k, strike`, key up `k, 0x40`, pressure `0x40 | k, amount`, k = note - 36 for the 61 keys C2-C7 (others ignored). `key()` takes the strike value the keyboard sends, clamped to 1-127; the OS maps it through its TOUCH table (VELTBL-4: strike 64 gives velocity 92 on a white key, 84 on a black one, 112 and up give 127).
+- Evidence: MIDI out: note-on `90 (k+36) vel`, note-off `80 (k+36) 40` for any nonzero release byte, aftertouch `A0 (k+36) amount` (docs/ts-hardware-interface.md, "Keys and pressure"). A strike of 0 reads as a button press, so 0 is clamped to 1.
+- Confidence: High for the forms and the mapping; low for what the strike value is physically.
+- Status: implemented in `Panel::key`, `Panel::pressure` (Plan 3 Task 5). Tests: ts_panel_button_bytes, ts_key_sounds, ts_poly_pressure_is_sent.
+
+## T18: Display command set
+- Options: which bytes are characters and which commands; their parameters; what each attribute byte does to the cells written after it.
+- Choice: 0x00-0x7E characters; 0x80-0xCF cursor to position 0-79; `D6` clear; `F5`/`F6` save/restore the cursor; `D4`/`D5` cursor right/left; `D0` flashing, `D1` plain, `D2` flashing underline, `D3` underline for the characters written after them; `E8` lets later characters keep their cells' attributes; `D9`/`DB` set/remove the underline of the cell at the cursor; `7F` and `E7` no effect; `FF nn` LED (T15); `FB nn` keyboard command (T19); anything else counted in `unknown` with no parameter. Past position 79 the cursor wraps to 0 (never seen).
+- Evidence: the boot and a sweep of every button code with the six soft buttons on each page it opens decode with `unknown` 0; field widths fix the zero-width bytes and `D5`; the manual's descriptions of the screens fix the attributes (docs/ts-hardware-interface.md, "Display and LEDs").
+- Confidence: High for text, positions, `D6`, `F5`/`F6`, `D3`, `D5`; medium for `D0`, `D1`, `D2`, `E8`, `D4`, `D9`, `DB`; low for `7F` and `E7` (effect unknown) and 0x00-0x1F (never seen).
+- Status: implemented in `Panel::fromCpu` (Plan 3 Task 5). Tests: ts_panel_commands, ts_boot_shows_play_screen.
+
+## T19: Keyboard start-up and the link lines
+- Options: what the keyboard must send for the OS to accept it; when; what KRES, DRES and SACK/ do.
+- Choice: the keyboard answers `FF` at once to `FB FD` and ignores its other commands (`FB FF`, `FB F0`, `FB DD`, `FB FC`). KRES (OP4) and DRES (OP5) are active-high resets: KRES empties the keyboard's queue and mutes it, DRES blanks the display and LEDs. The keyboard sends only while SACK/ (OP7) is low, one byte at a time when RxDB is idle.
+- Evidence: of all 256 single bytes during "CALIBRATING KEYBOARD", only `FF` ends the OS's wait, and only from the moment it queues `FB FF FB FD` to its next `FB F0`. The OS holds OP4/OP5 high only until 0.24 ms (active-low resets would keep the keyboard in reset). SACK/ goes low just before the first keyboard command and stays low; it pulses high only under a continuous line-rate flood (docs/ts-hardware-interface.md, "Keyboard link").
+- Confidence: High for the `FF` answer and the reset polarity; low for SACK/'s role (ignoring it changes no firmware test) and for what the other keyboard commands mean.
+- Status: implemented in `Panel::run`, `Panel::setLines`, `Panel::popToCpu`, `Machine::slot` and `Machine::updateLines` (Plan 3 Task 5). Tests: ts_panel_lines, ts_boot_shows_play_screen.
+
+## T20: MIDI in and out
+- Options: MIDI in straight onto DUART A's wire queue, or a second machine-side queue fed one byte at a time when the wire is idle (as the keyboard link does); what program change selects.
+- Choice: `Machine::midiIn` puts the byte on DUART A's wire queue (1024 characters, A1), which hands them to the receiver back to back at the line rate, 320 us a byte at 31 250 baud (D2). `popMidiOut` pops what left TxDA (256 kept, A2). No second queue: the keyboard link holds bytes back for SACK/ (T19), MIDI has no flow control, and the wire queue already paces a burst.
+- Evidence: the OS writes CSRA = 0xEE: channel A runs from the 500 kHz IP3/IP4 clocks, `rxBitClocks(0) == 128`. Middle C at velocity 100 on channel 1 peaks at 2256 within 300 ms (silence before: 3). 33 note-ons and 33 note-offs queued at once (198 bytes) give no overrun, nothing dropped and no warning text, and the notes release. Program change n selects bank n / 6, sound n % 6 of the current bank set (U0-0 BABY-GRAND to U0-9 REMEMBER-ME for 0-59; 60 and up not tried); after it the play screen underlines the selected sound (docs/ts-hardware-interface.md, "MIDI").
+- Confidence: High.
+- Status: implemented in `Machine::midiIn`, `Machine::popMidiOut` (Plan 3 Task 7); `tsemu render`, `tsemu bench`. Tests: ts_midi_rate, ts_midi_note_sounds, ts_midi_burst_no_overrun, ts_program_change_changes_display, ts_render_is_deterministic.

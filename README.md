@@ -7,8 +7,10 @@ emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP e
 a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of
 [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
-**Status:** Plan 2: the 68000, ESP and DUART cores (from KS-32 Reborn) and a new ES5506 OTTO core,
-written from its datasheet. No TS machine yet.
+**Status:** Plan 3: the TS-10 machine runs the unmodified OS v3.10 headless. It boots to the play
+screen and plays from the keys, the panel and MIDI; the battery RAM can be saved and loaded. `tsemu`
+boots it, renders a MIDI file to WAV and measures its speed.
+No plugin or app yet (Plan 4); nothing has been checked by ear.
 The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).
 
 ## The ROMs
