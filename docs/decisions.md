@@ -874,3 +874,17 @@ Plan 4's engine and app (TS Reborn). Where a KS-32 Reborn decision is carried ov
 - Evidence: as KS-32 A12: the jack receives the whole stream and the firmware decides what to read. The block store (A101) and the DUART (A1) bound a flood (engine_midi_overflow_is_counted).
 - Confidence: High.
 - Status: the engine side settled, Plan 4 Task 2: `// DECISION A108` at `Engine::midi` (`src/app/engine.cpp`). The processor's call comes with Task 4.
+
+## A110: Analog positions
+- Options: (a) as KS-32 A17, the wheels inverted; (b) no inversion; and whether Data Entry may reach raw 0.
+- Choice: (b). A host or GUI position is 0-1, 0 at the bottom or toward the player, and the raw value is `lround(p * 1023)`, clamped to 0-1023. NaN gives the rest value, an infinity clamps. Data Entry is clamped to 1-1023. The defaults are the `kAnalogRest` positions.
+- Evidence: nothing is inverted on the TS (docs/ts-hardware-interface.md, "Analog inputs"; KS-32's wheels read inverted, the TS's do not). Raw 0 on Data Entry makes the OS rewrite the selected value and show SYSTEM ERROR 144, so a slider or host lane at its bottom must never send it.
+- Confidence: High.
+- Status: settled, Plan 4 Task 3. `// DECISION A110` at `analogRaw` (`src/app/analog_map.h`). Tests: analog_map_round_trips_rest_values, analog_map_data_entry_never_zero.
+
+## A112: Layout units
+- Options: (a) the photo's pixels; (b) the photo scaled to a fixed design size and scaled uniformly to the window, as KS-32 A13.
+- Choice: (b), 2576 x 920 design units. Default window 1546 x 552 (60 %), minimum 1030 x 368 (40 %), aspect fixed.
+- Evidence: the arrangement and proportions follow `datasheets/ts10-photo.webp`, the left section and labels the Musician's Manual page 3 (design section 10). The table's rects were measured on the photo scaled to this size.
+- Confidence: High for the units; Medium for single rects (measured by eye on the photo, within about 10 units).
+- Status: settled, Plan 4 Task 3. `// DECISION A112` at `kDesignW` (`src/app/panel_layout.h`). Tests: panel_layout_fits_and_does_not_overlap, panel_layout_has_every_button.

@@ -26,6 +26,7 @@ set(ENS_TEST_SOURCES
   test_ts_firmware.cpp
   test_ts_panel.cpp
   test_app_engine.cpp
+  test_app_panel_layout.cpp
 )
 
 add_executable(ens_tests ${ENS_TEST_SOURCES})

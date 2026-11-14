@@ -46,7 +46,7 @@ add_library(ens_ts STATIC src/ts/roms.cpp src/ts/board.cpp src/ts/machine.cpp sr
 target_link_libraries(ens_ts PUBLIC ens_otto ens_esp ens_m68k ens_duart)
 
 # The JUCE-free engine between the machine and a host's audio callback (Plan 4): plain C++17, no file I/O.
-add_library(ens_app STATIC src/app/engine.cpp src/app/resampler.cpp)
+add_library(ens_app STATIC src/app/engine.cpp src/app/resampler.cpp src/app/panel_layout.cpp)
 target_link_libraries(ens_app PUBLIC ens_ts)
 
 # Tom Harte's per-instruction tests (.m68t reader and runner); the data itself is not in the repo.
