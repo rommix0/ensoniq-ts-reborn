@@ -11,8 +11,9 @@ a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It f
 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64 and Linux x64; see
 [docs/tsapp.md](docs/tsapp.md)). The floppy drive works: the OS reads and writes disk images (raw `.img`,
 `.gkh`, Giebler `.ede`/`.eda`) of its own and of the ASR-10 and EPS families, from the drive on the panel or
-`tsemu --disk`. `tsemu` boots the machine headless, renders a MIDI file to WAV and measures its speed. The
-sounds were checked by ear on 2026-11-14 (Plan 4); the drive has not been used in a real window yet. What a
+`tsemu --disk`. `tsemu` boots the machine headless, renders a MIDI file to WAV and measures its speed. Five
+sounds were checked by ear on 2026-11-14 (CRUNCH-ELEC, ZEP-KIT, SUITCASE-74, TRANS-CLAV, JAM-WITH-IT); levels and
+filters are still unchecked by ear, and the drive has not been used in a real window yet. What a
 person must still check is in [docs/verification-plan5.md](docs/verification-plan5.md) and
 [docs/verification-plan4.md](docs/verification-plan4.md).
 The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).

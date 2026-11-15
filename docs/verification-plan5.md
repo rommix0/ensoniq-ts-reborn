@@ -21,8 +21,7 @@ test ran.
 | Linux GCC 13.3 x64, Release (WSL Ubuntu) | `build-linux/ens_tests` | **363 passed, 0 failed** |
 
 Plan 4 ended at 321; Plan 5 added 42: `test_ts_disk.cpp` 8, `test_ts_fdc.cpp` 15, `test_ts_floppy.cpp` 7,
-and the rest in `test_app_engine.cpp` and the other test files (engine disk hand-over, write protect). Warnings: none from our files on the
-toolchains built in this task.
+`test_app_engine.cpp` 9 and 3 in other files (not itemised).
 
 ### `ens_rt_tests` (no allocation after the boot)
 
@@ -64,7 +63,7 @@ Printed, not asserted. The same on all three toolchains and equal to `AGENTS.md`
 
 | Hash | Printed by | MSVC x64 | MinGW i686 | Linux GCC x64 |
 |---|---|---|---|---|
-| Boot trace | `ts_boot_is_deterministic` | `3bfc7336098a6def` | `3bfc7336098a6def` | `3bfc7336098a6def` |
+| Boot trace (re-printed on each: `ens_tests ts_boot_is_deterministic`) | `ts_boot_is_deterministic` | `3bfc7336098a6def` | `3bfc7336098a6def` | `3bfc7336098a6def` |
 | Render | `tsemu render tests/data/player_smoke.mid` | `3374892bfdc150e6` | `3374892bfdc150e6` | `3374892bfdc150e6` |
 | Render | `tsemu render tests/data/full_chord.mid` | `524fcc64af78f175` | `524fcc64af78f175` | `524fcc64af78f175` |
 | Render | `tsemu render tests/data/filtered_patch.mid` | `01e3c8622cc8c8be` | `01e3c8622cc8c8be` | `01e3c8622cc8c8be` |
@@ -84,9 +83,9 @@ toolchains agree, so a sample-RAM bank error is not hidden behind a matching has
 | MSVC x64 Release, run 2 | host 1.343 s, x3.95 | host 8.166 s, **realtime x2.45** |
 
 Peak 21789 in both, as in Plan 4. The rule is x2 or more on MSVC and it holds. Plan 4 measured x3.79 to
-x3.85 on this loop (boot x5.84), so the machine is slower by about a third. A first run during the Linux build
-gave x1.93; it was repeated with nothing else running. The cause was not looked into (the per-slot drive
-pins and the FDC are the new work in the frame loop). The margin is small: a further slowdown needs a look.
+x3.85 on this loop. The controller ran the bench back to back on MSVC on `main` (x2.31, x2.36) and on this
+branch (x2.34, x2.37): no regression from Plan 5. The drop from Plan 4's figures is the host (today's
+machine state), not the code. A first run during the Linux build gave x1.93 (contention) and was discarded.
 
 ## What was found, by task
 
@@ -110,6 +109,8 @@ pins and the FDC are the new work in the frame loop). The margin is small: a fur
 
 ## Left open
 
+- **After an aborted FDC command** the controller is in the result phase, so stray data writes parse as command
+  bytes (Task 2 carry-over; the OS does not send them).
 - **`.hfe` and `.efe` images** are not read. Only raw, GKH and Giebler.
 - **SCSI and the CD-ROM** are absent.
 - **Confidence notes.** T23: the index period (200 ms) is a real drive's, but any edge within 0.71 s works;
