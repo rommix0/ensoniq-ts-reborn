@@ -226,6 +226,21 @@ TEST(agen_reg_alignment) {
     CHECK_EQ(b.dbase, 0x000100u);
 }
 
+// E32: DLENGTH, ABASE and BBASE have no bits 3..0; they read back as 1 whatever was written. OS v3.10
+// verifies every effect load with exactly this expectation (written low byte | 0x0F).
+TEST(agen_low_nibble_reads_as_ones) {
+    Agen a;
+    a.writeReg(245, 0x3CFE00);
+    a.writeReg(246, 0x3CFE00);
+    a.writeReg(247, 0x000000);
+    CHECK_EQ(a.readReg(245), 0x3CFE0Fu);
+    CHECK_EQ(a.readReg(246), 0x3CFE0Fu);
+    CHECK_EQ(a.readReg(247), 0x00000Fu);
+    a.writeReg(248, 0x001230);  // DBASE: no evidence, read back as written
+    CHECK_EQ(a.readReg(248), 0x001230u);
+    CHECK_EQ(a.dlength20(), 0x3CFE00u);  // the arithmetic still sees bits 3..0 as 0 (R13)
+}
+
 TEST(fifo_semantics) {
     DolFifo f;
     f.push(0x111111);

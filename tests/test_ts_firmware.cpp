@@ -805,3 +805,30 @@ TEST(ts_power_cycle_on_the_same_machine) {
     CHECK(tune.compare(0, 16, "SYSTEM  TUNE=+02") == 0);
     CHECK(pcmA == pcmB);
 }
+
+// E32: OS v3.10 reads every ESP register it loads back and compares; on a mismatch it reloads, up to 10
+// times (counter at RAM $130), then gives up with the flag at $12e set and never writes the effect's
+// tables. Effect 64 GUITAR AMP 2 (U1-3 CRUNCH-ELEC, bank LSB 1 program 19) writes ABASE = 0x3CFE00 and
+// reads its waveshaper from table A: with a failed load it is silent. Effect 71 EQ--COMPRESSOR (U1-8
+// ZEP-KIT, program 48) reads its gain curve from table A the same way.
+TEST(ts_effect_tables_load) {
+    auto m = bootFresh();
+    if (!m) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    const auto failFlag = [&] { return m->peek16(0x12E) >> 8; };
+    sendBytes(*m, {0xB0, 0x00, 0x00, 0xB0, 0x20, 0x01, 0xC0, 19});
+    runMs(*m, 600);
+    const unsigned crunchFail = failFlag();
+    for (int k : {40, 47, 52, 55}) sendBytes(*m, {0x90, static_cast<uint8_t>(k), 100});
+    const int crunch = mainPeak(*m, 500);
+    for (int k : {40, 47, 52, 55}) sendBytes(*m, {0x80, static_cast<uint8_t>(k), 64});
+    sendBytes(*m, {0xC0, 48});
+    runMs(*m, 600);
+    const unsigned zepFail = failFlag();
+    std::printf("  CRUNCH-ELEC: load failed %u, peak %d; ZEP-KIT: load failed %u\n", crunchFail, crunch, zepFail);
+    CHECK_EQ(crunchFail, 0u);
+    CHECK(crunch > 1000);
+    CHECK_EQ(zepFail, 0u);
+}

@@ -14,10 +14,11 @@ and Linux x64 (GCC). The 68000, ESP and DUART cores were copied from KS-32 Rebor
 
 ## Rules that are not negotiable
 
-- **Run the firmware; never study it.** The OS is run as-is in emulation. Do not disassemble,
-  decompile, annotate or map the firmware, and do not propose it. Hardware behaviour comes from the
-  service manual, the schematic, the chip datasheets and bus traces of the running OS. Feeding the
-  running OS candidate inputs and watching how it reacts is running it, not studying it.
+- **The firmware runs unmodified, and the app still needs the user's ROMs.** The OS is run as-is in
+  emulation; nothing from it is patched, rebuilt or shipped in place of the ROM files. Studying the
+  firmware (disassembling the OS, reading the ESP effect programs it loads, tracing them) is allowed
+  as a source of evidence since 2026-11-14 (the user's decision); cite what was found in the decision
+  entry, as for any other evidence.
 - **MAME is a comparison point, never a reference.** Do not copy MAME's behaviour to match it.
   `docs/reference/mame/` (git-ignored) holds the user's working copy of MAME's TS driver for
   comparison only; keep it out of the code.

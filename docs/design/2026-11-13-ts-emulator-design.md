@@ -60,16 +60,15 @@ the on-screen panel as on the instrument. Supporting evidence:
   manual p5). Out of scope for this project (the user's decision, 2026-11-14).
 - **SCSI**, the SQX-70 sequence expander, sample-RAM sizes above 2 MB.
 - **MIDI out to the host.** As on the KS-32, the firmware's MIDI out is read and discarded.
-- **Disassembling or mapping the firmware** (see anti-goals).
+- **Disassembling or mapping the firmware** (see anti-goals; lifted 2026-11-14).
 
 ## 5. Anti-goals: failure even if it "works"
 
 Carried over from KS-32 `AGENTS.md`, unchanged:
 
-- **Run the firmware; never study it.** No disassembly listing, annotation or decompiling of the
-  TS OS. Hardware behaviour comes from the schematic, the service manual, the chip datasheets and
-  bus traces of the running OS. A debug disassembler for the emulator's own trace is allowed, as on
-  the KS-32.
+- **Run the firmware unmodified.** The OS runs as-is from the user's ROMs. (Until 2026-11-14 this
+  also said "never study it"; the user lifted that part so the ESP effect programs could be traced.
+  Studying the firmware is now allowed as evidence.)
 - **MAME is a comparison point, never a reference.** `docs/reference/mame/esqkt_TS_Work_without
   FX.cpp` (the user's working copy of MAME's driver) may be read to compare results, never copied
   to match. Note it is wrong in at least one place already: it maps one ES5506 at 0x300000 while the

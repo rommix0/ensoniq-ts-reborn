@@ -83,9 +83,10 @@ void Agen::writeReg(int spr, uint32_t v24) {
 uint32_t Agen::readReg(int spr) const {
     switch (spr) {
         case 244: return memsiz;
-        case 245: return dlength;
-        case 246: return abase;
-        case 247: return bbase;
+        // DECISION E32: DLENGTH, ABASE and BBASE have no bits 3..0; they read back as 1.
+        case 245: return dlength | 0xF;
+        case 246: return abase | 0xF;
+        case 247: return bbase | 0xF;
         case 248: return dbase;
         default: return 0;
     }

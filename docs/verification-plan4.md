@@ -165,9 +165,10 @@ attributes `E7` and `7F`, SACK/, wait states, the CPU clock, the levels.
   block is cut silently. Pacing it or showing the count is for a later plan.
 - The disk drive (empty). The TS-12 is out of scope (the user's decision, 2026-11-14).
 - Effects that read ESP table A (found after the merge, from the user's listening): CRUNCH-ELEC (effect 64
-  GUITAR AMP 2) is silent on FX1 and ZEP-KIT (effect 71 EQ--COMPRESSOR) clicks after the release of keys
-  70-80. Every table-A read returns 0; nothing in the emulation fills the table. See `docs/tsapp.md`, "Open
-  items".
+  GUITAR AMP 2) was silent on FX1 and ZEP-KIT (effect 71 EQ--COMPRESSOR) clicked after the release of keys
+  70-80. Fixed 2026-11-14 by E32: the OS's load verification failed on the ESP's ABASE/DLENGTH read-back,
+  so it never wrote the tables. Tests agen_low_nibble_reads_as_ones and ts_effect_tables_load; the four
+  reference hashes are unchanged. User to run: listen to both sounds.
 - Deferred minors of the review rounds, none changing behaviour. Code: the editor test does not check
   begin/end gestures; no automated check of underline, blink, latch, focus release, patch buttons or the
   reset on an engine change; `paramId` falls back to Data Entry for an unknown analog; closing the editor can
