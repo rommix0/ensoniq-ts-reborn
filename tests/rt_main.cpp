@@ -208,6 +208,41 @@ TEST(rt_engine_render_does_not_allocate) {
     CHECK_EQ(n, 0u);
 }
 
+// Real time: a disk inserted, copied out and ejected through the engine allocates nothing in render (A118).
+TEST(rt_engine_disk_swap_does_not_allocate) {
+    RomSet roms;
+    if (!readTsRoms(roms)) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    std::string err;
+    auto e = ens::app::Engine::create(roms, err);
+    CHECK(e != nullptr);
+    if (!e) return;
+    constexpr int kBlock = 480;
+    e->prepare(48000, kBlock);
+    float ml[kBlock], mr[kBlock], al[kBlock], ar[kBlock];
+    for (int b = 0; b < 540; ++b) e->render(ml, mr, al, ar, kBlock);
+    auto in = Disk::formatted(Density::Double);
+    auto scratch = Disk::blank(Density::Double);
+    std::unique_ptr<Disk> copy, removed;
+    bool ok = false;
+    allocStart();
+    CHECK(e->insertDisk(std::move(in)));
+    e->render(ml, mr, al, ar, kBlock);
+    CHECK(e->takeRemoved() == nullptr);  // the empty drive's "old disk"; frees the slot
+    CHECK(e->requestDisk(std::move(scratch)));
+    e->render(ml, mr, al, ar, kBlock);
+    const bool took = e->takeDisk(copy, ok);
+    CHECK(e->insertDisk(nullptr));
+    e->render(ml, mr, al, ar, kBlock);
+    removed = e->takeRemoved();
+    const size_t n = allocStop();
+    std::printf("  allocations: %zu\n", n);
+    CHECK_EQ(n, 0u);
+    CHECK(took && ok && copy && removed);
+}
+
 // Usage: ens_rt_tests [substring]  -- runs only tests whose name contains the substring.
 int main(int argc, char** argv) {
     const char* filter = argc > 1 ? argv[1] : nullptr;

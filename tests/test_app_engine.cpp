@@ -512,3 +512,81 @@ TEST(engine_restore_happens_once_at_boot_end) {
     std::printf("  peak before the note %.5f, after %.5f\n", peakBefore, peakAfter);
     CHECK(peakAfter > 0.01f && peakAfter > 10 * peakBefore);
 }
+
+// DECISION A118: disks cross threads through single-slot atomics; the block start applies them.
+TEST(engine_insert_applies_at_block) {
+    auto e = makeEngine();
+    if (!e) return;
+    auto a = ts::Disk::formatted(ts::Density::Double);
+    auto b = ts::Disk::formatted(ts::Density::High);
+    const ts::Disk* pa = a.get();
+    const ts::Disk* pb = b.get();
+    CHECK(!e->snapshot().diskIn);
+    CHECK(e->insertDisk(std::move(a)));
+    CHECK(e->machine().disk() == nullptr);  // not before the block
+    renderMs(*e, 10);
+    CHECK(e->snapshot().diskIn);
+    CHECK(e->machine().disk() == pa);
+    CHECK_EQ(e->snapshot().diskSwaps, 1u);
+    CHECK(e->takeRemoved() == nullptr);
+    CHECK(e->insertDisk(std::move(b)));
+    renderMs(*e, 10);
+    CHECK(e->machine().disk() == pb);
+    auto old = e->takeRemoved();
+    CHECK(old.get() == pa);
+    CHECK(e->takeRemoved() == nullptr);
+    CHECK_EQ(e->snapshot().diskSwaps, 2u);
+    CHECK(e->insertDisk(nullptr));  // eject
+    renderMs(*e, 10);
+    CHECK(!e->snapshot().diskIn);
+    CHECK(e->takeRemoved().get() == pb);
+}
+
+TEST(engine_insert_twice_before_render) {
+    auto e = makeEngine();
+    if (!e) return;
+    CHECK(e->insertDisk(ts::Disk::formatted(ts::Density::Double)));
+    CHECK(!e->insertDisk(ts::Disk::formatted(ts::Density::Double)));
+    renderMs(*e, 10);
+    CHECK(e->insertDisk(nullptr));
+}
+
+TEST(engine_copy_out) {
+    auto e = makeEngine();
+    if (!e) return;
+    auto d = ts::Disk::formatted(ts::Density::Double);
+    d->block(7)[3] = 0x5A;
+    e->insertDisk(std::move(d));
+    renderMs(*e, 10);
+    CHECK(e->requestDisk(ts::Disk::blank(ts::Density::Double)));
+    CHECK(!e->requestDisk(ts::Disk::blank(ts::Density::Double)));  // one pending
+    std::unique_ptr<ts::Disk> out;
+    bool ok = false;
+    CHECK(!e->takeDisk(out, ok));  // not before the block
+    renderMs(*e, 10);
+    CHECK(e->takeDisk(out, ok));
+    CHECK(ok && out);
+    CHECK_EQ(out->block(7)[3], 0x5A);
+    CHECK(!e->takeDisk(out, ok));
+}
+
+TEST(engine_copy_out_density_mismatch) {
+    auto e = makeEngine();
+    if (!e) return;
+    e->insertDisk(ts::Disk::formatted(ts::Density::Double));
+    renderMs(*e, 10);
+    CHECK(e->requestDisk(ts::Disk::blank(ts::Density::High)));
+    renderMs(*e, 10);
+    std::unique_ptr<ts::Disk> out;
+    bool ok = true;
+    CHECK(e->takeDisk(out, ok));
+    CHECK(!ok);
+    CHECK(out != nullptr);  // the scratch comes back to be freed here
+    CHECK(e->takeRemoved() == nullptr);  // the first insert took out nothing; this frees the slot
+    e->insertDisk(nullptr);
+    renderMs(*e, 10);
+    CHECK(e->requestDisk(ts::Disk::blank(ts::Density::Double)));
+    renderMs(*e, 10);
+    CHECK(e->takeDisk(out, ok));
+    CHECK(!ok);  // an empty drive
+}

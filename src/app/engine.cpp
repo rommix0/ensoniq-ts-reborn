@@ -19,6 +19,12 @@ std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err)
 
 Engine::Engine(std::unique_ptr<ts::Machine> m) : m_(std::move(m)), ram_(m_->ramImage().size()) {}
 
+Engine::~Engine() {  // message thread, audio stopped: free what is still in a slot
+    delete swapIn_.load();
+    delete removed_.load();
+    delete scratch_.load();
+}
+
 void Engine::prepare(double outRate, int maxBlock) {
     outRate_ = outRate;
     maxBlock_ = std::max(1, maxBlock);
@@ -200,6 +206,37 @@ bool Engine::takeRam(std::vector<uint8_t>& out) {
     return true;
 }
 
+// DECISION A118: each slot has one writer at a time, handed over by a release store of its flag and read
+// after an acquire load of it. The audio thread only moves pointers and copies into the caller's scratch.
+bool Engine::insertDisk(std::unique_ptr<ts::Disk> d) {
+    if (swapWanted_.load(std::memory_order_acquire)) return false;
+    swapIn_.store(d.release(), std::memory_order_relaxed);
+    swapWanted_.store(true, std::memory_order_release);
+    return true;
+}
+
+std::unique_ptr<ts::Disk> Engine::takeRemoved() {
+    if (!removedFull_.load(std::memory_order_acquire)) return nullptr;
+    std::unique_ptr<ts::Disk> d(removed_.exchange(nullptr, std::memory_order_relaxed));
+    removedFull_.store(false, std::memory_order_release);
+    return d;
+}
+
+bool Engine::requestDisk(std::unique_ptr<ts::Disk> scratch) {
+    if (!scratch || copyState_.load(std::memory_order_acquire) != 0) return false;
+    scratch_.store(scratch.release(), std::memory_order_relaxed);
+    copyState_.store(1, std::memory_order_release);
+    return true;
+}
+
+bool Engine::takeDisk(std::unique_ptr<ts::Disk>& out, bool& ok) {
+    if (copyState_.load(std::memory_order_acquire) != 2) return false;
+    ok = copyOk_.load(std::memory_order_relaxed);
+    out.reset(scratch_.exchange(nullptr, std::memory_order_relaxed));
+    copyState_.store(0, std::memory_order_release);
+    return true;
+}
+
 // DECISION A101: a byte at offset o enters before machine frame floor(o * kFrameHz / outRate) of the
 // block; the store holds 1024 bytes a block, and the rest are dropped and counted.
 // DECISION A108: every byte goes to MIDI IN unchanged, as the jack would carry it; the OS reads pressure itself.
@@ -259,6 +296,19 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         apply(held_);
         holding_ = false;
     }
+    // DECISION A118: a swap waits while the last removed disk is untaken, so none is lost or freed here.
+    if (swapWanted_.load(std::memory_order_acquire) && !removedFull_.load(std::memory_order_acquire)) {
+        std::unique_ptr<ts::Disk> old = m_->insertDisk(std::unique_ptr<ts::Disk>(swapIn_.exchange(nullptr)));
+        removed_.store(old.release(), std::memory_order_relaxed);
+        removedFull_.store(true, std::memory_order_release);
+        ++diskSwaps_;
+        swapWanted_.store(false, std::memory_order_release);
+    }
+    if (copyState_.load(std::memory_order_acquire) == 1) {
+        const ts::Disk* cur = m_->disk();
+        copyOk_.store(cur && cur->copyInto(*scratch_.load(std::memory_order_relaxed)), std::memory_order_relaxed);
+        copyState_.store(2, std::memory_order_release);
+    }
     blockStart();
     blockFrame_ = 0;
     for (int done = 0; done < frames;) {
@@ -288,6 +338,9 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         snap_.notes = notes_;
         snap_.programsSent = programsSent_;
         snap_.programSeq = programSeq_;
+        snap_.diskIn = m_->disk() != nullptr;
+        snap_.diskWrites = m_->disk() ? m_->disk()->writes() : 0;
+        snap_.diskSwaps = diskSwaps_;
         snapMu_.unlock();
     }
     // The acquire on ramReady_ pairs with takeRam's release, so its reads of ram_ end before this

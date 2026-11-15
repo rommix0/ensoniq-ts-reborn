@@ -44,10 +44,14 @@ struct Snapshot {
     std::array<uint64_t, 2> notes{};  // MIDI-in note mask, bit n is note n (A107)
     uint32_t programsSent = 0;  // selections the engine has sent into MIDI in since create (A105)
     uint32_t programSeq = 0;    // program changes tracked from MIDI out or in, not the engine's own sends
+    bool diskIn = false;        // a disk is in the drive (A118)
+    uint32_t diskWrites = 0;    // Disk::writes() of the disk in the drive
+    uint32_t diskSwaps = 0;     // inserts and ejects applied, so a copy can be matched to its disk
 };
 
 class Engine {
 public:
+    ~Engine();
     static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err);
     // Message thread, audio stopped:
     void prepare(double outRate, int maxBlock);  // allocates the resampler and buffers
@@ -62,6 +66,12 @@ public:
     Snapshot snapshot() const;  // A103
     void requestRam();          // the next block copies the RAM
     bool takeRam(std::vector<uint8_t>& out);  // true once a requested copy is ready
+    // DECISION A118: disks cross threads in single-slot atomics, applied at the next block start; the audio
+    // thread never allocates or frees one. The caller allocates a scratch disk and frees what comes back.
+    bool insertDisk(std::unique_ptr<ts::Disk> d);  // nullptr ejects; false while a swap is pending
+    std::unique_ptr<ts::Disk> takeRemoved();       // the disk the last swap took out; nullptr when none
+    bool requestDisk(std::unique_ptr<ts::Disk> scratch);  // a disk of the current density; false when pending
+    bool takeDisk(std::unique_ptr<ts::Disk>& out, bool& ok);  // true once done; ok false: no disk or other density
     // Audio thread:
     void midi(int offset, const uint8_t* data, int size);  // before render, offsets in this block (A101)
     // Any frames >= 0, in pieces of maxBlock.
@@ -131,6 +141,13 @@ private:
     std::array<uint16_t, ts::kAnalogCount> wantAnalog_{};  // A106
     std::array<bool, ts::kAnalogCount> wantSet_{};
     std::atomic<bool> ramWanted_{false}, ramReady_{false};
+    // A118. swapWanted_ publishes swapIn_ (message to audio) and clears when applied; removedFull_ publishes
+    // removed_ (audio to message); copyState_ 0 idle, 1 requested (scratch_ set), 2 done (copyOk_ set).
+    std::atomic<bool> swapWanted_{false}, removedFull_{false};
+    std::atomic<ts::Disk*> swapIn_{nullptr}, removed_{nullptr}, scratch_{nullptr};
+    std::atomic<int> copyState_{0};
+    std::atomic<bool> copyOk_{false};
+    uint32_t diskSwaps_ = 0;
 };
 
 }  // namespace ens::app
