@@ -1,6 +1,8 @@
 // The OS v3.10 with a disk in the drive (T23, T24): the user's ED-001 (EPS-16 PLUS, DD, GKH) and AD-001
 // (ASR-10, HD, raw) images from ENS_DISK_DIR. Skipped without the ROMs or the images.
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -168,4 +170,122 @@ TEST(ts_empty_drive_still_reports_no_disk) {
     const Seen s = watch(*m, 3000, "DISK DRIVE NOT READY");
     CHECK(s.text);
     CHECK(!s.notResponding);
+}
+
+namespace {
+
+// A voice started from sample RAM: a CR write (pages 0x00-0x3F, register 0) with BS1:BS0 = 3, the bank the OS
+// gives BankSet S8 (T4). Follows the page register (15) and CR's byte 2 (bits 15-8); byte 3 completes the write.
+struct SampleVoices {
+    int count = 0;
+    unsigned page = 0, bs = 0;
+    void operator()(const BusEvent& e) {
+        if (e.dev != Device::Otto || !e.write) return;
+        const unsigned ha = (e.addr >> 1) & 0x3F, reg = ha >> 2, byte = ha & 3;
+        if (reg == 15 && byte == 3) page = e.value & 0x7F;
+        if (reg != 0 || page >= 0x40) return;
+        if (byte == 2) bs = (e.value >> 6) & 3;
+        if (byte == 3 && bs == 3) ++count;
+    }
+};
+
+// Loads the disk's first sampled sound into S8-0, selects it and plays C-E-G for 400 ms (Musician's Manual,
+// Section 14, "Loading a Sampled Sound" and "Selecting and Playing a Sampled Sound").
+void loadsAndPlays(const char* rel) {
+    auto disk = loadDisk(rel);
+    if (!disk) return;
+    const std::string name = firstSoundName(*disk);
+    auto m = bootWith(std::move(disk));
+    if (!m) return;
+    openDiskLoad(*m);
+    CHECK(watch(*m, 3000, "FILE=" + name).text);
+    tap(*m, Button::Soft3);  // *YES*: USE BANK BUTTONS TO SELECT LOCATION, BANKSET=8
+    CHECK(shows(m->panel(), "BANKSET=8"));
+    m->button(Button::Bank0, true);
+    runMs(*m, 60);
+    m->button(Button::Bank0, false);
+    CHECK(watch(*m, 2000, "LOADING " + name).text);
+    const Seen done = watch(*m, 30000, "LOAD FILE=");  // back on the Load page when the sound is in
+    CHECK(done.text);
+    CHECK(!done.notReady && !done.notResponding);
+    tap(*m, Button::Sounds);
+    m->button(Button::BankSet, true);  // BankSet held, Bank 8: BankSet S8
+    runMs(*m, 60);
+    tap(*m, Button::Bank8);
+    m->button(Button::BankSet, false);
+    runMs(*m, 300);
+    std::printf("  |%s|\n  |%s|\n", rowText(m->panel(), 0).c_str(), rowText(m->panel(), 1).c_str());
+    CHECK(shows(m->panel(), "S8-0 SAMPLED-SOUND"));
+    CHECK(shows(m->panel(), name.c_str()));
+    tap(*m, Button::Soft5);  // the sound's name: select it
+    SampleVoices v;
+    m->onBusEvent = [&v](const BusEvent& e) { v(e); };
+    for (int k : {60, 64, 67}) m->key(k, true, 127);
+    int peak = 0;
+    const uint64_t end = m->cycles() + static_cast<uint64_t>(400) * kCpuHz / 1000;
+    Audio a;
+    while (m->cycles() < end) {
+        m->runFrame(a);
+        peak = std::max({peak, std::abs(int{a.mainL}), std::abs(int{a.mainR})});
+    }
+    m->onBusEvent = nullptr;
+    std::printf("  peak %d, voices from sample RAM %d, emulated %.1f s\n", peak, v.count,
+                static_cast<double>(m->cycles()) / kCpuHz);
+    CHECK(v.count >= 3);
+    CHECK(peak > 1000);
+}
+
+}  // namespace
+
+// AD-001's first instrument (GRND PIANO 1, 3055 blocks, ASR-10 HD) into S8-0; it plays from sample RAM.
+TEST(ts_loads_asr10_instrument) { loadsAndPlays(kAd001); }
+
+// ED-001's first instrument (FLUTE 1, EPS-16 PLUS DD, GKH) the same way.
+TEST(ts_loads_eps_instrument) { loadsAndPlays(kEd001); }
+
+// A blank HD disk formatted by the OS (Section 13, "FORMAT -- Formatting a Blank Disk"), then the current
+// program saved to it (Disk Save page, TYPE=1-PROGRAM). The disk written out as a raw image and read back
+// into a fresh TS lists the file on its Disk Load page.
+TEST(ts_format_and_save_roundtrip) {
+    auto m = bootWith(Disk::blank(Density::High));
+    if (!m) return;
+    tap(*m, Button::Storage);
+    tap(*m, Button::Soft5);  // DISK
+    tap(*m, Button::Soft1);  // FORMAT: DISK NAME=..., *FORMAT*
+    tap(*m, Button::Soft3);  // *FORMAT*
+    CHECK(shows(m->panel(), "ALL DISK FILES WILL BE ERASED"));
+    tap(*m, Button::Soft3);  // *YES*
+    const Seen formatted = watch(*m, 60000, "DISK COMMAND COMPLETED");
+    CHECK(formatted.text);
+    CHECK(!formatted.notReady && !formatted.notResponding);
+    runMs(*m, 1500);         // back to the Disk menu
+    tap(*m, Button::Soft4);  // SAVE
+    CHECK(shows(m->panel(), "TYPE=1-PROGRAM"));
+    tap(*m, Button::Soft3);  // *YES*: SAVE FILE NAME=<the program's name>
+    const std::string row = rowText(m->panel(), 0);
+    const size_t at = row.find("NAME=");
+    CHECK(at != std::string::npos);
+    if (at == std::string::npos) return;
+    std::string name = row.substr(at + 5, 11);
+    name = name.substr(name.find_first_not_of(' '));
+    name = name.substr(0, name.find_last_not_of(' ') + 1);
+    const uint32_t before = m->disk()->writes();
+    tap(*m, Button::Soft3);  // *YES*: SAVING <name>
+    CHECK(watch(*m, 10000, "DISK COMMAND COMPLETED").text);
+    std::printf("  saved |%s|, writes %u then %u, emulated %.1f s\n", name.c_str(), before, m->disk()->writes(),
+                static_cast<double>(m->cycles()) / kCpuHz);
+    CHECK(before > 0);
+    CHECK(m->disk()->writes() > before);
+
+    DecodedImage img;
+    std::string err;
+    CHECK(decodeImage(encodeImage(*m->disk(), ImageFormat::Raw, {}), img, err));
+    auto fresh = bootWith(std::move(img.disk));
+    if (!fresh) return;
+    openDiskLoad(*fresh);
+    const Seen s = watch(*fresh, 3000, "TYPE=1-PROGRAM");  // the second row, written after the name
+    std::printf("  |%s|\n  |%s|\n", rowText(fresh->panel(), 0).c_str(), rowText(fresh->panel(), 1).c_str());
+    CHECK(s.text);
+    CHECK(rowText(fresh->panel(), 0).find("LOAD FILE=") == 0);
+    CHECK(shows(fresh->panel(), name.c_str()));
 }
