@@ -1,6 +1,7 @@
 // tsemu: runs the emulated TS-10 (OS v3.10 on the 68000 with the DUART and the OTTO/ESP board).
 //   tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] [--last <n>]
 //              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]... [--ram <file>] [--sqx70]
+//              [--disk <image>] [--save-disk <file>]
 // --trace takes a comma list of otto,esp,duart,fdc,iexp,scsi,unmapped,iack; matching bus events are
 // printed as "<cycle> <DEV> <R|W><size> <addr> <value>". --last <n> prints the last n instruction
 // addresses disassembled, to see where a run stops (the disassembler is a debugging aid).
@@ -19,8 +20,13 @@
 // always does); a shorter boot --ms prints a line and leaves the file alone, so a diagnostic run cannot
 // replace a good settings image with a half-initialised one. --sqx70 fits the SQX-70 sequence expander (SEQEXP); the default is a stock
 // TS-10 (T13). Both use the same image layout.
+// --disk <image> puts a disk image (raw .img, GKH or Giebler EDE/EDA, told apart by content, T21) in the drive
+// from power-on; the file is only read. --save-disk <file> writes the disk as it is at the end of the run, in the
+// format the file's extension gives (.gkh GKH, .ede/.eda/.edt Giebler, anything else raw; the --disk file's
+// header is kept when the format is the same); it is refused when it names the --disk file, and when the drive
+// is empty.
 //   tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] [--analog <name>=<raw>]...
-//                [--ram <file>] [--sqx70]
+//                [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>]
 // render boots for kBootMs (not written), sends each MIDI file event to MIDI in at its frame and renders
 // until the last event plus --tail (default 2000 ms); it writes Main as a 16-bit stereo WAV at kWavRate
 // (--aux writes Aux the same way) and prints one summary line and "pcm hash <16 hex>", the FNV-1a 64 of
@@ -46,6 +52,7 @@
 #include "files.h"
 #include "m68k/m68k_dis.h"
 #include "smf.h"
+#include "ts/disk_image.h"
 #include "ts/machine.h"
 #include "ts_render.h"
 #include "wav.h"
@@ -72,6 +79,7 @@ struct Options {
     uint64_t seconds = 20;                                            // bench --seconds
     std::string ram;                                                  // --ram: the battery RAM image file
     bool sqx70 = false;                                               // --sqx70: SEQEXP fitted
+    std::string disk, saveDisk;                                       // --disk, --save-disk
 };
 
 constexpr struct {
@@ -207,7 +215,8 @@ std::pair<Analog, uint16_t> parseAnalog(const std::string& v) {
     fail("bad value '" + v + "' for --analog (PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF=<raw>)");
 }
 
-std::unique_ptr<Machine> makeMachine(const Options& o) {
+// kept: the --disk file's format and header, for --save-disk.
+std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = nullptr) {
     RomSet roms;
     roms.osHigh = load(o.roms + "/os", "ts10_310h.bin");
     roms.osLow = load(o.roms + "/os", "ts10_310l.bin");
@@ -227,6 +236,13 @@ std::unique_ptr<Machine> makeMachine(const Options& o) {
             std::printf("RAM file '%s' not found: cold start (it is written at the end of a full run)\n", o.ram.c_str());
         }
     }
+    if (!o.disk.empty()) {
+        std::vector<uint8_t> file;
+        DecodedImage img;
+        if (!readFile(o.disk, file, err) || !decodeImage(file, img, err)) fail(err + " '" + o.disk + "'");
+        m->insertDisk(std::move(img.disk));
+        if (kept) *kept = std::move(img);
+    }
     return m;
 }
 
@@ -242,11 +258,22 @@ void saveRam(const Machine& m, const std::string& path, uint64_t emulatedMs) {
     if (!path.empty() && !writeFile(path, m.ramImage(), err)) fail(err + " '" + path + "'");
 }
 
+// --save-disk: the disk in the drive to the file, in the format its name gives.
+void saveDisk(const Machine& m, const Options& o, const DecodedImage& kept) {
+    if (o.saveDisk.empty()) return;
+    if (!m.disk()) fail("--save-disk: the drive is empty");
+    const ImageFormat f = formatForName(o.saveDisk);
+    std::string err;
+    const std::vector<uint8_t> header = f == kept.format ? kept.header : std::vector<uint8_t>{};
+    if (!writeFile(o.saveDisk, encodeImage(*m.disk(), f, header), err)) fail(err + " '" + o.saveDisk + "'");
+}
+
 int boot(const Options& o) {
     std::set<Device> traced;
     if (!parseTrace(o.trace, traced))
         fail("bad value '" + o.trace + "' for --trace (otto,esp,duart,fdc,iexp,scsi,unmapped,iack)");
-    auto m = makeMachine(o);
+    DecodedImage kept;
+    auto m = makeMachine(o, &kept);
 
     std::set<uint32_t> unmapped;
     std::map<int, uint8_t> duartLast;  // register -> last value written
@@ -304,6 +331,7 @@ int boot(const Options& o) {
         firstFrame = false;
     }
     saveRam(*m, o.ram, o.ms);
+    saveDisk(*m, o, kept);
     if (o.displayOnly) return 0;
 
     std::printf("ran %llu frames (%llu ms), %llu CPU cycles%s\n", static_cast<unsigned long long>(frames),
@@ -364,12 +392,14 @@ int render(const Options& o) {
     std::vector<MidiEvent> midi;
     std::string err;
     if (!readFile(o.positional[0], file, err) || !parseSmf(file, midi, err)) fail(err + " '" + o.positional[0] + "'");
-    auto m = makeMachine(o);
+    DecodedImage kept;
+    auto m = makeMachine(o, &kept);
     runMs(*m, kBootMs);
     const Rendered r = renderMidi(*m, midi, o.tailMs);
     writeWav(o.positional[1], r.main);
     if (!o.aux.empty()) writeWav(o.aux, r.aux);
     saveRam(*m, o.ram, kBootMs);  // render booted for kBootMs first
+    saveDisk(*m, o, kept);
     const size_t frames = r.main.size() / 2;
     std::printf("%zu MIDI events, %zu frames (%.3f s at %u Hz), peak %d, MIDI out %zu bytes\n", midi.size(), frames,
                 static_cast<double>(frames) / kWavRate, kWavRate, r.peak, r.midiOut);
@@ -422,9 +452,10 @@ int main(int argc, char** argv) {
         if (cmd != "boot" && cmd != "render" && cmd != "bench")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
                  "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...\n"
-                 "             [--ram <file>] [--sqx70]\n"
+                 "             [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>]\n"
                  "  tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] "
                  "[--analog <name>=<raw>]... [--ram <file>] [--sqx70]\n"
+                 "               [--disk <image>] [--save-disk <file>]\n"
                  "  tsemu bench [--roms <dir>] [--seconds <n>]");
         Options o;
         for (int i = 2; i < argc; ++i) {
@@ -451,8 +482,14 @@ int main(int argc, char** argv) {
             else if (a == "--aux") o.aux = v;
             else if (a == "--seconds") o.seconds = parseNum(a, v);
             else if (a == "--ram") o.ram = v;
+            else if (a == "--disk") o.disk = v;
+            else if (a == "--save-disk") o.saveDisk = v;
             else fail("unknown option " + a);
         }
+        std::error_code ec;
+        if (!o.disk.empty() && !o.saveDisk.empty() &&
+            (o.disk == o.saveDisk || std::filesystem::equivalent(o.disk, o.saveDisk, ec)))
+            fail("--save-disk must not name the --disk file (the image is only read)");
         if (cmd == "render") return render(o);
         if (cmd == "bench") return bench(o);
         if (!o.positional.empty()) fail("unexpected argument '" + o.positional[0] + "'");

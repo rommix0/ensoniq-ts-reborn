@@ -186,13 +186,6 @@ std::unique_ptr<Machine> bootFresh(bool sqx70 = false) {
     return m;
 }
 
-void tap(Machine& m, Button b) {
-    m.button(b, true);
-    runMs(m, 60);
-    m.button(b, false);
-    runMs(m, 300);
-}
-
 std::vector<uint8_t> midiOut(Machine& m) {
     std::vector<uint8_t> out;
     for (uint8_t b; m.popMidiOut(b);) out.push_back(b);
@@ -276,10 +269,6 @@ void chord(Machine& m, Button a, Button b) {
     tap(m, b);
     m.button(a, false);
     runMs(m, 300);
-}
-
-bool shows(const PanelState& p, const char* text) {
-    return rowText(p, 0).find(text) != std::string::npos || rowText(p, 1).find(text) != std::string::npos;
 }
 
 // Text that must never appear in normal operation: a low-battery warning, a SYSTEM ERROR, an

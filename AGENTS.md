@@ -64,7 +64,7 @@ cmake -S . -B build-linux-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_AP
 cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
 ```
 
-The release-folder (Plan 5) commands are added by that plan. The app and its checks never open a
+The release-folder (Plan 6) commands are added by that plan. The app and its checks never open a
 window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an agent session.
 
 ## Testing
@@ -73,9 +73,9 @@ window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an a
 |---|---|---|
 | Core suite | `build\ens_tests.exe`, `build-msvc\Release\ens_tests.exe` | Must pass on **both** toolchains. |
 | Real-time suite | `build\ens_rt_tests.exe`, `build-msvc\Release\ens_rt_tests.exe` | Counts allocations in `Machine::runFrame` and `Engine::render` after the boot; must be 0. Also on Linux. |
-| App checks | `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` | Headless: ROM folder, memory file, buses, parameters, state, the editor painted offscreen, the built VST3 through JUCE's host. About 35 s with the ROMs. Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`. Sets `TSR_SETTINGS_DIR` to a temp folder. |
+| App checks | `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` | Headless: ROM folder, memory file, buses, parameters, state, the editor painted offscreen, the built VST3 through JUCE's host. About 55 s with the ROMs. Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`. Sets `TSR_SETTINGS_DIR` to a temp folder. |
 | 68000 suite | `ctest --test-dir build -R m68k_suite` | Needs Tom Harte's tests (`testdata/`, ignored; see `docs/m68k.md`). `-DENS_M68K_TESTS_DIR=` can point at the KS-32 repo's local copy. |
-| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image; written back only after a run of at least the boot time), `--sqx70`: see the comment at the top of `tools/tsemu/main.cpp`. |
+| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image; written back only after a run of at least the boot time), `--sqx70`, `--disk <image>` and `--save-disk <file>` (a disk image in the drive; the disk written out at the end): see the comment at the top of `tools/tsemu/main.cpp`. |
 | TS render | `build\tsemu.exe render tests/data/player_smoke.mid out.wav` | Boots, plays the MIDI file, writes Main as a WAV and prints `pcm hash <16 hex>`. |
 | Speed | `build-msvc\Release\tsemu.exe bench` | Realtime factor of a 20 s chord load after the boot; must stay at x2 or more on MSVC. |
 
@@ -83,15 +83,18 @@ window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an a
 Linux GCC, and must not change unless a change is meant to alter emulation output. When one changes on
 purpose, record the new value here and in the current verification report.
 
-| Hash | Printed by | Value (Plan 3) |
+| Hash | Printed by | Value (Plan 3, unless noted) |
 |---|---|---|
 | Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `3bfc7336098a6def` |
-| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `4a751109deae8b89` |
+| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `3374892bfdc150e6` (Plan 5 Task 4, T4: the parked voice 0 now reads S8's first words in OTTO bank 3; one sample 1 LSB apart from Plan 3's `4a751109deae8b89`) |
 | Render | `tsemu render tests/data/full_chord.mid` | `524fcc64af78f175` |
 | Render | `tsemu render tests/data/filtered_patch.mid` | `01e3c8622cc8c8be` |
 
 Firmware tests read the ROMs from `ENS_ROM_DIR` (default `roms/`) and print "skip: ROMs not found"
-without them.
+without them. The disk tests read the user's disk images from `ENS_DISK_DIR` (a CMake cache variable, a
+compile-time path; empty by default): `-DENS_DISK_DIR="<folder with AD-001.img, ED-001.GKH, the blank
+Giebler files>"`. With it empty, `image_user_files` and the floppy tests that need those images print
+"skip: disk images not found". The images are the user's own and are never copied into the repo.
 
 Tests use the tiny registry in `tests/check.h` (`TEST(name) { CHECK(...); CHECK_EQ(a, b); }`). A new
 test file is one line in `ENS_TEST_SOURCES` in `tests/CMakeLists.txt`. For bugs, write the failing test

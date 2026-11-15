@@ -14,6 +14,7 @@ endif()
 set(ENS_M68K_TESTS_DIR "${CMAKE_SOURCE_DIR}/testdata/680x0/68000/m68t" CACHE PATH
   "Converted Tom Harte 68000 tests (.m68t, see docs/m68k.md); m68k_suite skips when absent")
 set(ENS_ROM_DIR "${CMAKE_SOURCE_DIR}/roms" CACHE PATH "TS ROM directory (roms/, see roms/README.txt)")
+set(ENS_DISK_DIR "" CACHE PATH "Folder of user disk images; image_user_files skips when empty")
 option(ENS_BUILD_APP "Build the JUCE app (MSVC x64 or Linux x64)" OFF)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})  # build/ens_tests
@@ -46,7 +47,7 @@ add_library(ens_duart STATIC src/duart/duart.cpp)
 target_link_libraries(ens_duart PUBLIC ens_common)
 
 # TS machine (Plan 3): ROM set, wave memory; the machine itself joins in later tasks.
-add_library(ens_ts STATIC src/ts/roms.cpp src/ts/board.cpp src/ts/machine.cpp src/ts/panel.cpp)
+add_library(ens_ts STATIC src/ts/roms.cpp src/ts/board.cpp src/ts/machine.cpp src/ts/panel.cpp src/ts/disk.cpp src/ts/disk_image.cpp src/ts/fdc.cpp)
 target_link_libraries(ens_ts PUBLIC ens_otto ens_esp ens_m68k ens_duart)
 
 # The JUCE-free engine between the machine and a host's audio callback (Plan 4): plain C++17, no file I/O.

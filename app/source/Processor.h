@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "AppSettings.h"
+#include "DiskDrive.h"
 #include "app/engine.h"
 
 // DECISION A117: File, the Standalone: the memory file is the machine's memory, saved on close and every
@@ -38,6 +39,10 @@ public:
     void tick();
     bool prepared() const { return rate_ > 0; }  // prepareToPlay has run: an audio device is open
     const AppSettings& settings() const { return settings_; }
+    // The floppy drive's file side (A119), message thread. The disk is not part of the state (A119).
+    DiskDrive& drive() { return drive_; }
+    // Counts the engines made by restart, so the drive knows its counts belong to a replaced one (A119).
+    uint32_t engineGeneration() const { return engineGen_.load(); }
 
     // Message thread. Each suspends processing around the engine swap itself.
     // Stores dir and, when all six ROMs are good, re-creates the machine keeping its memory.
@@ -54,7 +59,8 @@ public:
     bool copyToSharedMemory(juce::String& err);
 
     void prepareToPlay(double sampleRate, int maximumExpectedSamplesPerBlock) override;
-    void releaseResources() override {}
+    // DECISION A119: the device stopped: prepared() is false until the next prepareToPlay.
+    void releaseResources() override { rate_ = 0; }
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override;
     using AudioProcessor::processBlock;
@@ -120,6 +126,8 @@ private:
     juce::AudioProcessorValueTreeState params_;
     std::atomic<float>* analogRaw_[5] = {};  // kAnalogParams' order (Processor.cpp)
     std::atomic<float>* sound_ = nullptr;
+    std::atomic<uint32_t> engineGen_{0};
+    DiskDrive drive_{*this};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TsProcessor)
 };

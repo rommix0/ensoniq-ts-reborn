@@ -95,7 +95,9 @@ protected:
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override {
         using R = juce::AccessibilityRole;
         const auto k = c_.kind;
-        const R role = k == ControlKind::Button || k == ControlKind::Patch || k == ControlKind::Key ? R::button
+        const bool pressed = k == ControlKind::Button || k == ControlKind::Patch || k == ControlKind::Key ||
+                             k == ControlKind::Decor;  // Decor: the disk drive (A119)
+        const R role = pressed                                                                     ? R::button
                        : k == ControlKind::Slider || k == ControlKind::Wheel                       ? R::slider
                        : k == ControlKind::Display                                                 ? R::staticText
                                                                                                    : R::image;
@@ -296,6 +298,38 @@ public:
     }
 };
 
+// DECISION A119: the disk drive drawn on the panel is the drive's control: a click opens its menu. The slot
+// shows the drive's slot text (the file name, "(modified)"), read from the snapshot as the display is.
+class DrivePart : public Part {
+public:
+    DrivePart(PanelEditor& ed, const Control& c) : Part(ed, c) {
+        setTooltip("Disk drive: click for the disk menu, or drop a disk image on the panel");
+        setBounds(rect(c.r));
+    }
+    void mouseDown(const juce::MouseEvent&) override { ed_.driveMenu(this); }
+    void refresh() {
+        if (ed_.slotText() != drawn_) repaint();
+    }
+    void paint(juce::Graphics& g) override {
+        drawn_ = ed_.slotText();
+        const auto r = getLocalBounds().toFloat();
+        box(g, r, kBack, kButtonEdge, 4.0f, 2.0f);
+        const auto slot = r.reduced(26.0f, 22.0f);
+        box(g, slot, kGroove, kEdge, 2.0f);
+        if (drawn_.isEmpty()) return;
+        g.setColour(kText);
+        g.setFont(labelFont(24.0f, false));
+        g.drawFittedText(drawn_, slot.reduced(10.0f).toNearestInt(), juce::Justification::centred, 3, 0.7f);
+    }
+
+private:
+    juce::AccessibilityActions actions() override {
+        return juce::AccessibilityActions().addAction(juce::AccessibilityActionType::press,
+                                                      [this] { ed_.driveMenu(this); });
+    }
+    juce::String drawn_;
+};
+
 // The sliders and wheels are host parameters (A111), never Analog events: the processor writes the
 // parameters into the machine every block. A vertical drag moves the position from where it was over
 // the control's travel, up raising it (nothing is inverted on the TS, A110). The pitch wheel springs
@@ -493,8 +527,13 @@ public:
                     p = std::move(k);
                     break;
                 }
-                case ControlKind::Label:
-                case ControlKind::Decor: painted_.push_back(&c); continue;
+                case ControlKind::Decor: {
+                    auto d = std::make_unique<DrivePart>(ed, c);
+                    drive_ = d.get();
+                    p = std::move(d);
+                    break;
+                }
+                case ControlKind::Label: painted_.push_back(&c); continue;
             }
             addAndMakeVisible(*p);
             parts_.push_back(std::move(p));
@@ -515,6 +554,7 @@ public:
     void refresh() {
         for (auto* k : keys_) k->refresh();
         for (auto* a : analogs_) a->refresh();
+        if (drive_ != nullptr) drive_->refresh();
     }
     // A new engine: nothing held, nothing latched; nothing is posted.
     void reset() {
@@ -565,11 +605,6 @@ public:
 
         for (const Control* c : painted_) {
             const auto r = rect(c->r);
-            if (c->kind == ControlKind::Decor) {  // the disk drive: a bezel round an empty slot
-                box(g, r.toFloat(), kBack, kButtonEdge, 4.0f, 2.0f);
-                box(g, r.toFloat().reduced(26.0f, 22.0f), kGroove, kEdge, 2.0f);
-                continue;
-            }
             if (c->ink == Ink::Decal) {
                 // The model decal: "TS-10" and its line, no maker's name or logo.
                 g.setColour(kDecal);
@@ -609,7 +644,8 @@ private:
     std::vector<AnalogPart*> analogs_;
     KeyPart* held_ = nullptr;  // the key the mouse plays
     bool keyDrag_ = false;
-    std::vector<const Control*> painted_;  // labels and decor, drawn by the board
+    DrivePart* drive_ = nullptr;
+    std::vector<const Control*> painted_;  // labels, drawn by the board
     std::vector<const Control*> arrows_;   // Up and Down
     juce::Component* display_ = nullptr;
 };
@@ -697,6 +733,15 @@ bool PanelEditor::sameEngine() {
 juce::String PanelEditor::romError() const {
     if (!proc_.engine()) return proc_.romError();
     return proc_.prepared() ? juce::String() : juce::String("No audio device");
+}
+
+juce::String PanelEditor::slotText() const { return proc_.drive().slotText(); }
+
+void PanelEditor::driveMenu(juce::Component* target) { proc_.drive().showMenu(target); }
+
+// DECISION A119: a file dropped anywhere on the panel goes in the drive (asking first, A120).
+void PanelEditor::filesDropped(const juce::StringArray& files, int, int) {
+    if (files.size() == 1) proc_.drive().openAsked(juce::File(files[0]));
 }
 
 void PanelEditor::toggleHexCodes() {

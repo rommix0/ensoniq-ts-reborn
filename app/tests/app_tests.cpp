@@ -1,8 +1,9 @@
 // TS Reborn app checks (from KS-32 Reborn's): checkRomFolder on a temp folder of dummy files the right
 // size (never ROM content), the memory file's load and save, the processor's memory-file guards and its
 // parameters (A111). On the real ROMs: the sound follow (A111), the plugin state and memory per format
-// (A117), the two output buses (A109), the panel editor clicked and painted offscreen (A113-A115), and the
-// built TS Reborn.vst3 loaded, played and its editor opened through JUCE's own VST3 host, as a DAW would.
+// (A117), the two output buses (A109), the panel editor clicked and painted offscreen (A113-A115), the disk
+// drive on temp files (A119), and the built TS Reborn.vst3 loaded, played and its editor opened through JUCE's
+// own VST3 host, as a DAW would.
 // No check puts a window on the desktop. Every check sets TSR_SETTINGS_DIR to a temp folder.
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -15,6 +16,7 @@
 #include <thread>
 
 #include "../source/AppSettings.h"
+#include "../source/DiskDrive.h"
 #include "../source/MemoryFile.h"
 #include "../source/PanelEditor.h"
 #include "../source/Processor.h"
@@ -956,6 +958,189 @@ void editor(const juce::File& dir) {
     ed.reset();
 }
 
+// One Write Data of cylinder 0, head 0, sector 0 put straight into the floppy controller between blocks, as
+// fdc_write_data_counts_write does: MSR at 0x280001, data at 0x280003 (CPU A1 = FDC A0). Waits, a block at a
+// time, for the OS to leave the controller idle (MSR 0x80). Returns ST1: 0x80 written, 0x02 write protected,
+// 0x01 no address mark (the wrong data rate); -1 when the controller never went idle.
+int writeSector(TsProcessor& p, uint8_t fill = 0xA5) {
+    auto& m = p.engine()->machine();
+    for (int i = 0; i < 100 && m.read8(0x280001) != 0x80; ++i) run(p, 10);
+    if (m.read8(0x280001) != 0x80) {
+        std::printf("  write data: MSR %02x\n", m.read8(0x280001));
+        return -1;
+    }
+    m.write8(0x280001, 0x88);  // the DD data rate, as the OS selects it from DENS before a transfer (T24)
+    for (const int b : {0x45, 0x00, 0, 0, 0, 2, 0, 0x1B, 0xFF}) m.write8(0x280003, static_cast<uint8_t>(b));
+    for (int i = 0; i < 512 && (m.read8(0x280001) & 0x20) != 0; ++i) m.write8(0x280003, fill);
+    uint8_t r[7];
+    for (auto& v : r) v = m.read8(0x280003);
+    std::printf("  write data: ST0-2 %02x %02x %02x, MSR %02x\n", r[0], r[1], r[2], m.read8(0x280001));
+    return r[1];
+}
+
+// disk_drive (A119): open, the size check, a write by the controller, save, write protect, a read-only file,
+// a new blank disk saved as, a restart that keeps the disk, and the slot drawn on the panel. Each save is
+// asynchronous: the copy comes with a block, the write with the tick after it. Temp files only.
+void diskDrive(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    auto& d = p.drive();
+    const auto step = [&] {  // one block, then the tick
+        run(p, 10);
+        p.tick();
+    };
+    CHECK(d.slotText().isEmpty() && !d.modified() && !p.engine()->snapshot().diskIn);
+
+    juce::String err;
+    const auto img = dir.getChildFile("disk.img");
+    write(img, 819200);  // raw DD, zeros
+    CHECK(d.open(img, err));
+    step();
+    CHECK(d.slotText() == "disk.img" && p.engine()->snapshot().diskIn && !d.modified());
+
+    // The wrong size: refused, naming the sizes; the disk in stays.
+    const auto bad = dir.getChildFile("bad.img");
+    write(bad, 1000);
+    CHECK(!d.open(bad, err) && err.contains("819200") && err.contains("1638400"));
+    step();
+    CHECK(d.slotText() == "disk.img" && p.engine()->snapshot().diskIn);
+
+    // The controller writes: "(modified)"; Save writes the file through <file>.tmp and clears it.
+    CHECK(writeSector(p) == 0x80);
+    step();
+    std::printf("  disk drive: [%s]\n", d.slotText().toRawUTF8());
+    CHECK(d.modified() && d.slotText().endsWith(" (modified)"));
+    CHECK(d.save(err));
+    step();
+    const auto saved = fileBytes(img);
+    CHECK(!d.modified() && d.slotText() == "disk.img" && !img.getSiblingFile("disk.img.tmp").exists());
+    CHECK(saved.getSize() == 819200 && static_cast<uint8_t>(saved[0]) == 0xA5 && static_cast<uint8_t>(saved[511]) == 0xA5);
+
+    // Write Protected: the controller refuses (ST1 NW), nothing changes; off again, it writes.
+    d.setWriteProtected(true);
+    step();
+    CHECK(d.writeProtected() && writeSector(p) == 0x02);
+    step();
+    CHECK(!d.modified());
+    d.setWriteProtected(false);
+    step();
+    CHECK(writeSector(p) == 0x80);
+    step();
+    CHECK(d.modified());
+
+    // A read-only file: Save is refused and the file is unchanged.
+    CHECK(img.setReadOnly(true));
+    CHECK(!d.save(err) && err.isNotEmpty());
+    step();
+    CHECK(fileBytes(img) == saved && d.modified());
+    CHECK(img.setReadOnly(false));
+
+    // A new HD disk saved as x.img: 1 638 400 bytes, the drive's file from then on.
+    d.newBlank(ens::ts::Density::High);
+    step();
+    CHECK(d.slotText() == "Untitled (blank)" && !d.modified());
+    CHECK(!d.save(err) && err.isNotEmpty());  // no file yet: Save As only
+    const auto x = dir.getChildFile("x.img");
+    CHECK(d.saveAs(x, err));
+    step();
+    CHECK(x.getSize() == 1638400 && !d.modified() && d.slotText() == "x.img");
+
+    // A restart (the same ROM folder) keeps the disk in the drive.
+    const auto* engine = p.engine();
+    CHECK(p.setRomFolder(juce::File(TSR_ROM_DIR), err) && p.engine() != engine);
+    step();
+    CHECK(p.engine()->snapshot().diskIn && d.slotText() == "x.img" && !d.modified());
+
+    // A save asked for just before a restart: the new engine is asked for the copy, and it is written.
+    CHECK(d.open(img, err));
+    step();
+    CHECK(writeSector(p, 0x5A) == 0x80);
+    step();
+    CHECK(d.modified() && d.save(err));
+    CHECK(p.setRomFolder(juce::File(TSR_ROM_DIR), err));
+    step();  // the drive sees the new engine at this tick and asks it for the copy
+    step();
+    const auto across = fileBytes(img);
+    CHECK(!d.modified() && across.getSize() == 819200 && static_cast<uint8_t>(across[0]) == 0x5A);
+    CHECK(!img.getSiblingFile("disk.img.tmp").exists());
+
+    // A save followed by New before its copy came: it fails, and the old file is kept byte for byte.
+    int calls = 0;
+    bool savedOk = true;
+    CHECK(d.save(err, [&](bool ok, const juce::String&) {
+        ++calls;
+        savedOk = ok;
+    }));
+    CHECK(d.newBlank(ens::ts::Density::Double));
+    step();
+    step();
+    CHECK(calls == 1 && !savedOk && fileBytes(img) == across && !img.getSiblingFile("disk.img.tmp").exists());
+    CHECK(d.slotText() == "Untitled (blank)");
+
+    // A save in flight: an action asked meanwhile waits for it, asks nothing, and runs after the write; a save
+    // that failed drops it (A120).
+    CHECK(d.open(img, err));
+    step();
+    CHECK(writeSector(p, 0x33) == 0x80);
+    step();
+    CHECK(d.modified() && d.save(err));
+    bool ran = false;
+    d.askThen([&] { ran = true; });  // would pop a dialog before the fix; now chained
+    CHECK(!ran);
+    step();
+    step();
+    CHECK(ran && !d.modified() && static_cast<uint8_t>(fileBytes(img)[0]) == 0x33);
+
+    // A save stuck because the audio stopped: one action waits for it, a second one asks again (so Don't Save
+    // still quits or goes on), and with the device stopped none waits; the chained one runs once audio is back.
+    CHECK(writeSector(p, 0x44) == 0x80);
+    step();
+    CHECK(d.modified() && d.save(err) && d.waitsForSave());
+    ran = false;
+    d.askThen([&] { ran = true; });
+    CHECK(!ran && !d.waitsForSave());  // a second askThen would show the prompt, not chain forever
+    p.releaseResources();
+    CHECK(!p.prepared());
+    p.prepareToPlay(48000, 480);
+    step();
+    step();
+    CHECK(ran && !d.modified() && static_cast<uint8_t>(fileBytes(img)[0]) == 0x44);
+    CHECK(writeSector(p, 0x45) == 0x80);
+    step();
+    CHECK(d.save(err));
+    p.releaseResources();
+    CHECK(d.modified() && !d.waitsForSave());  // device stopped: the save cannot finish, so askThen prompts
+    p.prepareToPlay(48000, 480);
+    step();
+    step();
+    CHECK(!d.modified() && static_cast<uint8_t>(fileBytes(img)[0]) == 0x45);
+
+    // No audio running: Open is refused at once, saying so, not "busy" (A119).
+    {
+        TsProcessor q;
+        if (q.engine()) {
+            juce::String e2;
+            CHECK(!q.drive().open(img, e2) && e2.contains("no audio") && !q.drive().newBlank(ens::ts::Density::Double));
+            CHECK(!q.drive().open(img, e2) && e2.contains("no audio"));
+        }
+    }
+
+    // The slot on the panel shows the text; empty after Eject.
+    auto slot = control(ens::app::ControlKind::Decor, -1).r;
+    slot = {slot.x + 26, slot.y + 22, slot.w - 52, slot.h - 44};
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    const int withDisk = brightPixels(paintEditor(*ed, "panel-disk.png"), slot, 0, 120);
+    d.eject();
+    step();
+    const int without = brightPixels(paintEditor(*ed, "panel-nodisk.png"), slot, 0, 120);
+    std::printf("  disk slot: %d bright pixels with the disk, %d without\n", withDisk, without);
+    CHECK(withDisk > 50 && without == 0 && d.slotText().isEmpty() && !p.engine()->snapshot().diskIn);
+    ed.reset();
+}
+
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
 // naming the ROM folder, so neither the user's settings nor their memory file is touched. Aux is off,
 // as the Standalone plays it (A109).
@@ -1045,6 +1230,7 @@ int main() {
     romsBesideApp(dir.getChildFile("beside"));
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
+    diskDrive(dir.getChildFile("disk"));
     vst3(dir.getChildFile("vst3"));
     dir.deleteRecursively();
     std::printf(failures == 0 ? "app_tests: all passed\n" : "app_tests: %d failed\n", failures);

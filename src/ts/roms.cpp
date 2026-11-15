@@ -46,7 +46,7 @@ uint16_t WaveMemory::read(int bank, uint32_t a) {
         const uint32_t i = (a & 0xFFFFF) * 2;
         return static_cast<uint16_t>((*v)[i] << 8 | (*v)[i + 1]);
     }
-    case 2:  // DECISION T4: 2 MB sample RAM = bank 2 words 0..0xFFFFF
+    case 3:  // DECISION T4: 2 MB sample RAM (BankSet S8) = bank 3 words 0..0xFFFFF; bank 2 (S9) is empty
         return a < kSampleRamWords ? ram_[a] : 0;
     default:
         return 0;

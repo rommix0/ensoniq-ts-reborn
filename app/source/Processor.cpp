@@ -187,6 +187,9 @@ bool TsProcessor::restart(Ram ram) {
     if (ok) {
         fresh->setSelect(sel.data(), static_cast<int>(sel.size()));
         if (rate_ > 0) fresh->prepare(rate_, block_);
+        // DECISION A119: the disk in the drive goes into the new machine (the OS sees a disk change).
+        if (engine_)
+            if (auto disk = engine_->releaseDisk()) fresh->insertDisk(std::move(disk));
         engine_.swap(fresh);  // fresh now holds the old engine, freed below after the resume
         startImage_ = std::move(img);
         startSelect_ = std::move(sel);
@@ -196,6 +199,7 @@ bool TsProcessor::restart(Ram ram) {
         followed_ = -1;  // a stale follow marker would make the new engine adopt the sound, not send it
         ticks_ = 0;
         romError_ = {};
+        ++engineGen_;
     } else if (!engine_) {
         romError_ = juce::String(e);
     }
@@ -207,6 +211,7 @@ bool TsProcessor::restart(Ram ram) {
 // tick that finds the copy (takeRam) saves it; 1800 ticks of the 30 Hz timer make the 60 s.
 void TsProcessor::tick() {
     if (!engine_) return;
+    drive_.poll();  // A119: a removed disk freed, a save's copy written
     // DECISION A111 (as KS-32 A18): follow a program change tracked from the panel or MIDI (programSeq
     // moved), never the engine's own sends. followed_ is stored first, then `sound` is written, so a
     // processBlock that sees the new `sound` also finds the marker (and adopts the value instead of
