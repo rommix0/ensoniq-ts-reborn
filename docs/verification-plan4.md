@@ -163,16 +163,17 @@ attributes `E7` and `7F`, SACK/, wait states, the CPU clock, the levels.
 - MIDI in over 1024 bytes in one host block: the engine keeps 1024 bytes a block and drops the rest,
   counted in `Snapshot::midiDropped` but shown nowhere, so a sysex message over about 1 KB arriving in one
   block is cut silently. Pacing it or showing the count is for a later plan.
-- The disk drive (empty). The TS-12 is out of scope (the user's decision, 2026-11-14).
+- The disk drive (empty; done in Plan 5, `docs/verification-plan5.md`). The TS-12 is out of scope (the user's decision, 2026-11-14).
 - Effects that read ESP table A (found after the merge, from the user's listening): CRUNCH-ELEC (effect 64
   GUITAR AMP 2) was silent on FX1 and ZEP-KIT (effect 71 EQ--COMPRESSOR) clicked after the release of keys
   70-80. Fixed 2026-11-14 by E32: the OS's load verification failed on the ESP's ABASE/DLENGTH read-back,
   so it never wrote the tables. Tests agen_low_nibble_reads_as_ones and ts_effect_tables_load; the four
-  reference hashes are unchanged. User to run: listen to both sounds.
+  reference hashes are unchanged. User to run: listen to both sounds. Passed by the user on 2026-11-14: CRUNCH-ELEC (U1-3) and ZEP-KIT (U1-8).
 - Found by surveying every sound and preset (banks U0, U1, R2-R4) after E32: the OS's load check also
   failed on CMR's spare bits for U0-4 SUITCASE-74, U0-5 TRANS-CLAV, U1 program 25 and their ROM copies,
   so those effects ran without the records after CMR. Fixed by E33 (test
   ts_effect_loads_verify_first_time); reference hashes unchanged. User to run: listen to those sounds.
+  Passed by the user on 2026-11-14: SUITCASE-74 (U0-4), TRANS-CLAV (U0-5) and JAM-WITH-IT (U1-4).
 - Deferred minors of the review rounds, none changing behaviour. Code: the editor test does not check
   begin/end gestures; no automated check of underline, blink, latch, focus release, patch buttons or the
   reset on an engine change; `paramId` falls back to Data Entry for an unknown analog; closing the editor can

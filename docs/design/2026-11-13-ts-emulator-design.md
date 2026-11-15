@@ -212,9 +212,12 @@ All *my call*, on the KS-32 model unless the user says otherwise:
    text and renders a MIDI file to WAV with a stable hash on both toolchains.
 4. **JUCE app**, Standalone and VST3: the TS-10 panel, MIDI, memory, two output buses, plugin state
    and automation. Done when the user passes it by playing it (section 3).
-5. **Release folder** (`tools/dist.ps1`, `tools/dist.sh`), as KS-32 Plan 8.
+5. **Floppy drive.** The uPD72069 and a disk in the drive, disk images, the drive on the panel
+   (`docs/design/2026-11-14-ts-floppy-design.md`). Done when the OS loads an instrument from a user's
+   image and saves to a blank one.
+6. **Release folder** (`tools/dist.ps1`, `tools/dist.sh`), as KS-32 Plan 8.
 
-Later stages: disk images, SCSI. The TS-12 is out of scope (section 2).
+Later stages: SCSI. The TS-12 is out of scope (section 2).
 
 ## 12. Left to the builder
 

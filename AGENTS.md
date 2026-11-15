@@ -64,7 +64,7 @@ cmake -S . -B build-linux-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_AP
 cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
 ```
 
-The release-folder (Plan 5) commands are added by that plan. The app and its checks never open a
+The release-folder (Plan 6) commands are added by that plan. The app and its checks never open a
 window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an agent session.
 
 ## Testing
@@ -91,7 +91,10 @@ purpose, record the new value here and in the current verification report.
 | Render | `tsemu render tests/data/filtered_patch.mid` | `01e3c8622cc8c8be` |
 
 Firmware tests read the ROMs from `ENS_ROM_DIR` (default `roms/`) and print "skip: ROMs not found"
-without them.
+without them. The disk tests read the user's disk images from `ENS_DISK_DIR` (a CMake cache variable, a
+compile-time path; empty by default): `-DENS_DISK_DIR="<folder with AD-001.img, ED-001.GKH, the blank
+Giebler files>"`. With it empty, `image_user_files` and the floppy tests that need those images print
+"skip: disk images not found". The images are the user's own and are never copied into the repo.
 
 Tests use the tiny registry in `tests/check.h` (`TEST(name) { CHECK(...); CHECK_EQ(a, b); }`). A new
 test file is one line in `ENS_TEST_SOURCES` in `tests/CMakeLists.txt`. For bugs, write the failing test

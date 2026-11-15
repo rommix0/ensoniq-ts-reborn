@@ -353,8 +353,8 @@ Register by register:
   drive bits only: not ready, not write protected, not track 0, one side). Nothing else is sent with
   the drive empty.
 - **DUART IP0 (DSTAT, the index pulse).** No pulse: no disk is turning. After each Sense Drive Status
-  command the OS polls the IPCR 300 000 times (about 0.9 s at the modelled clock) for a change on
-  IP0..IP3 before it reads ST3. A check that sees no change is "no disk".
+  command the OS polls the IPCR 300 000 times (about 0.9 s at the modelled clock) at c0ea1c before it
+  reads ST3, testing only IPCR bit 4 (the delta of IP0). A check that sees no change is "no disk".
 - **DUART IP1 (DSKCHG) and IP2 (DENS).** Held high. No level of either changes anything the OS does
   with an empty drive (below), so they stay at the idle level of the other inputs. The schematic names
   them without a "/"; if active high, high reads as "disk changed" and "high density".
