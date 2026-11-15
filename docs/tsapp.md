@@ -4,7 +4,7 @@ TS Reborn runs the user's TS-10 OS ROM (v3.10) on the emulated machine of Plan 3
 
 It is built in two formats from the same code: a Standalone program (`TS Reborn.exe`) and a VST3 instrument (`TS Reborn.vst3`). Windows x64 (MSVC) and Linux x64 (GCC).
 
-The design is `docs/design/2026-11-13-ts-emulator-design.md`, the decisions are `A100` to `A120` in `docs/decisions.md` (`# App`), and the verification report is `docs/verification-plan4.md`.
+The design is `docs/design/2026-11-13-ts-emulator-design.md`, the decisions are `A100` to `A120` in `docs/decisions.md` (`# App`), and the verification report is `docs/verification-plan5.md`.
 
 ## Building
 

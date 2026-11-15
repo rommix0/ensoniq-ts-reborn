@@ -123,13 +123,11 @@ machine state), not the code. A first run during the Linux build gave x1.93 (con
 - **The OS's MIDI-out answer to a MIDI-in program change, large sysex, label readability:** as in
   `docs/verification-plan4.md`.
 - **Deferred minors of the review rounds**, none changing behaviour. Code:
-  - Giebler decode accepts trailing bytes (the size is a lower bound); no negative Giebler tests; `encodeImage`
-    does not check a GKH header's size.
-  - `Disk::copyInto` does not copy the write-protect flag (documented in `engine.h`).
+  - `encodeImage` does not check a GKH header's size.
+  - `Disk::copyInto` does not copy the write-protect flag (documented in `src/ts/disk.h`).
   - FDC: Write Data writes live (a reset mid-sector leaves a half-written sector); C >= 80 reports MA, not ND;
     the command mask ignores MT/MF/SK; Format Track ignores the data rate; Seek or Recalibrate on an empty
-    drive leaves no interrupt status (the hashes depend on it); an EOT end reports normal termination (a real
-    uPD765 without TC gives ST0 0x40 and ST1 EN); DSKCHG clears on a cylinder change, not on a step pulse.
+    drive leaves no interrupt status (the hashes depend on it); DSKCHG clears on a cylinder change, not on a step pulse.
   - `tsemu --save-disk` without `--disk` fails only at the end; `ts_reads_both_densities` prints duplicate skip
     lines; `SampleVoices` counts every BS=3 CR write; `firstSoundName` returning "" passes silently;
     `name.substr(find_first_not_of(...))` can throw on an all-space name.

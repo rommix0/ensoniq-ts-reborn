@@ -35,7 +35,9 @@ public:
     bool writeProtected() const { return protect_; }
     void setWriteProtected(bool p) { protect_ = p; }
 
-    bool copyInto(Disk& dst) const;  // contents and writes(); false, nothing copied, when the densities differ
+    // Contents and writes(); false, nothing copied, when the densities differ. The write-protect flag is not
+    // copied: it belongs to the drive (A119), which sets it on each disk it puts in.
+    bool copyInto(Disk& dst) const;
 
 private:
     explicit Disk(Density d);
