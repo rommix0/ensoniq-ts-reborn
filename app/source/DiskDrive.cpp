@@ -291,16 +291,21 @@ void DiskDrive::openAsked(const juce::File& f) {
 // DECISION A120: while a save is in flight (its copy not yet arrived) the disk still reads as modified; the
 // action then waits for that save instead of asking again, runs when it succeeded and is dropped when it
 // failed (its error is shown by the save's own handler), so the user's writes are never given up unasked.
+// Only one action waits, and only while the audio runs: a save whose copy may never come (the device stopped,
+// or the host stopped calling processBlock) must not swallow every later close, so the next one asks.
+bool DiskDrive::waitsForSave() const { return save_ && !save_->waited && proc_.prepared(); }
+
 void DiskDrive::askThen(std::function<void()> then) {
-    if (save_ && modified()) {
+    if (!modified()) {
+        then();
+        return;
+    }
+    if (waitsForSave()) {
+        save_->waited = true;
         save_->done = [prev = std::move(save_->done), then](bool ok, const juce::String& e) {
             if (prev) prev(ok, e);
             if (ok) then();
         };
-        return;
-    }
-    if (!modified()) {
-        then();
         return;
     }
     const auto options = juce::MessageBoxOptions()

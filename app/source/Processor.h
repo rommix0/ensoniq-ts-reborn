@@ -59,7 +59,8 @@ public:
     bool copyToSharedMemory(juce::String& err);
 
     void prepareToPlay(double sampleRate, int maximumExpectedSamplesPerBlock) override;
-    void releaseResources() override {}
+    // DECISION A119: the device stopped: prepared() is false until the next prepareToPlay.
+    void releaseResources() override { rate_ = 0; }
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override;
     using AudioProcessor::processBlock;

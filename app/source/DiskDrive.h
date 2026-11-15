@@ -53,6 +53,8 @@ public:
     // `then` runs at once when the disk has no unsaved writes, else once the user saved it (Save, or Save As
     // for a disk with no writable file) or chose Don't Save; Cancel or a failed save drops it.
     void askThen(std::function<void()> then);
+    // askThen would wait for the save in flight rather than ask: the audio runs and nothing waits yet (A120).
+    bool waitsForSave() const;
 
 private:
     struct Save {
@@ -61,6 +63,7 @@ private:
         std::vector<uint8_t> header;
         uint32_t swaps = 0;  // the drive's swap count of the disk being saved
         Done done;
+        bool waited = false;  // an askThen action is chained onto `done`
     };
     ens::app::Engine* engine();   // the engine after follow(); null with no ROMs
     void follow();                // a restarted engine: counts start again, a pending save asks again

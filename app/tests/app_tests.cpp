@@ -1094,6 +1094,30 @@ void diskDrive(const juce::File& dir) {
     step();
     CHECK(ran && !d.modified() && static_cast<uint8_t>(fileBytes(img)[0]) == 0x33);
 
+    // A save stuck because the audio stopped: one action waits for it, a second one asks again (so Don't Save
+    // still quits or goes on), and with the device stopped none waits; the chained one runs once audio is back.
+    CHECK(writeSector(p, 0x44) == 0x80);
+    step();
+    CHECK(d.modified() && d.save(err) && d.waitsForSave());
+    ran = false;
+    d.askThen([&] { ran = true; });
+    CHECK(!ran && !d.waitsForSave());  // a second askThen would show the prompt, not chain forever
+    p.releaseResources();
+    CHECK(!p.prepared());
+    p.prepareToPlay(48000, 480);
+    step();
+    step();
+    CHECK(ran && !d.modified() && static_cast<uint8_t>(fileBytes(img)[0]) == 0x44);
+    CHECK(writeSector(p, 0x45) == 0x80);
+    step();
+    CHECK(d.save(err));
+    p.releaseResources();
+    CHECK(d.modified() && !d.waitsForSave());  // device stopped: the save cannot finish, so askThen prompts
+    p.prepareToPlay(48000, 480);
+    step();
+    step();
+    CHECK(!d.modified() && static_cast<uint8_t>(fileBytes(img)[0]) == 0x45);
+
     // No audio running: Open is refused at once, saying so, not "busy" (A119).
     {
         TsProcessor q;
