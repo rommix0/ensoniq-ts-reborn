@@ -226,3 +226,48 @@ TEST(fdc_wrong_rate) {
     d.result7(r);
     CHECK_EQ(r[0], 0x00);
 }
+
+TEST(fdc_eject_mid_read) {
+    auto disk = Disk::formatted(Density::Double);
+    Drv d;
+    d.f.setDisk(disk.get());
+    d.cmd({0x46, 0x00, 0, 0, 1, 2, 1, 0x1B, 0xFF});
+    for (int i = 0; i < 100; ++i) d.f.read(true);
+    d.f.setDisk(nullptr);
+    CHECK(!d.exm());
+    uint8_t r[7];
+    d.result7(r);
+    CHECK_EQ(r[0], 0x48);
+    CHECK_EQ(r[5], 1);
+    d.f.read(true);  // safe
+    d.cmd({0x04, 0x00});
+    CHECK_EQ(d.f.read(true), 0x00);
+}
+
+TEST(fdc_swap_mid_write) {
+    auto a = Disk::formatted(Density::Double);
+    auto b = Disk::formatted(Density::Double);
+    Drv d;
+    d.f.setDisk(a.get());
+    d.cmd({0x45, 0x00, 0, 0, 1, 2, 1, 0x1B, 0xFF});
+    for (int i = 0; i < 100; ++i) d.f.write(true, 0xEE);
+    d.f.setDisk(b.get());
+    CHECK(!d.exm());
+    for (int i = 0; i < 600; ++i) d.f.write(true, 0xEE);  // ignored as data
+    CHECK_EQ(a->sector(0, 0, 1)[100], 0);
+    CHECK_EQ(a->sector(0, 0, 1)[99], 0xEE);
+    CHECK_EQ(b->sector(0, 0, 1)[0], 0);
+    CHECK_EQ(b->writes(), 0u);
+}
+
+TEST(fdc_reset_mid_read) {
+    auto disk = Disk::formatted(Density::Double);
+    Drv d;
+    d.f.setDisk(disk.get());
+    d.cmd({0x46, 0x00, 0, 0, 1, 2, 1, 0x1B, 0xFF});
+    d.f.read(true);
+    d.f.reset();
+    CHECK_EQ(d.f.read(false), 0x80);
+    d.cmd({0x04, 0x00});
+    CHECK_EQ(d.f.read(true), 0x20 | 0x08 | 0x10);
+}

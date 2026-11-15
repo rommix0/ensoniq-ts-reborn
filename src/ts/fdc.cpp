@@ -14,6 +14,15 @@ void Fdc::reset() {
     cyl_ = c;
 }
 
+// DECISION T22: a disk removed or changed during an execution phase ends that command as a drive losing ready
+// does: ST0 IC 01 + NR, C H R N of where it stopped; no pointer into either disk survives. Outside an execution
+// phase only the pointer changes.
+void Fdc::setDisk(Disk* d) {
+    if (d != disk_ && (phase_ == Phase::ExecRead || phase_ == Phase::ExecWrite || phase_ == Phase::ExecFormat))
+        setResult(static_cast<uint8_t>(0x48 | (cmd_[1] & 7)), 0, 0, cmd_[2], cmd_[3], static_cast<uint8_t>(curR_), cmd_[5]);
+    disk_ = d;
+}
+
 int Fdc::commandLength(uint8_t c) {
     switch (c & 0x1F) {
     case 0x03: return 3;  // specify

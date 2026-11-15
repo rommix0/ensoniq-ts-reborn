@@ -17,7 +17,7 @@ public:
     // control register; only remembered (control()).
     void write(bool a0, uint8_t v);
 
-    void setDisk(Disk* d) { disk_ = d; }  // nullptr: empty drive; the machine owns the disk
+    void setDisk(Disk* d);  // nullptr: empty drive; the machine owns the disk. Ends a running transfer (T22)
     uint8_t control() const { return control_; }
     int cylinder() const { return cyl_; }
     void setHighRate(bool high) { high_ = high; }
