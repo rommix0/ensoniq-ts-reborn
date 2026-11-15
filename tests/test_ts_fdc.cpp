@@ -87,7 +87,7 @@ TEST(fdc_read_data_non_dma) {
     }
     uint8_t r[7];
     d.result7(r);
-    const uint8_t want[7] = {0, 0, 0, 1, 0, 4, 2};
+    const uint8_t want[7] = {0x40, 0x80, 0, 1, 0, 4, 2};  // EOT without TC (grounded on the TS): IC 01 + EN (T22)
     CHECK(std::memcmp(r, want, 7) == 0);
 }
 
@@ -127,7 +127,8 @@ TEST(fdc_write_data_counts_write) {
     }
     uint8_t r[7];
     d.result7(r);
-    CHECK_EQ(r[0], 0x00);
+    CHECK_EQ(r[0], 0x40);
+    CHECK_EQ(r[1], 0x80);
     CHECK_EQ(r[5], 6);
     CHECK_EQ(disk->writes(), w0 + 1);
     CHECK_EQ(disk->sector(0, 1, 5)[3], 3 ^ 0x5A);
@@ -190,7 +191,8 @@ TEST(fdc_format_track) {
     while (d.exm()) { CHECK_EQ(d.f.read(true), 0xE5); ++n; }
     CHECK_EQ(n, 512);
     d.result7(r);
-    CHECK_EQ(r[0], 0x00);
+    CHECK_EQ(r[0], 0x40);
+    CHECK_EQ(r[1], 0x80);
 }
 
 TEST(fdc_read_id) {
@@ -270,4 +272,29 @@ TEST(fdc_reset_mid_read) {
     CHECK_EQ(d.f.read(false), 0x80);
     d.cmd({0x04, 0x00});
     CHECK_EQ(d.f.read(true), 0x20 | 0x08 | 0x10);
+}
+
+// The 72069's own register (A0 = 0 writes, T24): 0x36 is the software reset, 0x88 / 0xC8 the DD / HD rate.
+TEST(fdc_control_reset_and_rate) {
+    auto disk = Disk::formatted(Density::High);
+    Drv d;
+    d.f.setDisk(disk.get());
+    uint8_t r[7];
+    d.f.write(false, 0xC8);
+    d.f.write(false, 0xE3);
+    d.cmd({0x46, 0x00, 0, 0, 1, 2, 1, 0x1B, 0xFF});
+    CHECK(d.exm());
+    d.f.read(true);
+    d.f.write(false, 0x36);
+    CHECK_EQ(d.f.control(), 0x36);
+    CHECK_EQ(d.f.read(false), 0x80);
+    d.f.write(false, 0x88);
+    d.cmd({0x46, 0x00, 0, 0, 1, 2, 1, 0x1B, 0xFF});
+    d.result7(r);
+    CHECK_EQ(r[1], 0x01);  // DD rate, HD disk: no address mark
+    d.f.write(false, 0x1E);  // motor bits leave the rate alone
+    d.f.write(false, 0x36);  // and so does a reset
+    d.cmd({0x46, 0x00, 0, 0, 1, 2, 1, 0x1B, 0xFF});
+    d.result7(r);
+    CHECK_EQ(r[1], 0x01);
 }

@@ -132,6 +132,32 @@ TEST(rt_machine_runframe_does_not_allocate) {
     CHECK_EQ(n, 0u);
 }
 
+// Real time: with a disk in, the OS reading it (Storage twice), another disk swapped in and the drive emptied
+// between frames allocate nothing: insertDisk only moves pointers (T23).
+TEST(rt_disk_in_the_drive_does_not_allocate) {
+    auto m = loadTs();
+    if (!m) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    auto hd = Disk::formatted(Density::High);
+    m->insertDisk(Disk::formatted(Density::Double));
+    runMs(*m, kBootMs);
+    std::unique_ptr<Disk> out1, out2;
+    allocStart();
+    tap(*m, Button::Storage);
+    tap(*m, Button::Storage);
+    runMs(*m, 1500);
+    out1 = m->insertDisk(std::move(hd));
+    runMs(*m, 500);
+    out2 = m->insertDisk(nullptr);
+    runMs(*m, 500);
+    const size_t n = allocStop();
+    std::printf("  allocations: %zu\n", n);
+    CHECK_EQ(n, 0u);
+    CHECK(out1 && out2);
+}
+
 // Real time: once booted, 2 s of engine blocks with what a host and the GUI do meanwhile (MIDI notes
 // and a program change with offsets, button, key, analog and patch select posts, a requested sound, an
 // analog from the host, snapshots, one RAM copy) allocates nothing.

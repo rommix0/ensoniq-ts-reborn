@@ -38,7 +38,7 @@ int Fdc::commandLength(uint8_t c) {
 }
 
 // DECISION T22: multi-sector transfers advance R; the transfer ends after sector EOT or at the end of the
-// track (no TC line in non-DMA mode, so no EN error is reported). The result's R is one past the last sector.
+// track. The result's R is one past the last sector.
 void Fdc::nextSector() {
     if (curR_ >= cmd_[6] || curR_ + 1 >= disk_->sectorsPerTrack()) {
         ++curR_;
@@ -69,7 +69,15 @@ uint8_t Fdc::read(bool a0) {
 }
 
 void Fdc::write(bool a0, uint8_t v) {
-    if (!a0) { control_ = v; return; }
+    if (!a0) {
+        // DECISION T24: 0x36 is the 72069's software reset (the OS's recovery: 0x36, a pause, then Sense
+        // Interrupt Status); 0x88 / 0xC8 select the DD / HD data rate (the OS writes them from DENS). The rest
+        // (0x0B, 0x4F, 0xE3/0xF3, 0x1E/0x0E) are only remembered.
+        if (v == 0x36) reset();
+        else if ((v & 0x3F) == 0x08) high_ = (v & 0x40) != 0;
+        control_ = v;
+        return;
+    }
     if (phase_ == Phase::ExecWrite) {
         sec_[secPos_++] = v;
         if (secPos_ >= Disk::kSectorBytes) {
@@ -109,9 +117,12 @@ void Fdc::setResult(uint8_t st0, uint8_t st1, uint8_t st2, uint8_t c, uint8_t h,
     sec_ = nullptr;
 }
 
-// DECISION T22: normal end: ST0, ST1, ST2 all 0 (no EN: the OS stops by reading until EXM drops), then C H R N.
+// DECISION T22: TC is tied to ground on the TS (schematic sheet 3, U20), so a transfer that runs to its end
+// stops as a uPD765 without TC does: ST0 IC 01 (0x40) and ST1 EN (0x80), which the OS takes as success
+// (c0ec40: ST1 exactly 0x80), then C H R N.
 void Fdc::finishTransfer() {
-    setResult(cmd_[1] & 7, 0, 0, cmd_[2], cmd_[3], static_cast<uint8_t>(curR_), cmd_[5]);
+    setResult(static_cast<uint8_t>(0x40 | (cmd_[1] & 7)), 0x80, 0, cmd_[2], cmd_[3], static_cast<uint8_t>(curR_),
+              cmd_[5]);
 }
 
 // DECISION T22: abnormal end = ST0 IC 01 (0x40); ST1/ST2 per the error: MA 0x01 (unformatted track, or a disk

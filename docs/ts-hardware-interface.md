@@ -338,7 +338,8 @@ Register by register:
   to its last; DIO and CB (0xD0) while result bytes wait. The OS polls it before each byte.
 - **A0 = 0 writes.** 0x36, 0x0B, 0x4F, 0xC8, 0xE3 at boot (110 ms), then 0x1E before each drive check
   and 0x0E after it (bit 4 set around the access: plausibly a motor or drive select bit of the 72069's
-  own control register). They are not uPD765 commands; the model ignores them, and nothing the OS
+  own control register). They are not uPD765 commands. Since Plan 5, 0x36 resets the controller and
+  0x88/0xC8 pick the data rate ("Floppy drive with a disk", T24); with the drive empty nothing the OS
   reads afterwards depends on them.
 - **Data register (A0 = 1).** The OS uses Sense Interrupt Status (0x08; result ST0 0x80, no interrupt
   pending), Specify (0x03 0xC2 0x11; no result) and Sense Drive Status (0x04 0x00; result ST3 = the
@@ -374,6 +375,69 @@ Storage-Storage and in FORMAT, and showed the settled display after each.
 no-disk message. Low for ST3, ST0 and the IP1/IP2 levels, which an empty drive cannot show.
 
 **Tests.** ts_floppy_reports_no_disk, ts_cold_boot_is_clean.
+
+## Floppy drive with a disk (T22, T23, T24)
+
+Found in Plan 5 Task 3 by reading the OS v3.10 disassembly (firmware study allowed since 2026-11-14)
+and running it with the user's ED-001 (EPS-16 PLUS, DD, GKH) and AD-001 (ASR-10, HD, raw) images in a
+scratch harness: the disk in from power-on, Storage pressed at 5300 and 5700 ms, every FDC access and
+every IPCR read logged with its PC. Addresses are the OS's (it runs from 0xC00000; the same code is
+mirrored at 0xC8xxxx).
+
+**What a disk command does** (c0d892). Motor on: control 0x1E (c0e974), IPCR read to clear it. The
+drive check (c0e9fe): Sense Drive Status, then wait for an index edge (below). Density (c0ead4):
+Sense Drive Status, IPCR bit 2, two control writes and Specify. Then the operation; for the directory
+(c0e372): Seek to cylinder 1, Sense Interrupt Status, Recalibrate, Sense Interrupt Status, then Read
+Data one sector per command (`46 00 C H R 02 EOT=R 1B FF`), reading until EXM drops and then the seven
+result bytes. Motor off: 0x0E (c0e9a4), IPCR read.
+
+**1. The index pulse (IP0, DSTAT).** The drive check clears the IPCR, then polls IPCR bit 4 (delta
+IP0) 300 000 times (0.9 s). An edge within the first 235 400 polls (0.71 s) passes; a later one
+retries (up to 10 times); none is "DISK DRIVE NOT READY" (error 4). Either edge counts. It runs once
+per disk command, after the motor-on write; no read, seek or format waits for the index. So a pulse
+per 200 ms (2 ms low), as a 300 rpm drive gives, is enough: the check waited 190 ms (5807.67 to
+5998.00 ms) and at boot 87 ms (110.91 to 198.01 ms). The schematic (sheet 3) takes DSTAT from drive
+pin 8 (IP/) through comparator U57/B; the controller's own INDEX pin is wired too but not modelled.
+
+**2. The disk change (IP1, DSKCHG).** The main loop (c12990) calls c0e958 about every 0.5 s; while a
+directory is cached ($a26) and the floppy is the current drive, it tests IPCR bit 5 (delta IP1) and on
+a change drops the cache (c0edca), so the next disk command reads the directory again. The OS never
+reads IP1's level: the only IPCR reads are at c0e964, c0e998, c0e9d4, c0ea10, c0ea1c and c0ea7e, and
+the IPR (0x20001B) is never read. The schematic inverts drive pin 34 (DSKCHG/) onto IP1 (U56/E), so
+high is "changed". The model is a PC drive's: high from a disk going in or out until the head steps
+with a disk in; each directory read starts with Seek 1 and Recalibrate, which steps it clear. A disk
+swapped in shows IPCR 0x7F at c0e964 (7067.74 ms, the swap at 7000 ms) and the next Disk Load page
+lists the new disk.
+
+**3. Density (IP2, DENS, and the control writes).** IPCR bit 2 is read at the start of every disk
+command and at the boot's controller set-up (c0ea7e), after a Sense Drive Status. Low: control 0x88,
+0xF3 and Specify `03 E1 09`; high: 0xC8, 0xE3 and `03 C2 11` (0x19 once set up). The two Specify
+values give the same step rate and head-load time at 250 and 500 kbps, so high is HD; the schematic
+inverts drive pin 2 (DENS/) onto IP2 (U56/D). Which of the control bytes carries the rate cannot be
+seen from the OS; the model takes 0x88/0xC8 (bit 6). 0x36 is the 72069's software reset: the OS's
+recovery (c0f7a6) writes it, waits and sends Sense Interrupt Status. A disk read at the other rate
+(IP2 forced wrong in the harness) gives ST1 MA, which the OS shows as "DISK NOT FORMATTED", then
+"PRESS ANY BUTTON TO CONTINUE...", both ways round.
+
+**4. What the commands must answer.** Seek and Recalibrate: the OS sends Sense Interrupt Status until
+MSR bit 0 (drive 0 busy) is clear, then needs ST0 & 0xE0 = 0x20 (seek end, normal); PCN is not
+checked (c0f6b8-c0f6cc, c0ec0c). Sense Drive Status: ST3 is not checked except bit 6 (write protect)
+before a write (c0e942: error 3). Read and Write Data (c0ec26): ST0 IC 00, or IC 01 with ST1 exactly
+0x80 (EN), is success; ST1 MA or ND is error 6, OR 8, DE 7, anything else 0x0A. TC is grounded on the
+TS (schematic, U20), so a real transfer ends with IC 01 + EN, and the model now does too (T22). Read
+ID is never sent: the OS's command senders send only 04, 08, 03, 4D, 45/46, 0F and 07.
+
+**Messages seen.** Disk out while a sector is moving: the read ends with ST0 NR (T22), error 0x0A:
+"DISK DRIVE NOT RESPONDING", then "PRESS ANY BUTTON TO CONTINUE..."; a button brings back the Storage
+page. Disk out during the index wait, or an empty drive: "DISK DRIVE NOT READY" and the Storage page.
+
+**Confidence.** High for the index timing, the IP2 meaning and the result checks (from the code and
+the runs); medium for DSKCHG clearing on a step (the OS only uses edges, so a line that is simply
+high while the drive is empty would do as well); low for which control byte is the rate. **MAME.** Not
+compared.
+
+**Tests.** ts_disk_load_page_lists_directory, ts_eject_mid_read_reports_error, ts_reads_both_densities,
+ts_empty_drive_still_reports_no_disk, fdc_control_reset_and_rate, rt_disk_in_the_drive_does_not_allocate.
 
 ## The ILLEGAL instructions at boot
 

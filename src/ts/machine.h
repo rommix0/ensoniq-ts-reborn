@@ -86,6 +86,10 @@ public:
     // side 0 = left, 1 = right patch select button. Read by the OS on its next IEXP poll.
     void footswitch(int n, bool down);
     void patchSelect(int side, bool down);
+    // The floppy drive (T23): the disk goes in at once (between frames), the one taken out is returned (nullptr
+    // when the drive was empty); nullptr ejects. Never allocates. The OS sees a disk change on IP1.
+    std::unique_ptr<Disk> insertDisk(std::unique_ptr<Disk> d);
+    const Disk* disk() const { return disk_.get(); }
     m68k::Cpu& cpu() { return cpu_; }
     Board& board() { return board_; }
     duart::Duart& duart() { return duart_; }
@@ -120,11 +124,17 @@ private:
     void trace(uint32_t addr, uint16_t value, uint8_t size, bool write, Device dev);
     void updateLines();  // IPL, the ESP's HALT pin, the OTTO pot
     void slot(int i, int n);
+    uint8_t drivePins() const;  // DUART IP5..IP0 with a disk in (T23, T24)
 
     WaveMemory waves_;  // before board_: the OTTO holds a reference
     Board board_{waves_};
     duart::Duart duart_{kDuartHz};
     Fdc fdc_;
+    std::unique_ptr<Disk> disk_;  // the disk in the drive (fdc_ holds a plain pointer to it)
+    uint64_t indexEdge_ = 0;      // cycles() of the next index-pulse edge while a disk is in (T23)
+    bool indexLow_ = false;       // IP0 (DSTAT) low: the index hole is passing
+    bool dskchg_ = true;          // IP1 (DSKCHG) high: a disk went in or out and the head has not stepped since
+    int stepCyl_ = 0;             // the head's cylinder when the disk changed
     Panel panel_;
     m68k::Cpu cpu_{*this};
     std::vector<uint16_t> os_;  // 256K words, T2

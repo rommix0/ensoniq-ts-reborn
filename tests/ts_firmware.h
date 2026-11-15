@@ -71,3 +71,17 @@ inline uint64_t traceHash(ens::ts::Machine& m, uint32_t ms) {
     m.onBusEvent = saved;
     return t.h;
 }
+
+// A button pressed for 60 ms, then 300 ms for the OS to answer.
+inline void tap(ens::ts::Machine& m, ens::ts::Button b) {
+    m.button(b, true);
+    runMs(m, 60);
+    m.button(b, false);
+    runMs(m, 300);
+}
+
+// The text on either display row.
+inline bool shows(const ens::ts::PanelState& p, const char* text) {
+    using ens::ts::rowText;
+    return rowText(p, 0).find(text) != std::string::npos || rowText(p, 1).find(text) != std::string::npos;
+}

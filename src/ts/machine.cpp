@@ -15,6 +15,9 @@ constexpr uint32_t kIo1Base = 0x200000, kIo1Window = 0x100000;      // A19:A18 =
 constexpr uint32_t kIo2Base = 0x300000, kIo2Window = 0x100000;      // A19 = OTTO, ESP
 constexpr uint32_t kHostBase = 0x400000, kHostWindow = 0x800000;    // DECISION T4: OTTO banks 2-3
 constexpr uint8_t kMuxSelect[kAnalogCount] = {0, 2, 3, 4, 5, 6, 7};  // Hardware facts: U69 Y0, Y2-Y7 (Y1 n.c.)
+constexpr uint8_t kEmptyDrivePins = 0x3F;  // DECISION T10: no index pulse; IP1 (DSKCHG) and IP2 (DENS) high
+// DECISION T23: a 300 rpm drive: the index hole passes every 200 ms and holds IP0 low for 2 ms.
+constexpr uint64_t kIndexPeriod = kCpuHz / 5, kIndexLow = kCpuHz / 500;
 }  // namespace
 
 Machine::Region Machine::decode(uint32_t a) {
@@ -40,7 +43,7 @@ std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, b
     m->duart_.setExternalClock(4, 500'000);
     m->duart_.setExternalClock(5, 1'000'000);
     m->duart_.setExternalClock(2, 1'000'000);
-    m->duart_.setInputPins(0x3F);  // DECISION T10: empty drive: no index pulse on IP0 (DSTAT); IP1, IP2 high
+    m->duart_.setInputPins(kEmptyDrivePins);
     for (int i = 0; i < kAnalogCount; ++i) m->mux_[kMuxSelect[i]] = kAnalogRest[i];
     m->powerOn();
     return m;
@@ -69,6 +72,27 @@ void Machine::setAnalog(Analog a, uint16_t raw10) {
 uint16_t Machine::analog(Analog a) const {
     const int i = static_cast<int>(a);
     return i >= 0 && i < kAnalogCount ? mux_[kMuxSelect[i]] : 0;
+}
+
+// DECISION T23: IP0 (DSTAT) is the index pulse. IP1 (DSKCHG, the drive's DSKCHG/ inverted) goes high when a
+// disk is taken out or put in and stays high, as on a PC drive, until the head steps with a disk in (each
+// directory read starts with Seek 1 and Recalibrate, c0e372); the drive empty holds it high. DECISION T24:
+// IP2 (DENS, the drive's DENS/ inverted) is high for a high-density disk. IP3-IP5 high.
+uint8_t Machine::drivePins() const {
+    return static_cast<uint8_t>(0x38 | (disk_->density() == Density::High ? 0x04 : 0) | (dskchg_ ? 0x02 : 0) |
+                                (indexLow_ ? 0 : 0x01));
+}
+
+// The index pulse starts a full turn after the insert.
+std::unique_ptr<Disk> Machine::insertDisk(std::unique_ptr<Disk> d) {
+    disk_.swap(d);
+    fdc_.setDisk(disk_.get());
+    dskchg_ = true;
+    stepCyl_ = fdc_.cylinder();
+    indexLow_ = false;
+    indexEdge_ = cycles() + kIndexPeriod - kIndexLow;
+    duart_.setInputPins(disk_ ? drivePins() : kEmptyDrivePins);
+    return d;
 }
 
 // Hardware facts: IEXP (U12/A) D0 FSW3B/, D1 FSW4B/, D2 PSRB/, D3 PSLB/, active low.
@@ -289,6 +313,19 @@ void Machine::slot(int i, int n) {
     const uint32_t x1 = duartAcc_ / kCpuHz;
     duartAcc_ %= kCpuHz;
     if (x1) duart_.advance(x1);
+    if (disk_) {  // DECISION T23: the index pulse from the CPU clock; DSKCHG clears on the first step
+        bool change = false;
+        if (cycles() >= indexEdge_) {
+            indexLow_ = !indexLow_;
+            indexEdge_ += indexLow_ ? kIndexLow : kIndexPeriod - kIndexLow;
+            change = true;
+        }
+        if (dskchg_ && fdc_.cylinder() != stepCyl_) {
+            dskchg_ = false;
+            change = true;
+        }
+        if (change) duart_.setInputPins(drivePins());
+    }
     // DECISION T19: the panel takes the bytes that finished leaving TxDB in this slot; the keyboard puts
     // its next byte on RxDB only when the line is idle, so SACK/ can hold it between bytes.
     uint8_t byte = 0;
