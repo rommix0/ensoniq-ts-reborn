@@ -108,7 +108,12 @@ Environment variables read when the app starts. Neither is needed for normal use
 ## Open items
 
 - **The disk drive** is empty. The drive is drawn as a bezel round an empty slot, and the OS reports "DISK DRIVE NOT READY". SCSI is absent.
-- **The TS-12** is not supported; this is the TS-10 only.
+- **The TS-12** is out of scope for this project; this is the TS-10 only.
+- **Effects that read ESP table A are wrong.** U1-3 CRUNCH-ELEC (effect 64 GUITAR AMP 2) is silent on
+  the FX1 bus, and U1-8 ZEP-KIT (effect 71 EQ--COMPRESSOR) clicks on its cymbal keys (70-80) after
+  release. Both effects read table A in the ESP delay RAM twice a sample, and every read returns 0:
+  nothing writes there. The OS never uses the ESP's host RAM access, and GUITAR AMP 2's program has no
+  RAM writes at all. Where the table comes from on the hardware is not known yet.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.
 - **Levels and the filters** have not been checked by ear (`docs/verification-plan3.md`, "User to run").

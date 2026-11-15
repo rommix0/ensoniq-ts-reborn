@@ -163,7 +163,11 @@ attributes `E7` and `7F`, SACK/, wait states, the CPU clock, the levels.
 - MIDI in over 1024 bytes in one host block: the engine keeps 1024 bytes a block and drops the rest,
   counted in `Snapshot::midiDropped` but shown nowhere, so a sysex message over about 1 KB arriving in one
   block is cut silently. Pacing it or showing the count is for a later plan.
-- The disk drive (empty) and the TS-12.
+- The disk drive (empty). The TS-12 is out of scope (the user's decision, 2026-11-14).
+- Effects that read ESP table A (found after the merge, from the user's listening): CRUNCH-ELEC (effect 64
+  GUITAR AMP 2) is silent on FX1 and ZEP-KIT (effect 71 EQ--COMPRESSOR) clicks after the release of keys
+  70-80. Every table-A read returns 0; nothing in the emulation fills the table. See `docs/tsapp.md`, "Open
+  items".
 - Deferred minors of the review rounds, none changing behaviour. Code: the editor test does not check
   begin/end gestures; no automated check of underline, blink, latch, focus release, patch buttons or the
   reset on an engine change; `paramId` falls back to Data Entry for an unknown analog; closing the editor can

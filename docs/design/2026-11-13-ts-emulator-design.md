@@ -57,7 +57,7 @@ the on-screen panel as on the instrument. Supporting evidence:
   no EPS/ASR sample loading from disk. The floppy controller is emulated only as far as the OS
   needs to boot and report an empty drive.
 - **The TS-12.** Same boards, different OS EPROMs and a 76-key mono-pressure keyboard (service
-  manual p5). Later; nothing here should make it hard.
+  manual p5). Out of scope for this project (the user's decision, 2026-11-14).
 - **SCSI**, the SQX-70 sequence expander, sample-RAM sizes above 2 MB.
 - **MIDI out to the host.** As on the KS-32, the firmware's MIDI out is read and discarded.
 - **Disassembling or mapping the firmware** (see anti-goals).
@@ -215,7 +215,7 @@ All *my call*, on the KS-32 model unless the user says otherwise:
    and automation. Done when the user passes it by playing it (section 3).
 5. **Release folder** (`tools/dist.ps1`, `tools/dist.sh`), as KS-32 Plan 8.
 
-Later stages: disk images, the TS-12, SCSI.
+Later stages: disk images, SCSI. The TS-12 is out of scope (section 2).
 
 ## 12. Left to the builder
 
