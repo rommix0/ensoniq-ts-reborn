@@ -822,6 +822,13 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Confidence: High.
 - Status: implemented in `Machine::midiIn`, `Machine::popMidiOut` (Plan 3 Task 7); `tsemu render`, `tsemu bench`. Tests: ts_midi_rate, ts_midi_note_sounds, ts_midi_burst_no_overrun, ts_program_change_changes_display, ts_render_is_deterministic.
 
+## T21: Disk images
+- Options: which image files to read and write; how to tell them apart; how to lay out and store a Giebler file's blocks; whether to write omitted blocks back as omitted.
+- Choice: three formats, told apart by content, never by name: Raw (exactly 819 200 or 1 638 400 bytes, blocks in order), GKH (58-byte header starting "TDDFI", then Raw; the header is kept and written back), Giebler (starts 0D 0A). Giebler file: 512-byte header, a bitmap of one bit per block, MSB first, 1 = block left out (reads as zero), at 0xA0 for DD (200 bytes, 1600 blocks) and at 0x60 for HD (400 bytes, 3200 blocks); the disk-type byte at 0x1FF (EPS 3, TS-DD 7, ASR 0xCB, TS-HD 0xCC); 0D 0A 1A just before the bitmap (so the EDA text block is 0x40 bytes shorter than the EDE one); then the stored blocks in block order, 512 bytes each, and one trailing 1A. Density is taken from the type byte first, then confirmed by file size = 512 + 512 x stored blocks + 1. Block order is `(cyl * 2 + head) * sectorsPerTrack + id`, ids from 0. On saving, a block is stored when it is not all zero or when the kept header already stored it (a decoded file re-encodes byte for byte); a block that was left out and got data is stored. Unformatted tracks are written as zeros. A file with no kept header gets a new one ("TS-10 (DD) Disk" with type 7, or "(HD)" with 0xCC).
+- Evidence: the four blank files EPSBLANK.EDE, ASRBLANK.EDA, TS-DD.EDT, TS-HD.EDT (8193, 12801, 9729 and 14337 bytes: 15, 24, 18 and 27 stored blocks, as their bitmaps give); the Giebler "Ensoniq Floppy Diskette Format" article for the block formula; the user's GKH and IMG pairs (EPS-16 ED-001, ASR-10 AD-001) decode to the same sectors. Layout shape follows the Mirage .edm pattern (different machine). The disk-type bytes other than these four are not seen.
+- Confidence: High for the four blank files and the raw and GKH pairs; medium for other type bytes.
+- Status: implemented in `src/ts/disk.*` and `src/ts/disk_image.*` (Plan 5 Task 1). `// DECISION T21` in `disk_image.cpp`. Tests: disk_geometry, disk_blank_is_unformatted, disk_copy_into_needs_same_density, image_raw_sizes, image_gkh_roundtrip, image_giebler_omitted_block_written, image_format_for_name, image_user_files (needs `ENS_DISK_DIR`).
+
 # App
 
 Plan 4's engine and app (TS Reborn). Where a KS-32 Reborn decision is carried over, the Evidence names it.
