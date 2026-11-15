@@ -4,7 +4,7 @@ TS Reborn runs the user's TS-10 OS ROM (v3.10) on the emulated machine of Plan 3
 
 It is built in two formats from the same code: a Standalone program (`TS Reborn.exe`) and a VST3 instrument (`TS Reborn.vst3`). Windows x64 (MSVC) and Linux x64 (GCC).
 
-The design is `docs/design/2026-11-13-ts-emulator-design.md`, the decisions are `A100` to `A117` in `docs/decisions.md` (`# App`), and the verification report is `docs/verification-plan4.md`.
+The design is `docs/design/2026-11-13-ts-emulator-design.md`, the decisions are `A100` to `A120` in `docs/decisions.md` (`# App`), and the verification report is `docs/verification-plan4.md`.
 
 ## Building
 
@@ -25,7 +25,7 @@ cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSRebor
 - The first configure fetches JUCE 8.0.16-security (git, about 150 MB) into `build-app/_deps`. To use a JUCE checkout you already have, add `-DFETCHCONTENT_SOURCE_DIR_JUCE=<path to juce-src>`; nothing is fetched then.
 - `ENS_ROM_DIR` (default: the repository's `roms` folder) is used only by the checks in `TSReborn_AppTests`. The app has no compiled-in ROM path.
 - Outputs, Windows: `build-app\app\TSReborn_artefacts\Release\Standalone\TS Reborn.exe` and `...\VST3\TS Reborn.vst3`. Linux: `build-linux-app/app/TSReborn_artefacts/Release/Standalone/TS Reborn` and `.../VST3/TS Reborn.vst3`. The build does not install the VST3. Copy the `TS Reborn.vst3` folder to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`).
-- Checks: `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` (Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`). They run without a window. They cover the ROM folder and the memory file, the engine's two buses, the host parameters, the state and the memory rules, and the editor painted offscreen, and they load the built VST3 through JUCE's VST3 host. Without the ROMs the firmware parts skip.
+- Checks: `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` (Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`). They run without a window. They cover the ROM folder and the memory file, the engine's two buses, the host parameters, the state and the memory rules, the disk drive (open, save, write protect, through temp files), and the editor painted offscreen, and they load the built VST3 through JUCE's VST3 host. Without the ROMs the firmware parts skip.
 
 **JUCE licence.** JUCE is dual-licensed: AGPLv3, or a commercial JUCE licence. A build of this app links JUCE, so giving the app to anyone else is under the AGPLv3's terms unless you hold a commercial JUCE licence. Building and using it yourself needs neither.
 
@@ -87,6 +87,11 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 - **Patch buttons.** The two buttons beside the wheels are the TS's patch selects (sent to the machine as the IEXP lines).
 - **Keys.** Click near the front of a key for loud and near the back for soft (A115: strike 1 to 127 along the key, which the OS reads through its own TOUCH table). Dragging across the keys plays each key entered and releases the one left. Notes arriving on MIDI light their keys the same way.
 - **Display.** Codes 0x20 to 0x7E are drawn as ASCII, others blank (A113). Underlined cells get a bar. Flashing cells and LEDs blink at 2 Hz. Right-click the display for **Show display codes**, a hex overlay of every cell.
+- **The disk drive** (A119, A120). Click the drive on the panel for its menu: **Open Disk Image...**, **New Blank Disk (DD)**, **New Blank Disk (HD)**, **Save Disk Image**, **Save Disk Image As...**, **Eject** and a **Write Protected** tick. A disk image dropped on the panel opens too. The slot shows the file's name, with "(modified)" once the OS has written to the disk since it was opened or saved; a new disk is "Untitled (blank)" until saved. Images: raw `.img` (819 200 bytes DD, 1 638 400 HD; the size decides the density, other sizes are refused), `.gkh`, and Giebler `.ede`/`.eda`. Opening puts the disk in without resetting the TS; the OS sees a disk change, as with a real drive.
+  - **Save** writes the file the disk came from, in its format, through `<file>.tmp` and then a replace, so a failed save keeps the old file. A new disk or a read-only file can only be saved with **Save As...**, whose extension picks the format (`.img`, `.gkh`, `.ede`/`.eda`; anything else is raw). Saving takes a moment: the disk is copied between audio blocks and written by the 30 Hz timer, so it needs the audio running.
+  - **Write Protected** (off at start) applies to the disk in the drive and to each disk put in: the OS then cannot write, as with the tab on a real disk.
+  - Open, New, Eject, a dropped file and closing the Standalone ask first (Save, Don't Save, Cancel) when the disk has unsaved writes. The VST3 cannot ask when a project closes or the plugin is removed: unsaved writes are lost, and "(modified)" is the warning.
+  - The drive starts empty: the disk is not remembered across a restart of the app, and the VST3's project state does not carry it. A ROM-folder change or Erase keeps the disk in the drive.
 - **Size.** The window opens at 1546 x 552 and resizes from 1030 x 368 up, keeping the panel's shape (A112).
 
 ## Firmware behaviours to know
@@ -107,7 +112,7 @@ Environment variables read when the app starts. Neither is needed for normal use
 
 ## Open items
 
-- **The disk drive** is empty. The drive is drawn as a bezel round an empty slot, and the OS reports "DISK DRIVE NOT READY". SCSI is absent.
+- **SCSI** is absent.
 - **The TS-12** is out of scope for this project; this is the TS-10 only.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.

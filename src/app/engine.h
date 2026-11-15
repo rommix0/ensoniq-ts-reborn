@@ -74,6 +74,13 @@ public:
     // true once done; ok false: no disk or other density. swapsAtCopy is the swap count when the copy was
     // made: an app counting its own accepted inserts and ejects matches the copy to its disk by it.
     bool takeDisk(std::unique_ptr<ts::Disk>& out, bool& ok, uint32_t& swapsAtCopy);
+    // DECISION A119: the write protect of the disk in the drive, set at the next block start (after a swap in
+    // that block); a request with the drive empty is dropped, so the caller also sets it on a disk it inserts.
+    void setWriteProtect(bool p);
+    // DECISION A119: message thread, audio stopped (a restart): the disk in the drive, out of it, with a
+    // pending insert or eject applied first. The rest (a disk replaced by that insert, the slots) goes with
+    // the engine.
+    std::unique_ptr<ts::Disk> releaseDisk();
     // Usage: after every swap that took a disk out, call takeRemoved (until it returns it) before the next
     // swap can apply; an insert into an empty drive parks nothing. takeDisk's `out` is the scratch, also
     // when ok is false, and is freed by the caller. The engine's destructor frees what is left in a slot.
@@ -153,6 +160,7 @@ private:
     std::atomic<int> copyState_{0};
     std::atomic<bool> copyOk_{false};
     std::atomic<uint32_t> copySwaps_{0};
+    std::atomic<int> protect_{-1};  // A119: -1 none, else the write protect asked for
     uint32_t diskSwaps_ = 0;
 };
 

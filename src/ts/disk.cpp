@@ -48,6 +48,7 @@ bool Disk::copyInto(Disk& dst) const {
     if (dst.density_ != density_) return false;
     std::copy(data_.begin(), data_.end(), dst.data_.begin());
     std::copy(formatted_.begin(), formatted_.end(), dst.formatted_.begin());
+    dst.writes_ = writes_;  // DECISION A119: the app's "modified" baseline is the copy's count
     return true;
 }
 

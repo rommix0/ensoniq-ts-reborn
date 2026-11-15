@@ -22,10 +22,12 @@ juce_add_plugin(TSReborn
   NEEDS_MIDI_OUTPUT FALSE)
 
 set(TSR_SOURCES source/Processor.cpp source/PanelEditor.cpp source/AppSettings.cpp source/RomFolder.cpp
-  source/MemoryFile.cpp source/SettingsPage.cpp)
+  source/MemoryFile.cpp source/SettingsPage.cpp source/DiskDrive.cpp)
 
-target_sources(TSReborn PRIVATE ${TSR_SOURCES})
-target_compile_definitions(TSReborn PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+# StandaloneApp.cpp is the Standalone's application (A120): the wrapper takes it instead of JUCE's own.
+target_sources(TSReborn PRIVATE ${TSR_SOURCES} source/StandaloneApp.cpp)
+target_compile_definitions(TSReborn PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
+  JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)
 target_link_libraries(TSReborn
   PRIVATE ens_app juce::juce_audio_utils
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)

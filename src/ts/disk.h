@@ -35,7 +35,7 @@ public:
     bool writeProtected() const { return protect_; }
     void setWriteProtected(bool p) { protect_ = p; }
 
-    bool copyInto(Disk& dst) const;  // false, nothing copied, when the densities differ
+    bool copyInto(Disk& dst) const;  // contents and writes(); false, nothing copied, when the densities differ
 
 private:
     explicit Disk(Density d);

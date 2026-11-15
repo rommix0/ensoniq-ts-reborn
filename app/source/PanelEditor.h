@@ -3,7 +3,7 @@
 // (src/app/panel_layout.h), scaled uniformly to the window (A112). The display and LEDs follow the
 // engine's snapshot (A113); the buttons post press and release, with the chord latch (A114); the sliders
 // and wheels are the host parameters (A111), and the keys play with a strike (A115). The gear opens the
-// settings page.
+// settings page; the disk drive opens the drive's menu, and a file dropped on the panel goes in the drive (A119).
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <memory>
@@ -12,7 +12,7 @@
 
 class TsProcessor;
 
-class PanelEditor : public juce::AudioProcessorEditor, private juce::Timer {
+class PanelEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer {
 public:
     explicit PanelEditor(TsProcessor& p);
     ~PanelEditor() override;
@@ -29,6 +29,11 @@ public:
     bool hexCodes() const { return hexCodes_; }
     void toggleHexCodes();
     juce::String romError() const;  // empty while the engine runs
+    juce::String slotText() const;  // the disk drive's (A119)
+    void driveMenu(juce::Component* target);
+
+    bool isInterestedInFileDrag(const juce::StringArray& files) override { return files.size() == 1; }
+    void filesDropped(const juce::StringArray& files, int, int) override;
 
 private:
     void timerCallback() override;

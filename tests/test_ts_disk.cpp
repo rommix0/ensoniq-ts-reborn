@@ -37,8 +37,10 @@ TEST(disk_copy_into_needs_same_density) {
     auto a = Disk::formatted(Density::Double);
     a->sector(3, 1, 4)[7] = 0x42;
     auto b = Disk::blank(Density::Double);
+    a->formatTrack(0, 0, 0);
     CHECK(a->copyInto(*b));
     CHECK_EQ(b->sector(3, 1, 4)[7], 0x42);
+    CHECK_EQ(b->writes(), a->writes());  // A119: the app's "modified" baseline after a save
     auto h = Disk::formatted(Density::High);
     h->sector(0, 0, 0)[0] = 9;
     CHECK(!a->copyInto(*h));

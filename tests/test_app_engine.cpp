@@ -570,6 +570,40 @@ TEST(engine_copy_out) {
     CHECK(!e->takeDisk(out, ok, sw));
 }
 
+// A119: the write-protect request reaches the disk in the drive at the next block, after a swap in the same
+// block, so a disk inserted and protected before one render comes out protected.
+TEST(engine_write_protect_at_block) {
+    auto e = makeEngine();
+    if (!e) return;
+    e->insertDisk(ts::Disk::formatted(ts::Density::Double));
+    e->setWriteProtect(true);
+    CHECK(e->machine().disk() == nullptr);
+    renderMs(*e, 10);
+    CHECK(e->machine().disk() && e->machine().disk()->writeProtected());
+    e->setWriteProtect(false);
+    renderMs(*e, 10);
+    CHECK(!e->machine().disk()->writeProtected());
+}
+
+// A119: a restart takes the disk out of the old engine, a pending insert or eject applied first.
+TEST(engine_release_disk) {
+    auto e = makeEngine();
+    if (!e) return;
+    CHECK(e->releaseDisk() == nullptr);
+    auto d = ts::Disk::formatted(ts::Density::Double);
+    const ts::Disk* raw = d.get();
+    e->insertDisk(std::move(d));
+    CHECK(e->releaseDisk().get() == raw);  // pending: the disk asked for
+    e->insertDisk(ts::Disk::formatted(ts::Density::High));
+    renderMs(*e, 10);
+    auto out = e->releaseDisk();
+    CHECK(out && out->density() == ts::Density::High && e->machine().disk() == nullptr);
+    e->insertDisk(std::move(out));
+    renderMs(*e, 10);
+    e->insertDisk(nullptr);
+    CHECK(e->releaseDisk() == nullptr);  // a pending eject
+}
+
 TEST(engine_copy_out_density_mismatch) {
     auto e = makeEngine();
     if (!e) return;

@@ -239,6 +239,16 @@ bool Engine::takeDisk(std::unique_ptr<ts::Disk>& out, bool& ok, uint32_t& swapsA
     return true;
 }
 
+void Engine::setWriteProtect(bool p) { protect_.store(p ? 1 : 0, std::memory_order_relaxed); }
+
+std::unique_ptr<ts::Disk> Engine::releaseDisk() {
+    if (swapWanted_.load(std::memory_order_acquire)) {
+        swapWanted_.store(false, std::memory_order_relaxed);
+        return std::unique_ptr<ts::Disk>(swapIn_.exchange(nullptr, std::memory_order_relaxed));
+    }
+    return m_->insertDisk(nullptr);
+}
+
 // DECISION A101: a byte at offset o enters before machine frame floor(o * kFrameHz / outRate) of the
 // block; the store holds 1024 bytes a block, and the rest are dropped and counted.
 // DECISION A108: every byte goes to MIDI IN unchanged, as the jack would carry it; the OS reads pressure itself.
@@ -308,6 +318,9 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         ++diskSwaps_;
         swapWanted_.store(false, std::memory_order_release);
     }
+    // DECISION A119: after the swap, so it reaches a disk inserted in this block too.
+    if (const int p = protect_.exchange(-1, std::memory_order_relaxed); p >= 0 && m_->disk())
+        m_->disk()->setWriteProtected(p != 0);
     if (copyState_.load(std::memory_order_acquire) == 1) {
         const ts::Disk* cur = m_->disk();
         copyOk_.store(cur && cur->copyInto(*scratch_.load(std::memory_order_relaxed)), std::memory_order_relaxed);

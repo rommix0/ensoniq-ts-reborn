@@ -90,6 +90,7 @@ public:
     // when the drive was empty); nullptr ejects. Never allocates. The OS sees a disk change on IP1.
     std::unique_ptr<Disk> insertDisk(std::unique_ptr<Disk> d);
     const Disk* disk() const { return disk_.get(); }
+    Disk* disk() { return disk_.get(); }
     m68k::Cpu& cpu() { return cpu_; }
     Board& board() { return board_; }
     duart::Duart& duart() { return duart_; }

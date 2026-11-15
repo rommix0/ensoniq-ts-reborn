@@ -42,7 +42,7 @@ void block(std::vector<Control>& t, int x0, int pitch, int cols, const char* con
 
 std::vector<Control> build() {
     std::vector<Control> t = {
-        // Decor: the disk drive, an empty slot; the model decal on its plate.
+        // Decor: the disk drive (the drive's control, A119); the model decal on its plate.
         {K::Decor, -1, {108, 112, 310, 233}, "Disk drive"},
         {K::Label, -1, {2010, 150, 375, 120}, "TS-10", Ink::Decal},
         {K::Label, -1, {2010, 280, 375, 16}, "Performance/Composition Synthesizer", Ink::Decal},
