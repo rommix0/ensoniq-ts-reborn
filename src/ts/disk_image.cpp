@@ -11,6 +11,15 @@ namespace {
 constexpr size_t kDdBytes = 819200, kHdBytes = 1638400;
 constexpr size_t kGkhHeader = 58;
 constexpr char kGkhMagic[] = "TDDFI";
+// DECISION T21: the header of a new .gkh file is the real 58-byte one from the user's ED-001 (DD) and AD-001 (HD)
+// files: "TDDFI", version 01, five 10-byte tags; tag 0A holds the geometry (80 cylinders, 2 heads, sectors per
+// track at 0x18, 512-byte sectors), tag 0B the image size (LE32 at 0x1E) and offset (0x3A at 0x22). The two files
+// differ only at 0x18 (0x0A / 0x14) and 0x1E..0x21 (0x000C8000 / 0x00190000).
+constexpr uint8_t kGkhDd[kGkhHeader] = {
+    'T', 'D', 'D', 'F', 'I', 0x01, 0x05, 0x00, 0x01, 0x04, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
+    0x00, 0x00, 0x0A, 0x05, 0x50, 0x00, 0x02, 0x00, 0x0A, 0x00, 0x00, 0x02, 0x0B, 0x0B, 0x00, 0x80,
+    0x0C, 0x00, 0x3A, 0x00, 0x00, 0x00, 0x15, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x14, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 constexpr size_t kGiebHeader = 512;
 constexpr uint8_t kEof = 0x1A;
 
@@ -29,6 +38,10 @@ bool decodeGiebler(const std::vector<uint8_t>& f, DecodedImage& out, std::string
         err = "damaged Giebler file: the 512-byte header is cut short";
         return false;
     }
+    if (f[0x4E] != 0x0D || f[0x4F] != 0x0A) {
+        err = "not a Giebler file: the header text is missing";
+        return false;
+    }
     // The disk-type byte (0x1FF: 3 or 7 DD, 0xCB or 0xCC HD) picks the density to try first; the file size
     // (512 + 512 per stored block + 1) must agree with the bitmap, which settles unknown type bytes.
     const bool hdFirst = f[0x1FF] >= 0x80;
@@ -36,7 +49,10 @@ bool decodeGiebler(const std::vector<uint8_t>& f, DecodedImage& out, std::string
         const Density d = (pass == 0) == hdFirst ? Density::High : Density::Double;
         size_t stored = 0;
         for (size_t n = 0; n < blockCount(d); ++n) stored += leftOut(f, d, n) ? 0 : 1;
-        if (f.size() < kGiebHeader + stored * Disk::kSectorBytes + 1) continue;
+        const size_t b = bitmapAt(d);
+        // The marker 0D 0A 1A sits just before the bitmap, and the size must be exact (T21).
+        if (f[b - 3] != 0x0D || f[b - 2] != 0x0A || f[b - 1] != kEof) continue;
+        if (f.size() != kGiebHeader + stored * Disk::kSectorBytes + 1) continue;
         out.disk = Disk::formatted(d);
         out.format = ImageFormat::Giebler;
         out.header.assign(f.begin(), f.begin() + kGiebHeader);
@@ -48,7 +64,7 @@ bool decodeGiebler(const std::vector<uint8_t>& f, DecodedImage& out, std::string
         }
         return true;
     }
-    err = "damaged Giebler file: the bitmap lists more blocks than the file holds";
+    err = "damaged Giebler file: the size does not match the bitmap";
     return false;
 }
 
@@ -89,8 +105,14 @@ std::vector<uint8_t> encodeImage(const Disk& d, ImageFormat f, const std::vector
         if (f == ImageFormat::Gkh) {
             out = header;
             if (out.empty()) {
-                out.assign(kGkhHeader, 0);
-                std::memcpy(out.data(), kGkhMagic, 5);
+                out.assign(kGkhDd, kGkhDd + kGkhHeader);
+                if (d.density() == Density::High) {
+                    out[0x18] = 0x14;
+                    out[0x20] = 0x19;
+                    out[0x21] = 0x00;
+                    out[0x1E] = 0x00;
+                    out[0x1F] = 0x00;
+                }
             }
         }
         for (int n = 0; n < blocks; ++n) out.insert(out.end(), blockData(n), blockData(n) + Disk::kSectorBytes);

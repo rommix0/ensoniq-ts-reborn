@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -76,6 +77,11 @@ TEST(image_giebler_omitted_block_written) {
     std::vector<uint8_t> f(512, ' ');
     f[0] = 0x0D;
     f[1] = 0x0A;
+    f[0x4E] = 0x0D;
+    f[0x4F] = 0x0A;
+    f[0x9D] = 0x0D;
+    f[0x9E] = 0x0A;
+    f[0x9F] = 0x1A;
     std::fill(f.begin() + 0xA0, f.end(), uint8_t(0));
     std::fill(f.begin() + 0xA0, f.begin() + 0xA0 + 200, uint8_t(0xFF));
     f[0xA0] = 0x7F;
@@ -101,6 +107,76 @@ TEST(image_giebler_omitted_block_written) {
     CHECK(decodeImage(encodeImage(*hd, ImageFormat::Giebler, {}), hb, err));
     CHECK(hb.disk->density() == Density::High);
     CHECK_EQ(hb.disk->block(3199)[511], 0x99);
+}
+
+namespace {
+// A valid DD Giebler file with one stored block, for the negative tests.
+std::vector<uint8_t> goodGiebler() {
+    std::vector<uint8_t> f(512, ' ');
+    f[0] = 0x0D; f[1] = 0x0A; f[0x4E] = 0x0D; f[0x4F] = 0x0A;
+    f[0x9D] = 0x0D; f[0x9E] = 0x0A; f[0x9F] = 0x1A;
+    std::fill(f.begin() + 0xA0, f.begin() + 0xA0 + 200, uint8_t(0xFF));
+    f[0xA0] = 0x7F;
+    f[0x1FF] = 7;
+    f.insert(f.end(), 512, 0x11);
+    f.push_back(0x1A);
+    return f;
+}
+}  // namespace
+
+TEST(image_giebler_refuses_damaged_files) {
+    DecodedImage out;
+    std::string err;
+    CHECK(decodeImage(goodGiebler(), out, err));
+    // A text file that happens to start with CRLF.
+    std::vector<uint8_t> text(2000, 'a');
+    text[0] = 0x0D;
+    text[1] = 0x0A;
+    CHECK(!decodeImage(text, out, err));
+    auto f = goodGiebler();
+    f.resize(512);
+    CHECK(!decodeImage(f, out, err));  // header only, no trailing 1A
+    f = goodGiebler();
+    f.resize(100);
+    CHECK(!decodeImage(f, out, err));  // header cut short
+    f = goodGiebler();
+    f[0xA1] = 0x7F;  // bitmap now lists two blocks, the file holds one
+    CHECK(!decodeImage(f, out, err));
+    f = goodGiebler();
+    f.erase(f.end() - 100, f.end());  // truncated body
+    CHECK(!decodeImage(f, out, err));
+    f = goodGiebler();
+    f.push_back(0);  // trailing bytes
+    CHECK(!decodeImage(f, out, err));
+    f = goodGiebler();
+    f[0x4E] = 0;  // marker bytes missing
+    CHECK(!decodeImage(f, out, err));
+    f = goodGiebler();
+    f[0x9F] = 0;
+    CHECK(!decodeImage(f, out, err));
+}
+
+TEST(image_gkh_fresh_header_bytes) {
+    // T21: the header of a new .gkh file, from the real 58-byte layout; only 0x18 and 0x1E..0x21 differ by density.
+    static const uint8_t dd[58] = {
+        'T', 'D', 'D', 'F', 'I', 0x01, 0x05, 0x00, 0x01, 0x04, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x00, 0x00, 0x0A, 0x05, 0x50, 0x00, 0x02, 0x00, 0x0A, 0x00, 0x00, 0x02, 0x0B, 0x0B, 0x00, 0x80,
+        0x0C, 0x00, 0x3A, 0x00, 0x00, 0x00, 0x15, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x14, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    std::vector<uint8_t> want(dd, dd + 58);
+    auto head = [](Density d) {
+        auto g = encodeImage(*Disk::formatted(d), ImageFormat::Gkh, {});
+        return std::vector<uint8_t>(g.begin(), g.begin() + 58);
+    };
+    CHECK(head(Density::Double) == want);
+    want[0x18] = 0x14;
+    want[0x1E] = 0x00; want[0x1F] = 0x00; want[0x20] = 0x19; want[0x21] = 0x00;
+    CHECK(head(Density::High) == want);
+    // And the result decodes as a GKH file.
+    DecodedImage out;
+    std::string err;
+    CHECK(decodeImage(encodeImage(*Disk::formatted(Density::High), ImageFormat::Gkh, {}), out, err));
+    CHECK(out.format == ImageFormat::Gkh && out.disk->density() == Density::High);
 }
 
 TEST(image_format_for_name) {
@@ -157,6 +233,9 @@ TEST(image_user_files) {
         CHECK(da.format == ImageFormat::Gkh && db.format == ImageFormat::Raw);
         CHECK(da.disk->density() == p.d && db.disk->density() == p.d);
         CHECK(sameSectors(*da.disk, *db.disk));
+        // A fresh header matches the real file's (T21).
+        const auto fresh = encodeImage(*da.disk, ImageFormat::Gkh, {});
+        CHECK(std::equal(fresh.begin(), fresh.begin() + 58, fa.begin()));
     }
     struct Blank { const char* name; Density d; };
     const Blank blanks[] = {{"EPSBLANK.EDE", Density::Double}, {"ASRBLANK.EDA", Density::High},
