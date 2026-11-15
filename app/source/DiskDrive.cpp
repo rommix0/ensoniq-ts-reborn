@@ -28,14 +28,21 @@ void DiskDrive::follow() {
     const bool saving = save_ && save_->swaps == swaps_;  // the disk being saved is still in
     gen_ = g;
     swaps_ = in_ ? 1u : 0u;
+    copyAsked_ = false;  // the old engine's copy request went with it
     auto* e = proc_.engine();
     if (e == nullptr) return;
     e->setWriteProtect(protect_);  // a request the old engine had not applied yet
     if (save_) {
-        // The old engine's copy request went with it: ask the new one.
         save_->swaps = swaps_;
-        if (!saving || !e->requestDisk(Disk::blank(density_))) finish(false, "The disk changed before it was saved.");
+        if (!saving || !askCopy(e)) finish(false, "The disk changed before it was saved.");
     }
+}
+
+// One copy request at a time in the engine; copyAsked_ until poll() has taken its answer.
+bool DiskDrive::askCopy(ens::app::Engine* e) {
+    if (copyAsked_) return true;  // an earlier request, not served yet (audio stopped), answers this save too
+    copyAsked_ = e->requestDisk(Disk::blank(density_));
+    return copyAsked_;
 }
 
 ens::app::Engine* DiskDrive::engine() {
@@ -50,7 +57,15 @@ bool DiskDrive::insert(std::unique_ptr<Disk> d) {
     e->takeRemoved();
     if (!e->insertDisk(std::move(d))) return false;
     ++swaps_;
+    // DECISION A119: a save waiting for its copy is given up when the disk changes (it may never come while
+    // the audio is stopped, and would hold off every later save).
+    if (save_) finish(false, "The disk was changed before it was saved.");
     return true;
+}
+
+juce::String DiskDrive::notNow() const {
+    return proc_.engine() != nullptr ? "The drive is busy. Try again."
+                                     : "The machine is not running: choose the ROM folder first.";
 }
 
 // DECISION A119: the format comes from the content (decodeImage), never the name; a raw file's size decides
@@ -181,7 +196,7 @@ bool DiskDrive::startSave(Save s, juce::String& err) {
         err = "A save is already running.";
     } else if (e == nullptr || !proc_.prepared()) {
         err = "The machine is not running (no audio device), so the disk cannot be copied.";
-    } else if (!e->requestDisk(Disk::blank(density_))) {
+    } else if (!askCopy(e)) {
         err = "The drive is busy. Try again.";
     }
     if (err.isNotEmpty()) return false;
@@ -197,15 +212,16 @@ void DiskDrive::poll() {
     std::unique_ptr<Disk> copy;
     bool ok = false;
     uint32_t at = 0;
-    if (!save_ || !e->takeDisk(copy, ok, at)) return;
-    if (at != save_->swaps) {
-        // A copy of the disk before: the one to save was still waiting to go in. Ask again with the same scratch.
-        if (at < save_->swaps && save_->swaps == swaps_ && e->requestDisk(std::move(copy))) return;
-        finish(false, "The disk changed before it was saved.");
-        return;
-    }
-    if (!ok) {
-        finish(false, "The disk could not be copied.");
+    if (!copyAsked_ || !e->takeDisk(copy, ok, at)) return;
+    copyAsked_ = false;
+    if (!save_) return;  // the save it was for was given up: dropped
+    if (at != save_->swaps || !ok) {
+        // A copy of another disk (the one to save still waiting to go in), or a scratch of the density before:
+        // ask again while the disk to save is in, else the save fails.
+        if (save_->swaps == swaps_ && at <= swaps_ && (at != save_->swaps || copy->density() != density_) &&
+            askCopy(e))
+            return;
+        finish(false, at != save_->swaps ? "The disk changed before it was saved." : "The disk could not be copied.");
         return;
     }
     // DECISION A119: <file>.tmp, then replace (the memory file's way, A116): a failed save keeps the old file.
@@ -240,7 +256,7 @@ void DiskDrive::showError(const juce::String& err) {
 void DiskDrive::showMenu(juce::Component* target) {
     const auto fresh = [this](Density d) {
         askThen([this, d] {
-            if (!newBlank(d)) showError("The drive is busy. Try again.");
+            if (!newBlank(d)) showError(notNow());
         });
     };
     juce::PopupMenu m;
@@ -253,7 +269,7 @@ void DiskDrive::showMenu(juce::Component* target) {
     m.addItem("Save Disk Image As...", in_, false, [this] { chooseSaveAs({}); });
     m.addItem("Eject", in_, false, [this] {
         askThen([this] {
-            if (!eject()) showError("The drive is busy. Try again.");
+            if (!eject()) showError(notNow());
         });
     });
     m.addSeparator();

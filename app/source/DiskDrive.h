@@ -29,7 +29,8 @@ public:
     bool newBlank(ens::ts::Density d);
     // To the file it came from, in its format, through <file>.tmp. False with err at once when there is no
     // disk, no file, the file is read-only or a save is running; otherwise true, and the file is written when
-    // the copy arrives (the tick after the next block), `done` reporting the result.
+    // the copy arrives (the tick after the next block), `done` reporting the result. Open, New or Eject before
+    // then gives the save up (`done` false); the copy needs the audio running.
     bool save(juce::String& err, Done done = {});
     // As save, to f in the format its extension names (formatForName); f becomes the drive's file.
     bool saveAs(const juce::File& f, juce::String& err, Done done = {});
@@ -66,6 +67,8 @@ private:
     uint32_t swapsNow() const;    // swaps_ as follow() would set it
     bool insert(std::unique_ptr<ens::ts::Disk> d);
     bool startSave(Save s, juce::String& err);
+    bool askCopy(ens::app::Engine* e);
+    juce::String notNow() const;  // why an insert or eject was not taken
     void finish(bool ok, const juce::String& err);
     void saveThen(std::function<void()> then);
     void chooseOpen();
@@ -82,6 +85,7 @@ private:
     std::vector<uint8_t> header_;  // as decoded, kept for saving in the same format
     uint32_t baseWrites_ = 0;      // Disk::writes() at the last open, new or save
     std::unique_ptr<Save> save_;   // the save waiting for its copy
+    bool copyAsked_ = false;       // the engine holds a copy request of ours
     std::unique_ptr<juce::FileChooser> chooser_;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE(DiskDrive)

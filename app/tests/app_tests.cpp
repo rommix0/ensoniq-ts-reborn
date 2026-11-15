@@ -962,7 +962,7 @@ void editor(const juce::File& dir) {
 // fdc_write_data_counts_write does: MSR at 0x280001, data at 0x280003 (CPU A1 = FDC A0). Waits, a block at a
 // time, for the OS to leave the controller idle (MSR 0x80). Returns ST1: 0x80 written, 0x02 write protected,
 // 0x01 no address mark (the wrong data rate); -1 when the controller never went idle.
-int writeSector(TsProcessor& p) {
+int writeSector(TsProcessor& p, uint8_t fill = 0xA5) {
     auto& m = p.engine()->machine();
     for (int i = 0; i < 100 && m.read8(0x280001) != 0x80; ++i) run(p, 10);
     if (m.read8(0x280001) != 0x80) {
@@ -971,7 +971,7 @@ int writeSector(TsProcessor& p) {
     }
     m.write8(0x280001, 0x88);  // the DD data rate, as the OS selects it from DENS before a transfer (T24)
     for (const int b : {0x45, 0x00, 0, 0, 0, 2, 0, 0x1B, 0xFF}) m.write8(0x280003, static_cast<uint8_t>(b));
-    for (int i = 0; i < 512 && (m.read8(0x280001) & 0x20) != 0; ++i) m.write8(0x280003, 0xA5);
+    for (int i = 0; i < 512 && (m.read8(0x280001) & 0x20) != 0; ++i) m.write8(0x280003, fill);
     uint8_t r[7];
     for (auto& v : r) v = m.read8(0x280003);
     std::printf("  write data: ST0-2 %02x %02x %02x, MSR %02x\n", r[0], r[1], r[2], m.read8(0x280001));
@@ -1053,6 +1053,32 @@ void diskDrive(const juce::File& dir) {
     CHECK(p.setRomFolder(juce::File(TSR_ROM_DIR), err) && p.engine() != engine);
     step();
     CHECK(p.engine()->snapshot().diskIn && d.slotText() == "x.img" && !d.modified());
+
+    // A save asked for just before a restart: the new engine is asked for the copy, and it is written.
+    CHECK(d.open(img, err));
+    step();
+    CHECK(writeSector(p, 0x5A) == 0x80);
+    step();
+    CHECK(d.modified() && d.save(err));
+    CHECK(p.setRomFolder(juce::File(TSR_ROM_DIR), err));
+    step();  // the drive sees the new engine at this tick and asks it for the copy
+    step();
+    const auto across = fileBytes(img);
+    CHECK(!d.modified() && across.getSize() == 819200 && static_cast<uint8_t>(across[0]) == 0x5A);
+    CHECK(!img.getSiblingFile("disk.img.tmp").exists());
+
+    // A save followed by New before its copy came: it fails, and the old file is kept byte for byte.
+    int calls = 0;
+    bool savedOk = true;
+    CHECK(d.save(err, [&](bool ok, const juce::String&) {
+        ++calls;
+        savedOk = ok;
+    }));
+    CHECK(d.newBlank(ens::ts::Density::Double));
+    step();
+    step();
+    CHECK(calls == 1 && !savedOk && fileBytes(img) == across && !img.getSiblingFile("disk.img.tmp").exists());
+    CHECK(d.slotText() == "Untitled (blank)");
 
     // The slot on the panel shows the text; empty after Eject.
     auto slot = control(ens::app::ControlKind::Decor, -1).r;

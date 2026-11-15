@@ -9,12 +9,14 @@
 namespace {
 
 // DECISION A120: closing the window (or the system asking the app to quit) goes through the drive's prompt
-// when the disk has unsaved writes; Cancel keeps the app open. A modal prompt blocks a second close.
+// when the disk has unsaved writes; Cancel keeps the app open. A close while a dialog is up is ignored: Windows
+// blocks it behind the modal dialog, Linux does not (juce_XWindowSystem_linux.cpp hands it to the window).
 class TsWindow final : public juce::StandaloneFilterWindow {
 public:
     using StandaloneFilterWindow::StandaloneFilterWindow;
 
     void closeButtonPressed() override {
+        if (juce::ModalComponentManager::getInstance()->getNumModalComponents() > 0) return;
         auto* p = dynamic_cast<TsProcessor*>(pluginHolder->processor.get());
         if (p == nullptr) {
             quitNow();
@@ -68,7 +70,15 @@ public:
         appProperties_.saveIfNeeded();
     }
 
+    // As JUCE's: open dialogs are cancelled first and the request comes back 100 ms later; then the close
+    // (with its prompt, A120).
     void systemRequestedQuit() override {
+        if (juce::ModalComponentManager::getInstance()->cancelAllModalComponents()) {
+            juce::Timer::callAfterDelay(100, [] {
+                if (auto* app = juce::JUCEApplicationBase::getInstance()) app->systemRequestedQuit();
+            });
+            return;
+        }
         if (window_ != nullptr) {
             window_->closeButtonPressed();
             return;
