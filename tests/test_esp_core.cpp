@@ -158,7 +158,7 @@ TEST(esp_skip_suppresses_writes_not_ram) {
     CHECK_EQ(e.gpr(2), 0x222200u);
     CHECK_EQ(e.gpr(3), 0x400000u);
     CHECK_EQ(e.mac().raw(), 0);
-    CHECK_EQ(e.gpr(250), 0x080000u);  // CCR untouched
+    CHECK_EQ(e.gpr(250), 0x080000u | 0x070000u);  // CCR untouched (E33: spare bits read 1)
     CHECK_EQ(bus.writes.size(), 1u);  // the RAM write still happened...
     if (bus.writes.size() == 1) {
         CHECK(!bus.writes[0].io);
@@ -183,7 +183,7 @@ TEST(esp_skip_suppresses_writes_not_ram) {
     CHECK_EQ(bus2.writes.size(), 1u);
     if (bus2.writes.size() == 1) CHECK_EQ(bus2.writes[0].v, 0x3333u);
     // DECISION E4: a skippable instruction never sets the CCR, even when it executes.
-    CHECK_EQ(x.gpr(250), 0x080000u);
+    CHECK_EQ(x.gpr(250), 0x080000u | 0x070000u);
 }
 
 TEST(esp_cmp_ignores_skip) {
@@ -196,7 +196,7 @@ TEST(esp_cmp_ignores_skip) {
     e.setGpr(1, 1);
     e.setGpr(2, 2);
     e.runSample();
-    CHECK_EQ(e.gpr(250), 0xD00000u);  // N | C(borrow) | LT
+    CHECK_EQ(e.gpr(250), 0xD00000u | 0x070000u);  // N | C(borrow) | LT (E33: spare bits read 1)
     CHECK_EQ(e.gpr(1), 1u);
 }
 
@@ -325,9 +325,17 @@ TEST(esp_narrow_spr_widths) {
     e.setGpr(249, 0xFFFFFF);
     e.setGpr(250, 0xFFFFFF);
     e.setGpr(251, 0xFFFFFF);
-    CHECK_EQ(e.gpr(249), 0x400000u);
-    CHECK_EQ(e.gpr(250), 0xF80000u);
-    CHECK_EQ(e.gpr(251), 0xFC0000u);
+    // E33: the spare bits of the top byte read as 1 (SIGREG 21..16, CCR 18..16, CMR 17..16); SIGREG
+    // bit 23 reads back as written; bits 15..0 read 0.
+    CHECK_EQ(e.gpr(249), 0xFF0000u);
+    CHECK_EQ(e.gpr(250), 0xFF0000u);
+    CHECK_EQ(e.gpr(251), 0xFF0000u);
+    e.setGpr(249, 0x000000);
+    e.setGpr(250, 0x000000);
+    e.setGpr(251, 0x1C0000);
+    CHECK_EQ(e.gpr(249), 0x3F0000u);
+    CHECK_EQ(e.gpr(250), 0x070000u);
+    CHECK_EQ(e.gpr(251), 0x1F0000u);
 }
 
 TEST(esp_runsample_terminates_without_end) {

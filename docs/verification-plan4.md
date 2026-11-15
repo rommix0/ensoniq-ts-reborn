@@ -169,6 +169,10 @@ attributes `E7` and `7F`, SACK/, wait states, the CPU clock, the levels.
   70-80. Fixed 2026-11-14 by E32: the OS's load verification failed on the ESP's ABASE/DLENGTH read-back,
   so it never wrote the tables. Tests agen_low_nibble_reads_as_ones and ts_effect_tables_load; the four
   reference hashes are unchanged. User to run: listen to both sounds.
+- Found by surveying every sound and preset (banks U0, U1, R2-R4) after E32: the OS's load check also
+  failed on CMR's spare bits for U0-4 SUITCASE-74, U0-5 TRANS-CLAV, U1 program 25 and their ROM copies,
+  so those effects ran without the records after CMR. Fixed by E33 (test
+  ts_effect_loads_verify_first_time); reference hashes unchanged. User to run: listen to those sounds.
 - Deferred minors of the review rounds, none changing behaviour. Code: the editor test does not check
   begin/end gestures; no automated check of underline, blink, latch, focus release, patch buttons or the
   reset on an engine change; `paramId` falls back to Data Entry for an unknown analog; closing the editor can

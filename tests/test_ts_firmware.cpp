@@ -832,3 +832,22 @@ TEST(ts_effect_tables_load) {
     CHECK(crunch > 1000);
     CHECK_EQ(zepFail, 0u);
 }
+
+// E33: the same load verification compares CMR's top byte against `written | 0x03`. U0-4 SUITCASE-74
+// (program 24) and U0-5 TRANS-CLAV (program 34) load a CMR value; with bits 17..16 reading 0 the OS
+// retried 10 times and dropped the rest of the effect's parameters. RAM $130 counts the retries of the
+// last load (cleared when a load starts).
+TEST(ts_effect_loads_verify_first_time) {
+    auto m = bootFresh();
+    if (!m) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    for (int prog : {24, 34}) {
+        sendBytes(*m, {0xB0, 0x00, 0x00, 0xB0, 0x20, 0x00, 0xC0, static_cast<uint8_t>(prog)});
+        runMs(*m, 700);
+        const unsigned tries = m->peek16(0x130) >> 8;
+        std::printf("  U0 program %d: load retries %u\n", prog, tries);
+        CHECK_EQ(tries, 0u);
+    }
+}

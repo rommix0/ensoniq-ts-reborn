@@ -174,7 +174,7 @@ Entry template:
 - Choice: (a). The firmware writes SIGREG with all bits set; only bit 22 has an effect either way.
 - Evidence: ESP notes part 1 §3.2 widths (SIGREG 1 bit = bit 22, CCR 5, CMR 6) and the DIL text ("unused 8 bits are read back as zeros"). Read-back of unused bits is not documented.
 - Confidence: Low.
-- Status: Implemented in Esp::writeReg (Task 8). Test: esp_narrow_spr_widths.
+- Status: Implemented in Esp::writeReg (Task 8). Test: esp_narrow_spr_widths. Read-back of the spare bits was changed by E33.
 
 ## E23: ESP reset state
 - Options: (a) reset clears GPRs, instruction memory, SPRs, the MAC, the AGEN registers, DIL, the DOL FIFO (including its last-pushed word) and the pipeline registers, with PC = 0; (b) leave GPR and instruction memory as they were (power-up contents are undefined in hardware).
@@ -268,6 +268,13 @@ Entry template:
 - Evidence: OS v3.10 verifies every ESP load by reading each register back and comparing (routine at 0xC4C78C; mismatch at 0xC4C868 reloads the whole effect, counter at RAM $130, after 10 tries flag $12E is set and the effect's table-A data is never written through host RAM access). For SPR 245-247 it compares the third byte against `written | 0x0F` (0xC4C838-0xC4C844), so the hardware returns 1s in bits 3..0. DBASE (248) and MEMSIZ/DIL (244) are skipped. Under (a), effects that set ABASE = 0x3CFE00 (64 GUITAR AMP 2, 71 EQ--COMPRESSOR) failed all 10 tries: CRUNCH-ELEC was silent and ZEP-KIT clicked after release. Under (b) they load first time and the OS writes their tables. The KS-32 boot's DLENGTH = 0xFFFFFF check (R13's evidence) passes under (a) and (b).
 - Confidence: High for DLENGTH/ABASE/BBASE; DBASE has no evidence.
 - Status: Implemented in Agen::readReg. Tests: agen_low_nibble_reads_as_ones, ts_effect_tables_load. The same routine expects other read-back bits (SIGREG bits 21..16, CCR 18..16, CMR 17..16 and the SER3 low byte read as 1); none of these changed a load that was tried, so they are left as E22/E8 say until a load needs them.
+
+## E33: Read-back of the SIGREG, CCR and CMR spare bits
+- Options: (a) E22: only the documented bits are kept and the rest read 0; (b) the spare bits of the top byte read as 1 (SIGREG 21..16, CCR 18..16, CMR 17..16) and SIGREG bit 23 reads back as written; bits 15..0 read 0.
+- Choice: (b). What the bits do is unchanged: SIGREG bit 22 picks the MAC shift, CCR keeps N C V LT Z, CMR keeps its six mask bits.
+- Evidence: OS v3.10's load verification (E32) compares the top byte of SIGREG, CCR and CMR against `written | 0x3F`, `| 0x07` and `| 0x03` and skips their lower bytes (0xC4C7FE-0xC4C82E). The boot writes SIGREG = 0xFFFFFF, so bit 23 is kept. Under (a) every load that writes CMR failed 10 times and dropped the rest of its records: U0-4 SUITCASE-74, U0-5 TRANS-CLAV, U1 program 25 and their R2/R3 copies (a survey of every sound and preset in banks U0, U1, R2-R4). Under (b) they load first time.
+- Confidence: High for the top byte; the lower bytes are not checked by the OS.
+- Status: Implemented in Esp::readReg and writeReg. Tests: esp_narrow_spr_widths, ts_effect_loads_verify_first_time. The same routine expects the low byte of SER3L/SER3R (240, 241) to read 0xFF and SER0-SER2 to read 0x00; E8 is left as it is (0x00) because SER3 is an audio input and no load was found that writes it.
 
 ## P1: ESP slots per frame
 - Options: (a) 89 instruction periods per frame (8 MHz ESP, 3 clocks per instruction, one 29.76 kHz frame; every KS-32 ESP program is exactly 89 words); (b) 160 slots (the full program memory); (c) run-to-END only (no budget, choice (a) of E30).

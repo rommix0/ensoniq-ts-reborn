@@ -545,7 +545,7 @@ TEST(host_firmware_boot_sequence) {
     CHECK_EQ(e.gpr(0xBF), 0xFFFFFFu);
     CHECK_EQ(e.gpr(0x00), 0xFFFFFFu);
     gprw(0xF9, 0xFFFFFF);  // SIGREG
-    CHECK_EQ(e.gpr(249), 0x400000u);
+    CHECK_EQ(e.gpr(249), 0xFF0000u);  // E33: bits 23..22 kept, 21..16 read 1
     for (int a = 0xEA; a <= 0xF1; a++) gprw(uint8_t(a), 0);
     // Read-back verification through $80, then parking the select registers at $C0.
     xfer(e, 0x80, 0x10);

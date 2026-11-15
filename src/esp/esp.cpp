@@ -60,9 +60,10 @@ uint32_t Esp::readReg(int addr) const {
         case kMacl: return mac_.readLow();
         case kMach: return mac_.readHigh();
         case kDil: return dil_;  // 244 read = DIL (the write side is MEMSIZ)
-        case kSigreg: return sigreg_;
-        case kCcr: return esp::packCcr(ccr_);
-        case kCmr: return cmr_;
+        // DECISION E33: the spare bits of the top byte read as 1 (SIGREG 21..16, CCR 18..16, CMR 17..16).
+        case kSigreg: return sigreg_ | 0x3F0000;
+        case kCcr: return esp::packCcr(ccr_) | 0x070000;
+        case kCmr: return cmr_ | 0x030000;
         // DECISION E12: constants -1, MIN, MAX, 0.
         case 252: return 0xFFFFFF;
         case 253: return 0x800000;
@@ -87,8 +88,9 @@ void Esp::writeReg(int addr, uint32_t v24) {
     switch (addr) {
         case kMacl: mac_.writeLow(v24); return;
         case kMach: mac_.writeHigh(v24); return;
-        // DECISION E22: SIGREG keeps only bit 22, CCR bits 23..19, CMR bits 23..18.
-        case kSigreg: sigreg_ = v24 & kShiftOneBit; return;
+        // DECISION E22: SIGREG keeps bits 23..22 (E33: bit 23 has no function but reads back), CCR bits
+        // 23..19, CMR bits 23..18.
+        case kSigreg: sigreg_ = v24 & 0xC00000; return;
         case kCcr: ccr_ = esp::unpackCcr(v24); return;
         case kCmr: cmr_ = v24 & kCmrMask; return;
         default:
