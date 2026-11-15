@@ -53,7 +53,8 @@ ens::app::Engine* DiskDrive::engine() {
 // DECISION A118: the disk the last swap took out is freed here, before the next swap, so that swap can apply.
 bool DiskDrive::insert(std::unique_ptr<Disk> d) {
     auto* e = engine();
-    if (e == nullptr) return false;
+    // DECISION A119: with no audio running the swap would never be applied; refuse it (notNow says why).
+    if (e == nullptr || !proc_.prepared()) return false;
     e->takeRemoved();
     if (!e->insertDisk(std::move(d))) return false;
     ++swaps_;
@@ -64,8 +65,9 @@ bool DiskDrive::insert(std::unique_ptr<Disk> d) {
 }
 
 juce::String DiskDrive::notNow() const {
-    return proc_.engine() != nullptr ? "The drive is busy. Try again."
-                                     : "The machine is not running: choose the ROM folder first.";
+    if (proc_.engine() == nullptr) return "The machine is not running: choose the ROM folder first.";
+    return proc_.prepared() ? "The drive is busy. Try again."
+                            : "The machine is not running (no audio device), so the disk cannot be changed.";
 }
 
 // DECISION A119: the format comes from the content (decodeImage), never the name; a raw file's size decides
@@ -100,7 +102,7 @@ bool DiskDrive::open(const juce::File& f, juce::String& err) {
     const uint32_t writes = im.disk->writes();
     const Density density = im.disk->density();
     if (!insert(std::move(im.disk))) {
-        err = "The drive is busy. Try again.";
+        err = notNow();
         return false;
     }
     in_ = true;
@@ -286,7 +288,17 @@ void DiskDrive::openAsked(const juce::File& f) {
 
 // DECISION A120: Open, New, Eject, a dropped file and the Standalone's close ask first when the disk has
 // unsaved writes: Save, Don't Save or Cancel.
+// DECISION A120: while a save is in flight (its copy not yet arrived) the disk still reads as modified; the
+// action then waits for that save instead of asking again, runs when it succeeded and is dropped when it
+// failed (its error is shown by the save's own handler), so the user's writes are never given up unasked.
 void DiskDrive::askThen(std::function<void()> then) {
+    if (save_ && modified()) {
+        save_->done = [prev = std::move(save_->done), then](bool ok, const juce::String& e) {
+            if (prev) prev(ok, e);
+            if (ok) then();
+        };
+        return;
+    }
     if (!modified()) {
         then();
         return;

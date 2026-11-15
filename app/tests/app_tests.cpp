@@ -1080,6 +1080,30 @@ void diskDrive(const juce::File& dir) {
     CHECK(calls == 1 && !savedOk && fileBytes(img) == across && !img.getSiblingFile("disk.img.tmp").exists());
     CHECK(d.slotText() == "Untitled (blank)");
 
+    // A save in flight: an action asked meanwhile waits for it, asks nothing, and runs after the write; a save
+    // that failed drops it (A120).
+    CHECK(d.open(img, err));
+    step();
+    CHECK(writeSector(p, 0x33) == 0x80);
+    step();
+    CHECK(d.modified() && d.save(err));
+    bool ran = false;
+    d.askThen([&] { ran = true; });  // would pop a dialog before the fix; now chained
+    CHECK(!ran);
+    step();
+    step();
+    CHECK(ran && !d.modified() && static_cast<uint8_t>(fileBytes(img)[0]) == 0x33);
+
+    // No audio running: Open is refused at once, saying so, not "busy" (A119).
+    {
+        TsProcessor q;
+        if (q.engine()) {
+            juce::String e2;
+            CHECK(!q.drive().open(img, e2) && e2.contains("no audio") && !q.drive().newBlank(ens::ts::Density::Double));
+            CHECK(!q.drive().open(img, e2) && e2.contains("no audio"));
+        }
+    }
+
     // The slot on the panel shows the text; empty after Eject.
     auto slot = control(ens::app::ControlKind::Decor, -1).r;
     slot = {slot.x + 26, slot.y + 22, slot.w - 52, slot.h - 44};
