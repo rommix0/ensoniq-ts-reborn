@@ -71,7 +71,12 @@ public:
     bool insertDisk(std::unique_ptr<ts::Disk> d);  // nullptr ejects; false while a swap is pending
     std::unique_ptr<ts::Disk> takeRemoved();       // the disk the last swap took out; nullptr when none
     bool requestDisk(std::unique_ptr<ts::Disk> scratch);  // a disk of the current density; false when pending
-    bool takeDisk(std::unique_ptr<ts::Disk>& out, bool& ok);  // true once done; ok false: no disk or other density
+    // true once done; ok false: no disk or other density. swapsAtCopy is the swap count when the copy was
+    // made: an app counting its own accepted inserts and ejects matches the copy to its disk by it.
+    bool takeDisk(std::unique_ptr<ts::Disk>& out, bool& ok, uint32_t& swapsAtCopy);
+    // Usage: after every swap that took a disk out, call takeRemoved (until it returns it) before the next
+    // swap can apply; an insert into an empty drive parks nothing. takeDisk's `out` is the scratch, also
+    // when ok is false, and is freed by the caller. The engine's destructor frees what is left in a slot.
     // Audio thread:
     void midi(int offset, const uint8_t* data, int size);  // before render, offsets in this block (A101)
     // Any frames >= 0, in pieces of maxBlock.
@@ -147,6 +152,7 @@ private:
     std::atomic<ts::Disk*> swapIn_{nullptr}, removed_{nullptr}, scratch_{nullptr};
     std::atomic<int> copyState_{0};
     std::atomic<bool> copyOk_{false};
+    std::atomic<uint32_t> copySwaps_{0};
     uint32_t diskSwaps_ = 0;
 };
 

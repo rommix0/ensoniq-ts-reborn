@@ -226,14 +226,13 @@ TEST(rt_engine_disk_swap_does_not_allocate) {
     auto in = Disk::formatted(Density::Double);
     auto scratch = Disk::blank(Density::Double);
     std::unique_ptr<Disk> copy, removed;
-    bool ok = false;
+    bool ok = false; uint32_t sw = 0;
     allocStart();
     CHECK(e->insertDisk(std::move(in)));
     e->render(ml, mr, al, ar, kBlock);
-    CHECK(e->takeRemoved() == nullptr);  // the empty drive's "old disk"; frees the slot
     CHECK(e->requestDisk(std::move(scratch)));
     e->render(ml, mr, al, ar, kBlock);
-    const bool took = e->takeDisk(copy, ok);
+    const bool took = e->takeDisk(copy, ok, sw);
     CHECK(e->insertDisk(nullptr));
     e->render(ml, mr, al, ar, kBlock);
     removed = e->takeRemoved();
