@@ -83,10 +83,10 @@ window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an a
 Linux GCC, and must not change unless a change is meant to alter emulation output. When one changes on
 purpose, record the new value here and in the current verification report.
 
-| Hash | Printed by | Value (Plan 3) |
+| Hash | Printed by | Value (Plan 3, unless noted) |
 |---|---|---|
 | Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `3bfc7336098a6def` |
-| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `4a751109deae8b89` |
+| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `3374892bfdc150e6` (Plan 5 Task 4, T4: the parked voice 0 now reads S8's first words in OTTO bank 3; one sample 1 LSB apart from Plan 3's `4a751109deae8b89`) |
 | Render | `tsemu render tests/data/full_chord.mid` | `524fcc64af78f175` |
 | Render | `tsemu render tests/data/filtered_patch.mid` | `01e3c8622cc8c8be` |
 

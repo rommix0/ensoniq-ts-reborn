@@ -13,7 +13,7 @@ constexpr uint32_t kRomBase = 0xC00000, kRomWindow = 0x100000, kRomBytes = 0x800
 constexpr uint32_t kSeqExpBase = 0x038000, kSeqExpTop = 0x078000, kRamHighBase = 0xFC0000;
 constexpr uint32_t kIo1Base = 0x200000, kIo1Window = 0x100000;      // A19:A18 = DUART, SCSI, FDC, IEXP
 constexpr uint32_t kIo2Base = 0x300000, kIo2Window = 0x100000;      // A19 = OTTO, ESP
-constexpr uint32_t kHostBase = 0x400000, kHostWindow = 0x800000;    // DECISION T4: OTTO banks 2-3
+constexpr uint32_t kHostBase = 0x400000, kHostWindow = 0x800000;    // DECISION T4: OTTO banks 3, then 2
 constexpr uint8_t kMuxSelect[kAnalogCount] = {0, 2, 3, 4, 5, 6, 7};  // Hardware facts: U69 Y0, Y2-Y7 (Y1 n.c.)
 constexpr uint8_t kEmptyDrivePins = 0x3F;  // DECISION T10: no index pulse; IP1 (DSKCHG) and IP2 (DENS) high
 // DECISION T23: a 300 rpm drive: the index hole passes every 200 ms and holds IP0 low for 2 ms.
@@ -153,8 +153,9 @@ uint8_t Machine::memByte(uint32_t a, bool& mapped) const {
     }
 }
 
-// DECISION T4: the host window is word (a - base) / 2 of OTTO banks 2-3 (CPU A22..A1); only bank 2
-// words 0-0xFFFFF exist (one 1M x 8 SIMM pair). Empty sockets read 0 and ignore writes.
+// DECISION T4: the host window is OTTO bank 3 at 0x400000-0x7FFFFF and bank 2 at 0x800000-0xBFFFFF, word
+// A21..A1; only bank 3 words 0-0xFFFFF exist (one 1M x 8 SIMM pair, BankSet S8). Empty sockets read 0 and
+// ignore writes.
 uint16_t Machine::hostWord(uint32_t a) const {
     const uint32_t w = (a - kHostBase) >> 1;
     return w < WaveMemory::kSampleRamWords ? waves_.sampleRam(w) : 0;

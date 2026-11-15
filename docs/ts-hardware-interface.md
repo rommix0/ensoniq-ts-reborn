@@ -38,7 +38,7 @@ the confidence and the decision entry in `docs/decisions.md`.
 | 0x200000 + 0x40000 n | I/O1: n = 0 DUART, 1 SCSI, 2 FDC, 3 IEXP (A19:A18 into U7/A) |
 | 0x300000–0x37FFFF | OTTO (odd bytes, HA5..HA0 = A6..A1) |
 | 0x380000–0x3FFFFF | ESP (odd bytes, host register = A8..A1) |
-| 0x400000–0xBFFFFF | Sample RAM host window: word (a − 0x400000) / 2 of OTTO banks 2–3 |
+| 0x400000–0xBFFFFF | Sample RAM host window: OTTO bank 3 at 0x400000–0x7FFFFF (BankSet S8), bank 2 at 0x800000–0xBFFFFF (S9), word A21..A1 |
 | 0xC00000–0xC7FFFF | OS ROM, 512 KB (T2); modelled mirrored to 0xCFFFFF |
 
 The devices are decoded over their whole block (a DUART register is A4..A1 anywhere in
@@ -60,7 +60,14 @@ The devices are decoded over their whole block (a DUART register is A4..A1 anywh
 - **Sample RAM window.** At 107.5 ms the OS writes words to 0x400000, 0x600000, 0x800000, 0xA00000
   (0x0000, 0x1111, 0x2222, 0x3333 at +2) and reads them back from the top down: a socket probe in
   steps of 2 MB, one 1M x 8 SIMM pair (1M words). Four steps of 2 MB from 0x400000 end at the ROM:
-  the 8 MB window of CPU A22..A1.
+  the 8 MB window of CPU A22..A1. The probe code (c14f7a) keeps 0x400000 as S8's base ($12d2) and
+  0x800000 as S9's ($12f6), and allows S9 only when more than 4 MB answered.
+- **Which OTTO bank (Plan 5 Task 4).** A sampled sound loaded into BankSet S8 is written through the window
+  at 0x400000 + 2 w (ED-001's FLUTE 1: words 0xE7E04-0xFFFFF, the top of the 1M words). Playing it, the OS
+  writes CR with BS1:BS0 = 11 (bank 3) and START/END inside those words (0xF510B-0xFAF1F). So the
+  window's first 4 MB (S8) is OTTO bank 3 and the second (S9) bank 2: CPU A22 = 1 is BS0 = 1. With bank 2
+  modelled there instead, the sound loads and is selected but plays silence. The OS also parks voice 0 on
+  bank 3 words 0-0x20000, where it writes its sample-memory header at boot (c14ea8).
 - **OSRAM in two windows.** (Task 4; the 0x038000 probe is SEQEXP's, below.) The reset SSP is 0xFF80A0.
   RAM use in the boot by 32 KB block: 0x0000–0x7FFF and 0xFF8000–0xFFFFFF heavily (from 0.2 ms), 0x8000–0x17FFF cleared at about 1.1 s,
   0x18000–0x1FFFF used from 1.27 s, and one word written and read back at 0x038000 at 1274.7 ms.

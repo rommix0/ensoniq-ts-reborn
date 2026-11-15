@@ -104,7 +104,7 @@ TEST(ts_peek_has_no_side_effects) {
     CHECK_EQ(events, 0);
 }
 
-// T13: OSRAM is seen at 0 and again at 0xFC0000; T4: the host window reaches OTTO bank 2 and stops at the
+// T13: OSRAM is seen at 0 and again at 0xFC0000; T4: the host window reaches OTTO bank 3 (BankSet S8) and stops at the
 // installed 1M words (an empty socket reads 0 and does not alias the installed pair).
 TEST(ts_ram_alias_and_sample_window) {
     auto m = machineWith({0x33FC, 0x1234, 0x00FF, 0x1000,   // MOVE.W #$1234,$FF1000

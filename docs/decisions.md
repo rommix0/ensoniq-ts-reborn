@@ -698,10 +698,12 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 
 ## T4: Sample RAM
 - Options: 2 MB (one 1M x 8 pair), 4 MB, none.
-- Choice: 2 MB: OTTO bank 2 words 0-0xFFFFF; the rest of bank 2 and bank 3 read 0 and ignore writes (empty sockets). The CPU sees banks 2-3 at 0x400000-0xBFFFFF, word (a - 0x400000) / 2 (CPU A22..A1); a byte access reads or writes one half of the word. `WaveMemory::sampleRam` wraps its index; the machine bounds it first, so an empty socket never aliases the installed pair.
+- Choice: 2 MB: OTTO bank 3 words 0-0xFFFFF (BankSet S8); the rest of bank 3 and all of bank 2 (S9's sockets) read 0 and ignore writes (empty sockets). The CPU sees bank 3 at 0x400000-0x7FFFFF and bank 2 at 0x800000-0xBFFFFF, word A21..A1 (CPU A22 = BS0); a byte access reads or writes one half of the word. `WaveMemory::sampleRam` wraps its index; the machine bounds it first, so an empty socket never aliases the installed pair.
 - Evidence: design section 4; service manual SIMM text; the OS's socket probe at boot (words written at 0x400000, 0x600000, 0x800000, 0xA00000 and read back: steps of one 1M x 8 pair). None, 2 MB, 2 MB aliased over the window, and empty sockets reading 0xFFFF all boot with the same event sequence and no "WRONG SOCKETS" text (docs/ts-hardware-interface.md, "Memory map").
 - Confidence: Medium for the window base; low for the installed size and empty-socket reads (the boot cannot tell).
-- Status: Storage in `WaveMemory::sampleRam` (Task 1); window in `Machine::hostWord` and `Machine::write8` (Task 4). Tests: ts_sample_ram_bank2, ts_ram_alias_and_sample_window.
+- Evidence (Plan 5 Task 4): the OS's socket probe (c14f7a) stores 0x400000 as S8's base and 0x800000 as S9's. A sampled sound loaded into S8 from disk is written at 0x400000 + 2 w (ED-001's FLUTE 1: w = 0xE7E04-0xFFFFF); played, its voices get CR BS1:BS0 = 11 and START/END inside those words. Bank 2 was the earlier choice (Plan 3, untested by any sound): the sound then loads but plays silence. The change moves one sample of the player_smoke render by 1 LSB (hash 4a751109deae8b89 -> 3374892bfdc150e6): the OS parks voice 0 on bank 3 words 0-0x20000 (CR 0xC308), which now reads the memory manager's header the OS writes at S8's start (c14ea8, words 4-5 = 0x4010 0x1F60).
+- Confidence (bank): High for S8 = bank 3 at 0x400000 (the OS's own use); S9 = bank 2 at 0x800000 follows (not testable without 4M x 8 SIMMs).
+- Status: Storage in `WaveMemory::sampleRam` (Plan 3 Task 1); window in `Machine::hostWord` and `Machine::write8` (Plan 3 Task 4); bank 3 since Plan 5 Task 4. Tests: ts_sample_ram_is_otto_bank3, ts_ram_alias_and_sample_window, ts_loads_asr10_instrument, ts_loads_eps_instrument.
 
 ## T11: Audio routing
 - Options: how the 20-bit OTTO values enter the 16-bit ESP ports; which channels feed what; ESP instructions per frame.

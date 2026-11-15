@@ -62,12 +62,13 @@ TEST(ts_bank1_regions) {
     CHECK_EQ(m.read(1, 0x1FFFFF), 0);
 }
 
-TEST(ts_sample_ram_bank2) {
+// T4: the factory SIMM pair (BankSet S8, CPU 0x400000) is OTTO bank 3; bank 2 (S9's sockets) is empty.
+TEST(ts_sample_ram_is_otto_bank3) {
     WaveMemory m;
     m.sampleRam(7) = 0xBEEF;
-    CHECK_EQ(m.read(2, 7), 0xBEEF);
-    CHECK_EQ(m.read(2, 0x100000), 0);
-    CHECK_EQ(m.read(3, 0), 0);
+    CHECK_EQ(m.read(3, 7), 0xBEEF);
+    CHECK_EQ(m.read(3, 0x100000), 0);
+    CHECK_EQ(m.read(2, 7), 0);
 }
 
 TEST(ts_roms_wrong_size_named) {
