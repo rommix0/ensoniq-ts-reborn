@@ -28,8 +28,8 @@ and Linux x64 (GCC). The 68000, ESP and DUART cores were copied from KS-32 Rebor
 - **The audio path is real-time safe.** Nothing in the engine's render path may allocate, lock or
   block after the boot.
 - **Ensoniq material.** The only Ensoniq files in git are the six ROMs the app needs (OS v3.10
-  `roms/os/ts10_310h.bin` and `ts10_310l.bin`, the four `roms/waves/*.bin`) and `roms/README.txt`.
-  Other OS versions, `roms/misc/`, `datasheets/` and `docs/reference/mame/` are ignored on purpose.
+  `roms/os/ts10_310h.bin` and `ts10_310l.bin`, the four `roms/waves/*.bin`) and `roms/README.txt`,
+  plus the two panel logos in `app/resources/` (the TS-10 logo and the Ensoniq badge, A122). Other OS versions, `roms/misc/`, `datasheets/` and `docs/reference/mame/` are ignored on purpose.
   Nothing is pushed to a public remote until the user approves publishing those six ROMs.
 - **The panel layout** follows `datasheets/ts10-photo.webp` for arrangement and proportions and the
   TS-10 Musician's Manual page 3 ("Front Panel Controls") for the left section and the labels (the

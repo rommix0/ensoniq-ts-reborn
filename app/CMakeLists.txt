@@ -21,6 +21,10 @@ juce_add_plugin(TSReborn
   NEEDS_MIDI_INPUT TRUE
   NEEDS_MIDI_OUTPUT FALSE)
 
+# The panel's logos (A122): TsArt::ts10_logo_svg, TsArt::ensoniq_logo_svg.
+juce_add_binary_data(TSReborn_Art HEADER_NAME TsArt.h NAMESPACE TsArt
+  SOURCES resources/ts10_logo.svg resources/ensoniq_logo.svg)
+
 set(TSR_SOURCES source/Processor.cpp source/PanelEditor.cpp source/AppSettings.cpp source/RomFolder.cpp
   source/MemoryFile.cpp source/SettingsPage.cpp source/DiskDrive.cpp)
 
@@ -29,7 +33,7 @@ target_sources(TSReborn PRIVATE ${TSR_SOURCES} source/StandaloneApp.cpp)
 target_compile_definitions(TSReborn PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0
   JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)
 target_link_libraries(TSReborn
-  PRIVATE ens_app juce::juce_audio_utils
+  PRIVATE ens_app TSReborn_Art juce::juce_audio_utils
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 # The checks that need JUCE but no window of their own: the ROM folder, the memory file, the
@@ -44,6 +48,6 @@ target_compile_definitions(TSReborn_AppTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE
   TSR_VST3_PATH="$<GENEX_EVAL:$<TARGET_PROPERTY:TSReborn_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
 add_dependencies(TSReborn_AppTests TSReborn_VST3)
 target_link_libraries(TSReborn_AppTests
-  PRIVATE ens_app juce::juce_audio_utils
+  PRIVATE ens_app TSReborn_Art juce::juce_audio_utils
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 add_test(NAME app_tests COMMAND TSReborn_AppTests)

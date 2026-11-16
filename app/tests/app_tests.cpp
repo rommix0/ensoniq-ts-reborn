@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <thread>
 
@@ -937,6 +938,23 @@ void editor(const juce::File& dir) {
     CHECK(brightPixels(img, ens::app::kDisplayText, 1, 120) > 100);
     CHECK(brightPixels(img, ledArea(1), 0, 200) > 0 && brightPixels(img, ledArea(10), 0, 200) > 0);
     CHECK(brightPixels(img, ledArea(9), 0, 200) == 0);  // Sounds: off
+    // The decals (A122): the TS-10 logo's lavender triangle (blue over green, as the photo) and the badge.
+    const auto pixels = [&img](ens::app::Rect r, auto want) {
+        int n = 0;
+        for (int y = static_cast<int>(r.y * kEdScale); y < static_cast<int>((r.y + r.h) * kEdScale); ++y)
+            for (int x = static_cast<int>(r.x * kEdScale); x < static_cast<int>((r.x + r.w) * kEdScale); ++x)
+                n += want(img.getPixelAt(x, y));
+        return n;
+    };
+    const auto decal = [](const char* label) {
+        for (const auto& c : ens::app::panelLayout())
+            if (c.ink == ens::app::Ink::Decal && std::strcmp(c.label, label) == 0) return c.r;
+        std::abort();
+    };
+    const int triangle = pixels(decal("TS-10"), [](juce::Colour c) { return c.getBlue() > c.getGreen() + 15; });
+    const int badge = pixels(decal("ensoniq"), [](juce::Colour c) { return c.getRed() > 120; });
+    std::printf("  decals: %d triangle pixels, %d badge pixels\n", triangle, badge);
+    CHECK(triangle > 50 && badge > 100);
     // "Show display codes": every cell as two hex digits, a different picture of the same cells.
     pe.toggleHexCodes();
     const int codes = brightPixels(paintEditor(*ed, "panel-codes.png"), ens::app::kDisplayText, 1, 120);

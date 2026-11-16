@@ -97,6 +97,21 @@ TEST(panel_layout_fits_and_does_not_overlap) {
     }
 }
 
+// The decals (A122) sit on bare panel: no control under the logo, its line or the badge.
+TEST(panel_layout_decals_are_clear) {
+    int decals = 0;
+    for (const Control& d : panelLayout()) {
+        if (d.ink != Ink::Decal) continue;
+        ++decals;
+        for (const Control& c : panelLayout())
+            if (c.kind != ControlKind::Label && overlap(d.r, c.r)) {
+                std::printf("    %s under %s\n", c.label, d.label);
+                CHECK(false);
+            }
+    }
+    CHECK_EQ(decals, 3);
+}
+
 TEST(panel_layout_led_matches_button) {
     // docs/ts-hardware-interface.md, "Display and LEDs".
     const Button byLed[ens::ts::kPanelLeds] = {

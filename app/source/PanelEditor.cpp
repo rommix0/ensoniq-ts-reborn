@@ -6,6 +6,7 @@
 
 #include "Processor.h"
 #include "SettingsPage.h"
+#include "TsArt.h"
 #include "app/panel_layout.h"
 #include "ts/machine.h"
 #include "ts/panel.h"
@@ -19,7 +20,24 @@ namespace {
 // The panel's colours: the panel, buttons, labels, the photo's teal display, the LEDs and the decal from
 // the Plan 4 Task 6 brief; the rest (keys, wheels, grooves) as KS-32 Reborn's.
 const juce::Colour kPanel{0xff1c1d20}, kButton{0xff2b2c30}, kButtonEdge{0xff45474c}, kText{0xffc9cbcf},
-    kVfd{0xff7fe8d6}, kVfdBack{0xff050807}, kLedOn{0xffff4a3d}, kLedOff{0xff4a2522}, kDecal{0xff8fb3ad};
+    kVfd{0xff7fe8d6}, kVfdBack{0xff050807}, kLedOn{0xffff4a3d}, kLedOff{0xff4a2522};
+// DECISION A122: the decals' colours, measured on datasheets/ts10-photo.webp: the logo's line and the badge.
+// The logo's own colours are in its SVG.
+const juce::Colour kDecal{0xff97938f}, kBadge{0xffa9a7a7};
+// DECISION A123: a label's font height over its line's height (two-line button labels, one-line labels),
+// the spacing of a two-line label's lines in lines, and the part of a box's width a line may fill.
+constexpr float kLabelGrow = 1.3f, kHeadGrow = 1.12f, kLineGap = 1.12f, kLabelRoom = 0.8f;
+
+// An SVG from the binary data; one colour for every black fill when `ink` is given (the Ensoniq badge's SVG
+// is black and #231f20).
+std::unique_ptr<juce::Drawable> art(const char* data, int size, juce::Colour ink = {}) {
+    auto d = juce::Drawable::createFromImageData(data, static_cast<size_t>(size));
+    if (d != nullptr && !ink.isTransparent()) {
+        d->replaceColour(juce::Colours::black, ink);
+        d->replaceColour(juce::Colour(0xff231f20), ink);
+    }
+    return d;
+}
 const juce::Colour kBack{0xff0d0d0e}, kGroove{0xff08080a}, kEdge{0xff2a2b2e}, kButtonShade{0xff1f2023},
     kButtonDown{0xff242528}, kBright{0xffe6e7ea}, kDim{0xffa7aab0}, kFocus{0xff9fd4c7}, kTrackEdge{0xff2c2e32},
     kCap{0xff4a4c51}, kCapEdge{0xff6a6d73}, kWhite{0xffecebe6}, kWhiteEdge{0xff9a9993}, kBlack{0xff1a1a1c},
@@ -606,22 +624,49 @@ public:
         for (const Control* c : painted_) {
             const auto r = rect(c->r);
             if (c->ink == Ink::Decal) {
-                // The model decal: "TS-10" and its line, no maker's name or logo.
+                // DECISION A122: the TS-10 logo and the Ensoniq badge are drawn from their SVGs, kept to
+                // their shapes; the line under the logo is text, tall and narrow, stretched or squeezed to
+                // the photo's width.
+                juce::Drawable* art = std::strcmp(c->label, "TS-10") == 0     ? ts10_.get()
+                                      : std::strcmp(c->label, "ensoniq") == 0 ? ensoniq_.get()
+                                                                              : nullptr;
+                if (art != nullptr) {
+                    art->drawWithin(g, r.toFloat(), juce::RectanglePlacement::centred, 1.0f);
+                    continue;
+                }
+                auto font = labelFont(c->r.h * 1.3f, false).withExtraKerningFactor(0.08f);
+                const float w = juce::GlyphArrangement::getStringWidth(font, c->label);
+                if (w > 0) font = font.withHorizontalScale(static_cast<float>(c->r.w) / w);
                 g.setColour(kDecal);
-                g.setFont(labelFont(static_cast<float>(c->r.h), c->r.h > 40));
-                g.drawFittedText(c->label, r, juce::Justification::centred, 1, 0.3f);
+                g.setFont(font);
+                g.drawText(c->label, r, juce::Justification::centred, false);
                 continue;
             }
             // A box 20 or more high holds two lines (the photo's button labels), even when the text has
             // one, which is centred. Each line is squeezed, never wrapped.
+            // DECISION A123: the font is larger than the line (Segoe UI's letters fill about 70 % of its
+            // height), so the letters, not the font's leading, fill it: kLabelGrow for a button's two-line
+            // label, kHeadGrow for a one-line label. A two-line label's lines are kLineGap lines apart,
+            // the second on the box's centre line as before, the first moved up, away from the button.
+            // A line wider than its box, or than kLabelRoom of a two-line box (neighbouring 44-wide boxes are
+            // 40 apart, so this keeps a gap between them), is squeezed sideways down to half width, never
+            // shrunk.
             const auto lines = juce::StringArray::fromLines(c->label);
-            const int lineH = c->r.h >= 20 ? c->r.h / 2 : c->r.h;
-            const int y0 = r.getY() + (c->r.h - lines.size() * lineH) / 2;
+            const bool two = c->r.h >= 20;
+            const int lineH = two ? c->r.h / 2 : c->r.h;
+            const int last = lines.size() - 1;
+            const float lastY = r.getY() + c->r.h / 2.0f + last * lineH / 2.0f;  // the last line's centre
+            const auto font = labelFont(lineH * (two ? kLabelGrow : kHeadGrow), c->ink == Ink::Bright);
+            const float room = r.getWidth() * (two ? kLabelRoom : 1.0f), fh = font.getHeight();
             g.setColour(c->ink == Ink::Bright ? kBright : c->ink == Ink::Dim ? kDim : kText);
-            g.setFont(labelFont(static_cast<float>(lineH), c->ink == Ink::Bright));
-            for (int i = 0; i < lines.size(); ++i)
-                g.drawFittedText(lines[i], r.getX(), y0 + i * lineH, r.getWidth(), lineH, juce::Justification::centred,
-                                 1, 0.5f);
+            for (int i = 0; i < lines.size(); ++i) {
+                const float w = juce::GlyphArrangement::getStringWidth(font, lines[i]);
+                g.setFont(w > room ? font.withHorizontalScale(std::max(0.5f, room / w)) : font);
+                const float cy = lastY - (last - i) * lineH * kLineGap;
+                const auto x = static_cast<float>(r.getX() - r.getWidth());
+                g.drawText(lines[i], juce::Rectangle<float>(x, cy - fh / 2, r.getWidth() * 3.0f, fh),
+                           juce::Justification::centred, false);
+            }
         }
 
         // The outline arrows printed above Up and below Down (the photo).
@@ -645,6 +690,8 @@ private:
     KeyPart* held_ = nullptr;  // the key the mouse plays
     bool keyDrag_ = false;
     DrivePart* drive_ = nullptr;
+    std::unique_ptr<juce::Drawable> ts10_ = art(TsArt::ts10_logo_svg, TsArt::ts10_logo_svgSize);
+    std::unique_ptr<juce::Drawable> ensoniq_ = art(TsArt::ensoniq_logo_svg, TsArt::ensoniq_logo_svgSize, kBadge);
     std::vector<const Control*> painted_;  // labels, drawn by the board
     std::vector<const Control*> arrows_;   // Up and Down
     juce::Component* display_ = nullptr;
