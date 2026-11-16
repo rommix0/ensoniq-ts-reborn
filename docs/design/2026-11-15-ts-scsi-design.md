@@ -1,6 +1,7 @@
 # TS Reborn SCSI and CD-ROM (Plan 7)
 
-Approved by the user on 2026-11-15 (after the builder check).
+Approved by the user on 2026-11-15 (after the builder check). Built on branch `plan7-scsi`; checked in
+`docs/verification-plan7.md`. Every section below is done except the "User to run" item under Checks.
 
 Calls made in this design, not by the user (each can be overturned): the SP-4 always fitted in the app and
 off in the test machine; Standalone and VST3 alike leave the CD out of the state; selection, command and

@@ -104,7 +104,10 @@ Firmware tests read the ROMs from `ENS_ROM_DIR` (default `roms/`) and print "ski
 without them. The disk tests read the user's disk images from `ENS_DISK_DIR` (a CMake cache variable, a
 compile-time path; empty by default): `-DENS_DISK_DIR="<folder with AD-001.img, ED-001.GKH, the blank
 Giebler files>"`. With it empty, `image_user_files` and the floppy tests that need those images print
-"skip: disk images not found". The images are the user's own and are never copied into the repo.
+"skip: disk images not found". The CD tests (`cd_file_reads_user_cds`, `ts_cd_*`) read the user's CD images from the
+same folder. The app checks need it too to run their floppy and CD project checks: configure `build-app` and
+`build-linux-app` with `-DENS_DISK_DIR=...` (it becomes `TSR_DISK_DIR` there). The images are the user's own,
+only ever read, and never copied into the repo.
 
 Tests use the tiny registry in `tests/check.h` (`TEST(name) { CHECK(...); CHECK_EQ(a, b); }`). A new
 test file is one line in `ENS_TEST_SOURCES` in `tests/CMakeLists.txt`. For bugs, write the failing test

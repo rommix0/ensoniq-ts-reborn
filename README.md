@@ -7,13 +7,16 @@ emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP e
 a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of
 [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
-**Status:** version 1.0.0 (Plan 6). The TS-10 machine runs the unmodified OS v3.10 in a Standalone app and
+**Status:** version 1.0.0 (Plan 7 on branch `plan7-scsi`, not merged). The TS-10 machine runs the unmodified OS v3.10 in a Standalone app and
 a VST3 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64 and Linux x64; see
 [docs/tsapp.md](docs/tsapp.md), named `APP-GUIDE.md` in a release folder). The floppy drive works: the OS
 reads and writes disk images (raw `.img`, `.gkh`, Giebler `.ede`/`.eda`) of its own and of the ASR-10 and
 EPS families, from the drive on the panel or `tsemu --disk`. `tsemu` boots the machine headless, renders a
 MIDI file to WAV and measures its speed. The person-only checks of Plans 4 and 5 (sound, the panel, the
-drive, a DAW) were done by the user on 2026-11-15. The release scripts build a ready-to-use folder (below).
+drive, a DAW) were done by the user on 2026-11-15. Plan 7 adds the SP-4 SCSI board and a CD-ROM drive at ID 4
+(`.iso` or `.cue` images, read-only, in the app and `tsemu --cd`), and VST3 projects keep the sampled sounds
+loaded from a floppy or a CD; its person-only checks are still to run
+([docs/verification-plan7.md](docs/verification-plan7.md)). The release scripts build a ready-to-use folder (below).
 The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).
 
 ## The release folder
