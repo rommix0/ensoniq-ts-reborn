@@ -1393,7 +1393,7 @@ void cdDriveMissingFile(const juce::File& dir) {
     runCd(p, kBoot);
     openScsiStatus(p);
     printRows(p);
-    CHECK(shows(p, "DEVICE-ID=4"));
+    CHECK(shows(p, "DEVICE-ID=4") && shows(p, "STATUS=TEST-CD"));
     CHECK(iso.deleteFile());
     const auto frames = p.engine()->snapshot().frames;
     pressCd(p, ens::ts::Button::Soft4);  // *LOAD*
@@ -1405,7 +1405,7 @@ void cdDriveMissingFile(const juce::File& dir) {
     CHECK(shows(p, "NOT RESPONDING"));
     pressCd(p, ens::ts::Button::Up);
     printRows(p);
-    CHECK(!shows(p, "NOT RESPONDING"));
+    CHECK(!shows(p, "NOT RESPONDING") && shows(p, "STATUS=INVALID"));
     CHECK(p.record().media().empty());
 }
 
