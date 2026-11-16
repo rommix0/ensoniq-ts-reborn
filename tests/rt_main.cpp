@@ -6,7 +6,10 @@
 #include <cstring>
 #include <new>
 
+#include <string>
+
 #include "app/engine.h"
+#include "cd_file.h"
 #include "check.h"
 #include "ts_firmware.h"
 
@@ -240,6 +243,65 @@ TEST(rt_engine_disk_swap_does_not_allocate) {
     std::printf("  allocations: %zu\n", n);
     CHECK_EQ(n, 0u);
     CHECK(took && ok && copy && removed);
+}
+
+// Real time: an SCSI engine with CDR-13 served from this thread between renders, the SCSI STATUS page and then
+// *LOAD* opened by posted buttons (the OS mounts the disc and reads its directory): render allocates nothing, and
+// sectors really were read.
+TEST(rt_engine_cd_load_does_not_allocate) {
+    RomSet roms;
+    if (!readTsRoms(roms)) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    const std::string dir = ENS_DISK_DIR;
+    CdFile cd;
+    std::string err;
+    if (dir.empty() ||
+        !cd.open(dir + "/CD-ROMs/Ensoniq.CDR-13.InVision.Percussion.ENSONiQ-DELiRiUM/dlm-cdr13.cue", err)) {
+        std::printf("  skip: disk images not found\n");
+        return;
+    }
+    auto e = ens::app::Engine::create(roms, err, true);
+    CHECK(e != nullptr);
+    if (!e) return;
+    constexpr int kBlock = 64;  // small blocks: the reader answers between them, as a thread would
+    e->prepare(48000, kBlock);
+    float ml[kBlock], mr[kBlock], al[kBlock], ar[kBlock];
+    uint8_t buf[SectorPort::kBytes];
+    uint32_t served = 0;
+    auto run = [&](int ms) {
+        for (int b = 0; b < ms * 48 / kBlock; ++b) {
+            e->render(ml, mr, al, ar, kBlock);
+            uint32_t med = 0, lba = 0;
+            if (SectorPort* p = e->cdPort(); p && p->pending(med, lba)) {
+                const bool ok = med == 1 && cd.read(lba, buf);
+                p->reply(med, lba, buf, ok);
+                ++served;
+            }
+        }
+    };
+    using ens::app::Event;
+    auto press = [&](Button b) {
+        e->post({Event::Kind::Button, static_cast<uint8_t>(b), true, 0});
+        run(60);
+        e->post({Event::Kind::Button, static_cast<uint8_t>(b), false, 0});
+        run(300);
+    };
+    CHECK(e->insertCd(1, cd.sectors()));
+    run(5400);  // booted
+    allocStart();
+    press(Button::Storage);
+    press(Button::Soft4);  // SCSI
+    for (int i = 0; i < 4; ++i) press(Button::Up);  // DEVICE-ID=4
+    run(1500);              // the OS mounts the disc
+    press(Button::Soft4);   // *LOAD*
+    run(5000);              // reads the directory
+    const size_t n = allocStop();
+    std::printf("  allocations: %zu, sectors served %u\n", n, served);
+    CHECK_EQ(n, 0u);
+    CHECK(served > 2);  // not hollow: the OS really read the CD
+    CHECK_EQ(e->snapshot().cdMedium, 1u);
 }
 
 // Usage: ens_rt_tests [substring]  -- runs only tests whose name contains the substring.

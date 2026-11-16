@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "app/resampler.h"
@@ -47,12 +48,15 @@ struct Snapshot {
     bool diskIn = false;        // a disk is in the drive (A118)
     uint32_t diskWrites = 0;    // Disk::writes() of the disk in the drive
     uint32_t diskSwaps = 0;     // inserts and ejects applied, so a copy can be matched to its disk
+    uint32_t diskReads = 0;     // Disk::reads() of the disk in the drive
+    uint32_t cdMedium = 0;      // the medium id of the CD in the drive; 0 none (applied, not pending)
 };
 
 class Engine {
 public:
     ~Engine();
-    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err);
+    // scsi: the SP-4 board with a CD drive at ID 4 (Plan 7).
+    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err, bool scsi = false);
     // Message thread, audio stopped:
     void prepare(double outRate, int maxBlock);  // allocates the resampler and buffers
     bool loadRam(const std::vector<uint8_t>& img, std::string& err);
@@ -84,6 +88,14 @@ public:
     // pending insert or eject applied first. The rest (a disk replaced by that insert, the slots) goes with
     // the engine.
     std::unique_ptr<ts::Disk> releaseDisk();
+    // DECISION A128: the CD drive's single slot, as the disk's: applied at the next block start, false while one is
+    // pending, 0 sectors ejects. cdPort() is stable for the engine's life (nullptr without SCSI); another thread
+    // answers its asks (T29) and never reuses a medium id for a different image.
+    ts::SectorPort* cdPort();
+    bool insertCd(uint32_t medium, uint32_t sectors);
+    // Message thread, audio stopped (a restart): the CD in the drive as {medium, sectors}, or the pending insert
+    // taken back unapplied; {0, 0} when none.
+    std::pair<uint32_t, uint32_t> releaseCd();
     // Usage: after every swap that took a disk out, call takeRemoved (until it returns it) before the next
     // swap can apply; an insert into an empty drive parks nothing. takeDisk's `out` is the scratch, also
     // when ok is false, and is freed by the caller. The engine's destructor frees what is left in a slot.
@@ -171,6 +183,9 @@ private:
     std::atomic<uint32_t> copySwaps_{0};
     std::atomic<int> protect_{-1};  // A119: -1 none, else the write protect asked for
     uint32_t diskSwaps_ = 0;
+    // A128: cdWanted_ publishes cdIn_ (medium << 32 | sectors); the audio thread clears it when applied.
+    std::atomic<bool> cdWanted_{false};
+    std::atomic<uint64_t> cdIn_{0};
 };
 
 }  // namespace ens::app

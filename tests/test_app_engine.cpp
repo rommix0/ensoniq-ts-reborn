@@ -25,14 +25,14 @@ namespace {
 constexpr int kBlock = 480;  // 10 ms at 48 000 Hz
 constexpr int kBootedMs = 5400;  // past kBootMs (5300) in 10 ms blocks
 
-std::unique_ptr<Engine> makeEngine() {
+std::unique_ptr<Engine> makeEngine(bool scsi = false) {
     ts::RomSet roms;
     if (!readTsRoms(roms)) {
         std::printf("  skip: ROMs not found\n");
         return nullptr;
     }
     std::string err;
-    auto e = Engine::create(roms, err);
+    auto e = Engine::create(roms, err, scsi);
     if (!e) {
         std::printf("  FAIL: ROMs present but rejected: %s\n", err.c_str());
         ++ens_test::failures();
@@ -668,4 +668,53 @@ TEST(engine_destroy_with_pending_slots) {
     e->insertDisk(ts::Disk::formatted(ts::Density::Double));  // and a pending insert
     e.reset();         // frees all four (checked by sanitizers and leak tools)
     CHECK(true);
+}
+
+// DECISION A128: the CD drive's slot works as the disk's (A118): applied at the next block start, one at a time.
+TEST(engine_cd_insert_at_block) {
+    auto e = makeEngine(true);
+    if (!e) return;
+    CHECK(e->cdPort() != nullptr);
+    CHECK_EQ(e->snapshot().cdMedium, 0u);
+    CHECK(e->insertCd(9, 100));
+    CHECK(!e->insertCd(10, 50));  // one pending
+    CHECK_EQ(e->snapshot().cdMedium, 0u);
+    renderMs(*e, 10);
+    CHECK_EQ(e->snapshot().cdMedium, 9u);
+    CHECK(e->machine().cd()->hasDisc());
+    CHECK(e->insertCd(0, 0));  // eject
+    renderMs(*e, 10);
+    CHECK_EQ(e->snapshot().cdMedium, 0u);
+    CHECK(!e->machine().cd()->hasDisc());
+}
+
+TEST(engine_release_cd) {
+    auto e = makeEngine(true);
+    if (!e) return;
+    CHECK(e->insertCd(9, 100));
+    auto pending = e->releaseCd();  // a pending insert is taken back unapplied
+    CHECK_EQ(pending.first, 9u);
+    CHECK_EQ(pending.second, 100u);
+    renderMs(*e, 10);
+    CHECK_EQ(e->snapshot().cdMedium, 0u);
+    CHECK(e->insertCd(4, 20));
+    renderMs(*e, 10);
+    auto cur = e->releaseCd();  // otherwise the disc in the drive
+    CHECK_EQ(cur.first, 4u);
+    CHECK_EQ(cur.second, 20u);
+    auto plain = makeEngine();  // no SCSI board: no port, nothing to release
+    if (!plain) return;
+    CHECK(plain->cdPort() == nullptr);
+    CHECK(plain->releaseCd() == (std::pair<uint32_t, uint32_t>{0, 0}));
+}
+
+TEST(engine_disk_reads_in_snapshot) {
+    auto e = makeEngine();
+    if (!e) return;
+    auto d = ts::Disk::formatted(ts::Density::Double);
+    d->noteRead(3);
+    d->noteRead(7);
+    CHECK(e->insertDisk(std::move(d)));
+    renderMs(*e, 10);
+    CHECK_EQ(e->snapshot().diskReads, 2u);
 }

@@ -12,8 +12,8 @@ namespace {
 constexpr uint64_t kBootFrames = static_cast<uint64_t>(ts::kBootMs) * ts::kCpuHz / 512'000;
 }  // namespace
 
-std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err) {
-    auto m = ts::Machine::create(roms, err);
+std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err, bool scsi) {
+    auto m = ts::Machine::create(roms, err, false, scsi);
     if (!m) return nullptr;
     return std::unique_ptr<Engine>(new Engine(std::move(m)));
 }
@@ -281,6 +281,26 @@ std::unique_ptr<ts::Disk> Engine::releaseDisk() {
     return m_->insertDisk(nullptr);
 }
 
+ts::SectorPort* Engine::cdPort() { return m_->cdPort(); }
+
+bool Engine::insertCd(uint32_t medium, uint32_t sectors) {
+    if (cdWanted_.load(std::memory_order_acquire)) return false;
+    cdIn_.store(uint64_t{medium} << 32 | sectors, std::memory_order_relaxed);
+    cdWanted_.store(true, std::memory_order_release);
+    return true;
+}
+
+std::pair<uint32_t, uint32_t> Engine::releaseCd() {
+    if (cdWanted_.load(std::memory_order_acquire)) {
+        cdWanted_.store(false, std::memory_order_relaxed);
+        const uint64_t v = cdIn_.load(std::memory_order_relaxed);
+        return {uint32_t(v >> 32), uint32_t(v)};
+    }
+    const ts::CdTarget* cd = m_->cd();
+    return cd && cd->hasDisc() ? std::pair<uint32_t, uint32_t>{cd->medium(), cd->sectors()}
+                               : std::pair<uint32_t, uint32_t>{0, 0};
+}
+
 // DECISION A101: a byte at offset o enters before machine frame floor(o * kFrameHz / outRate) of the
 // block; the store holds 1024 bytes a block, and the rest are dropped and counted.
 // DECISION A108: every byte goes to MIDI IN unchanged, as the jack would carry it; the OS reads pressure itself.
@@ -351,6 +371,11 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         ++diskSwaps_;
         swapWanted_.store(false, std::memory_order_release);
     }
+    if (cdWanted_.load(std::memory_order_acquire)) {  // A128: the CD slot, at the block start
+        const uint64_t v = cdIn_.load(std::memory_order_relaxed);
+        m_->insertCd(uint32_t(v >> 32), uint32_t(v));
+        cdWanted_.store(false, std::memory_order_release);
+    }
     // DECISION A119: after the swap, so it reaches a disk inserted in this block too.
     if (const int p = protect_.exchange(-1, std::memory_order_relaxed); p >= 0 && m_->disk())
         m_->disk()->setWriteProtected(p != 0);
@@ -392,6 +417,8 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         snap_.diskIn = m_->disk() != nullptr;
         snap_.diskWrites = m_->disk() ? m_->disk()->writes() : 0;
         snap_.diskSwaps = diskSwaps_;
+        snap_.diskReads = m_->disk() ? m_->disk()->reads() : 0;
+        snap_.cdMedium = m_->cd() ? m_->cd()->medium() : 0;
         snapMu_.unlock();
     }
     // The acquire on ramReady_ pairs with takeRam's release, so its reads of ram_ end before this
