@@ -47,7 +47,7 @@ add_library(ens_duart STATIC src/duart/duart.cpp)
 target_link_libraries(ens_duart PUBLIC ens_common)
 
 # TS machine (Plan 3): ROM set, wave memory; the machine itself joins in later tasks.
-add_library(ens_ts STATIC src/ts/roms.cpp src/ts/board.cpp src/ts/machine.cpp src/ts/panel.cpp src/ts/disk.cpp src/ts/disk_image.cpp src/ts/fdc.cpp)
+add_library(ens_ts STATIC src/ts/roms.cpp src/ts/board.cpp src/ts/machine.cpp src/ts/panel.cpp src/ts/disk.cpp src/ts/disk_image.cpp src/ts/fdc.cpp src/ts/cd_image.cpp)
 target_link_libraries(ens_ts PUBLIC ens_otto ens_esp ens_m68k ens_duart)
 
 # The JUCE-free engine between the machine and a host's audio callback (Plan 4): plain C++17, no file I/O.
@@ -59,8 +59,9 @@ add_library(ens_m68k_harte STATIC src/m68k/harte_format.cpp)
 target_link_libraries(ens_m68k_harte PUBLIC ens_m68k)
 
 # File reading and writing, the MIDI file reader and the WAV writer, for the tools and the tests.
-add_library(ens_tools_common STATIC tools/common/files.cpp tools/common/smf.cpp tools/common/wav.cpp)
+add_library(ens_tools_common STATIC tools/common/files.cpp tools/common/smf.cpp tools/common/wav.cpp tools/common/cd_file.cpp)
 target_include_directories(ens_tools_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tools/common)
+target_link_libraries(ens_tools_common PUBLIC ens_ts)
 target_compile_definitions(ens_tools_common PRIVATE _CRT_SECURE_NO_WARNINGS)
 
 add_subdirectory(tests)
