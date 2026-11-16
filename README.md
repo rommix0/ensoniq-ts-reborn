@@ -1,3 +1,5 @@
+![](panel.png)
+
 # Ensoniq TS Reborn
 
 An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. The TS-12 is out of scope. It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
@@ -22,12 +24,12 @@ A release folder holds Ensoniq's ROMs (below).
 
 The ROMs are Ensoniq's copyrighted firmware and samples. The emulator needs six files, which the release folder includes (see [roms/README.txt](roms/README.txt)):
 
-| File | Size | What it is |
-|---|---|---|
-| `os/ts10_310h.bin` | 256 KB | OS v3.10, high byte (even addresses) |
-| `os/ts10_310l.bin` | 512 KB | OS v3.10, low byte (odd addresses) |
-| `waves/901401_u41.bin`, `waves/901402_u45.bin` | 2 MB each | Wave ROMs |
-| `waves/901301_u43.bin`, `waves/901302_u46.bin` | 1 MB each | Wave ROMs |
+| File                                           | Size      | What it is                           |
+| ---------------------------------------------- | --------- | ------------------------------------ |
+| `os/ts10_310h.bin`                             | 256 KB    | OS v3.10, high byte (even addresses) |
+| `os/ts10_310l.bin`                             | 512 KB    | OS v3.10, low byte (odd addresses)   |
+| `waves/901401_u41.bin`, `waves/901402_u45.bin` | 2 MB each | Wave ROMs                            |
+| `waves/901301_u43.bin`, `waves/901302_u46.bin` | 1 MB each | Wave ROMs                            |
 
 ## Building
 
