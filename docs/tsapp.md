@@ -69,6 +69,7 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 |---|---|---|
 | Start | from the memory file | from the project's RAM if the project has one, else from the memory file |
 | Saves to the memory file on close and every 60 s | yes (A116) | **no** |
+| "AUTO-LOAD ALL SAMPLED-SOUNDS" at power-on (memory that remembers a loaded sampled sound) | asked, as on the TS | answered *NO* by the app during the boot (A124); the question after loading a SAMPLE-BANKS file is still asked |
 | Sound and the controls | not brought back (A121): the controls start at their defaults, and the sound is the one the memory boots on | from the project |
 | **Erase memory...** | zeros to the file, then a cold boot (Sound goes to 0) | this instance only; the file is left alone |
 | **Copy to shared memory...** | not shown | asks first, then writes this instance's RAM to the shared file (once booted) |

@@ -182,6 +182,8 @@ bool TsProcessor::restart(Ram ram) {
     }
     std::string e;
     auto fresh = ens::app::Engine::create(roms_, e);
+    // DECISION A124: the VST3 answers the power-on auto-load question; the Standalone asks, as the TS does.
+    if (fresh) fresh->setAnswerAutoLoad(mode_ == MemoryMode::Project);
     if (fresh && !img.empty() && !fresh->loadRam(img, e)) fresh.reset();
     const bool ok = fresh != nullptr;
     if (ok) {

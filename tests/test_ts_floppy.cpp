@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "app/engine.h"
 #include "check.h"
 #include "files.h"
 #include "ts/disk_image.h"
@@ -189,14 +190,14 @@ struct SampleVoices {
     }
 };
 
-// Loads the disk's first sampled sound into S8-0, selects it and plays C-E-G for 400 ms (Musician's Manual,
-// Section 14, "Loading a Sampled Sound" and "Selecting and Playing a Sampled Sound").
-void loadsAndPlays(const char* rel) {
+// A machine booted with the disk that has loaded the disk's first sampled sound into S8-0 (Musician's Manual,
+// Section 14, "Loading a Sampled Sound"); null without the ROMs or the image.
+std::unique_ptr<Machine> withFirstSound(const char* rel, std::string& name) {
     auto disk = loadDisk(rel);
-    if (!disk) return;
-    const std::string name = firstSoundName(*disk);
+    if (!disk) return nullptr;
+    name = firstSoundName(*disk);
     auto m = bootWith(std::move(disk));
-    if (!m) return;
+    if (!m) return nullptr;
     openDiskLoad(*m);
     CHECK(watch(*m, 3000, "FILE=" + name).text);
     tap(*m, Button::Soft3);  // *YES*: USE BANK BUTTONS TO SELECT LOCATION, BANKSET=8
@@ -208,6 +209,15 @@ void loadsAndPlays(const char* rel) {
     const Seen done = watch(*m, 30000, "LOAD FILE=");  // back on the Load page when the sound is in
     CHECK(done.text);
     CHECK(!done.notReady && !done.notResponding);
+    return m;
+}
+
+// Loads the disk's first sampled sound into S8-0, selects it and plays C-E-G for 400 ms (Section 14,
+// "Selecting and Playing a Sampled Sound").
+void loadsAndPlays(const char* rel) {
+    std::string name;
+    auto m = withFirstSound(rel, name);
+    if (!m) return;
     tap(*m, Button::Sounds);
     m->button(Button::BankSet, true);  // BankSet held, Bank 8: BankSet S8
     runMs(*m, 60);
@@ -242,6 +252,41 @@ TEST(ts_loads_asr10_instrument) { loadsAndPlays(kAd001); }
 
 // ED-001's first instrument (FLUTE 1, EPS-16 PLUS DD, GKH) the same way.
 TEST(ts_loads_eps_instrument) { loadsAndPlays(kEd001); }
+
+// DECISION A124: memory that remembers a loaded sampled sound makes the OS ask AUTO-LOAD ALL SAMPLED-SOUNDS
+// at power-on (Musician's Manual, "About the Auto-Load Feature"). An engine told to answer it (the VST3's)
+// presses the soft button under *NO * once, during the boot; one not told (the Standalone's) leaves the
+// question up.
+TEST(engine_answers_power_on_auto_load) {
+    std::string name;
+    auto m = withFirstSound(kEd001, name);
+    if (!m) return;
+    const auto ram = m->ramImage();
+    m.reset();
+    ens::ts::RomSet roms;
+    CHECK(readTsRoms(roms));
+    for (const bool answer : {false, true}) {
+        std::string err;
+        auto e = ens::app::Engine::create(roms, err);
+        CHECK(e != nullptr);
+        if (!e) return;
+        e->setAnswerAutoLoad(answer);
+        CHECK(e->loadRam(ram, err));
+        e->prepare(48000, 480);
+        float l[480], r[480], al[480], ar[480];
+        bool asked = false;
+        for (int b = 0; b < 600; ++b) {  // 6 s
+            e->render(l, r, al, ar, 480);
+            asked = asked || shows(e->machine().panel(), "AUTO-LOAD ALL SAMPLED-SOUNDS");
+        }
+        const bool still = shows(e->machine().panel(), "AUTO-LOAD ALL SAMPLED-SOUNDS");
+        std::printf("  answer %d: asked %d, still asking %d, |%s|\n", answer, asked, still,
+                    rowText(e->machine().panel(), 0).c_str());
+        CHECK(asked);
+        CHECK(still == !answer);
+        CHECK(e->snapshot().booted);
+    }
+}
 
 // A blank HD disk formatted by the OS (Section 13, "FORMAT -- Formatting a Blank Disk"), then the current
 // program saved to it (Disk Save page, TYPE=1-PROGRAM). The disk written out as a raw image and read back

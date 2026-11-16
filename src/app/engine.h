@@ -60,6 +60,9 @@ public:
     // for, instead of a bare program change, and at the boot's end even when the machine is already on
     // that program number (R2-0 against the boot's U0-0). Call after loadRam; up to 8 bytes.
     void setSelect(const uint8_t* bytes, int len);
+    // DECISION A124: answer the OS's power-on AUTO-LOAD ALL SAMPLED-SOUNDS question with *NO * (the VST3's
+    // engines). Before the audio starts; kept across loadRam.
+    void setAnswerAutoLoad(bool on);
     ts::Machine& machine();  // tests, and the RAM at shut-down
     // Message thread, audio running:
     bool post(const Event&);    // false when the queue is full (A102)
@@ -98,6 +101,7 @@ private:
     void renderPiece(float* const out[4], int frames);
     void feedMidi(uint64_t upTo);  // the stored bytes due before block frame upTo
     void blockStart();             // sends the requested sound, applies the analogs (A105, A106)
+    void answerAutoLoad();         // A124: presses and releases *NO * under the power-on question
     void sendSelect(const uint8_t* b, int n);
 
     struct MidiByte {
@@ -137,6 +141,11 @@ private:
     // The sound (A105), reset by loadRam as a power cycle.
     MidiParse inParse_, outParse_;
     bool booted_ = false;  // the tracker's boot flag: frames_ reached kBootFrames
+    // A124: Off, or watching this boot for the question, *NO * held since autoLoadAt_, or done.
+    enum class AutoLoad : uint8_t { Off, Watch, Held, Done };
+    bool answerAutoLoad_ = false;
+    AutoLoad autoLoad_ = AutoLoad::Off;
+    uint64_t autoLoadAt_ = 0;
     int requested_ = -1, current_ = -1;
     bool dirty_ = false, sending_ = false;
     uint32_t programSeq_ = 0;

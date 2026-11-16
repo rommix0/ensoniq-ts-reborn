@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace ens::app {
 
@@ -41,6 +42,7 @@ bool Engine::loadRam(const std::vector<uint8_t>& img, std::string& err) {
     frames_ = 0;  // a power cycle: the boot starts again
     inParse_ = outParse_ = MidiParse{};
     booted_ = false;
+    autoLoad_ = answerAutoLoad_ ? AutoLoad::Watch : AutoLoad::Off;
     requested_ = current_ = -1;
     dirty_ = false;
     channel_ = 0;
@@ -186,6 +188,36 @@ void Engine::blockStart() {
     }
 }
 
+void Engine::setAnswerAutoLoad(bool on) {
+    answerAutoLoad_ = on;
+    autoLoad_ = on && !booted_ ? AutoLoad::Watch : AutoLoad::Off;
+}
+
+// DECISION A124: OS v3.10 asks "AUTO-LOAD ALL SAMPLED-SOUNDS  *YES*" / "*NO *" at power-on whenever its memory
+// remembers a loaded sampled sound (Musician's Manual, "About the Auto-Load Feature"). Asked for, the engine
+// answers it as a player would: Soft6 (under *NO *, row 1 columns 35-39) held 100 ms. Only during the boot
+// (A104), so the same question after a SAMPLE-BANKS or 60-SEQ/SONGS load is left to the player.
+void Engine::answerAutoLoad() {
+    static constexpr char kAsk[] = "AUTO-LOAD ALL SAMPLED-SOUNDS";
+    static constexpr uint64_t kHold = 100ull * ts::kCpuHz / 512'000;
+    if (autoLoad_ == AutoLoad::Watch) {
+        if (booted_) {
+            autoLoad_ = AutoLoad::Done;
+            return;
+        }
+        const auto& p = m_->panel();
+        if (std::memcmp(p.text[0], kAsk, sizeof kAsk - 1) != 0 || std::memcmp(&p.text[1][35], "*NO *", 5) != 0 ||
+            m_->panelRoom() < 2)
+            return;
+        m_->button(ts::Button::Soft6, true);
+        autoLoadAt_ = frames_;
+        autoLoad_ = AutoLoad::Held;
+    } else if (autoLoad_ == AutoLoad::Held && frames_ - autoLoadAt_ >= kHold && m_->panelRoom() >= 2) {
+        m_->button(ts::Button::Soft6, false);
+        autoLoad_ = AutoLoad::Done;
+    }
+}
+
 ts::Machine& Engine::machine() { return *m_; }
 
 // DECISION A102: the queue holds 256 events; they are applied at the start of the next block, in
@@ -308,6 +340,7 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         apply(held_);
         holding_ = false;
     }
+    if (autoLoad_ == AutoLoad::Watch || autoLoad_ == AutoLoad::Held) answerAutoLoad();
     // DECISION A118: a swap waits while the last removed disk is untaken, so none is lost or freed here.
     if (swapWanted_.load(std::memory_order_acquire) && !removedFull_.load(std::memory_order_acquire)) {
         std::unique_ptr<ts::Disk> old = m_->insertDisk(std::unique_ptr<ts::Disk>(swapIn_.exchange(nullptr)));
