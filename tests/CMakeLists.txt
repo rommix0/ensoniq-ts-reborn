@@ -29,6 +29,7 @@ set(ENS_TEST_SOURCES
   test_ts_fdc.cpp
   test_ts_floppy.cpp
   test_ts_cd_image.cpp
+  test_ts_cd_target.cpp
   test_app_engine.cpp
   test_app_panel_layout.cpp
 )
