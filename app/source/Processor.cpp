@@ -372,13 +372,13 @@ void TsProcessor::tick() {
         const std::lock_guard<std::mutex> lock(mediaMu_);
         cd_.poll();  // A128: the sectors served to the record
     }
-    // DECISION A129: once the restore has ended (a block has run and restoring is false), the stand-ins.
+    // DECISION A129: once the restore has ended (a block has run and restoring is false), the stand-ins. The snapshot
+    // is taken under stateMu_: one taken before it could be the old engine's, while a host's setStateInformation on
+    // another thread starts a new restore that the snapshot would then finish early.
     if (restoreRan_) {
+        const std::lock_guard<std::mutex> lock(stateMu_);
         const auto s = engine_->snapshot();
-        if (s.frames > 0 && !s.restoring) {
-            const std::lock_guard<std::mutex> lock(stateMu_);
-            if (restoreRan_) finishRestore();
-        }
+        if (restoreRan_ && s.frames > 0 && !s.restoring) finishRestore();
     }
     // DECISION A111 (as KS-32 A18): follow a program change tracked from the panel or MIDI (programSeq
     // moved), never the engine's own sends. followed_ is stored first, then `sound` is written, so a
