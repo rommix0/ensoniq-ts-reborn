@@ -61,6 +61,7 @@ TEST(cd_target_inquiry) {
     CHECK_EQ(v[0], 5);
     CHECK(v[1] & 0x80);
     CHECK_EQ(v[2], 2);
+    CHECK(v[32] == '3' && v[33] == '6' && v[34] == '0' && v[35] == '5');
     CHECK_EQ(r.t.status(), 0);
 }
 

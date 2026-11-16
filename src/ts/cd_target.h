@@ -40,7 +40,7 @@ private:
     uint32_t remaining_ = 0;       // host bytes still to move
     uint32_t pos_ = 0, avail_ = 0; // bytes moved so far, bytes the command really has
     uint64_t base_ = 0;            // byte position of the first block of a READ on the medium
-    uint8_t resp_[32] = {};
+    uint8_t resp_[36] = {};  // largest answer is INQUIRY, 36 bytes (REQUEST SENSE 18, MODE SENSE 12, READ CAPACITY 8)
     uint8_t out_[16] = {};         // MODE SELECT parameter bytes
     uint32_t outLen_ = 0;
 
