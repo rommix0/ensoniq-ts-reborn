@@ -90,10 +90,10 @@ int shownSize(const Machine& m) {
 }
 
 // From *LOAD* (Soft4) on the SCSI STATUS page: the root lists directories; *YES* (Soft3) walks down each first
-// directory to a list of sampled sounds; Soft1 (the FILE field) and Up step to the first one that fits sample RAM, which loads into S8-0 (as
-// withFirstSound in test_ts_floppy.cpp), is selected and plays C-E-G from sample RAM. On CDR-13: ROOT, PERCUSSION,
-// PERC KITS, whose first sound is larger than the free blocks (ETHNIC PERC1, SIZE=4201: the OS shows NOT ENOUGH
-// ROOM, SHORTAGE=183); the next, ETHNIC PERC2 (SIZE=3927), fits.
+// directory to a list of sampled sounds; Soft1 (the FILE field) and Up step to the first one that fits sample RAM,
+// which loads into S8-0 (as withFirstSound in test_ts_floppy.cpp), is selected and plays C-E-G from sample RAM.
+// On CDR-13: ROOT, PERCUSSION, PERC KITS, whose first sound is larger than the free blocks (ETHNIC PERC1,
+// SIZE=4201: the OS shows NOT ENOUGH ROOM, SHORTAGE=183); the next, ETHNIC PERC2 (SIZE=3927), fits.
 TEST(ts_cd_loads_and_plays) {
     ServedCd cd;
     if (!openCd(kCdr13, cd)) return;

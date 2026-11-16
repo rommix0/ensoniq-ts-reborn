@@ -12,7 +12,9 @@ using ens::esp::RamOp;
 namespace {
 constexpr uint8_t kZero = 255, kSer0L = 235, kSer1L = 237;
 
-uint64_t word(uint8_t b, uint8_t a, Op op) { return Instr{kZero, kZero, b, a, op, 0, false, true, RamOp::ReadDelay}.encode(); }
+uint64_t word(uint8_t b, uint8_t a, Op op) {
+    return Instr{kZero, kZero, b, a, op, 0, false, true, RamOp::ReadDelay}.encode();
+}
 
 struct Rig {
     WaveMemory waves;

@@ -1,5 +1,5 @@
 #pragma once
-// What a Project state keeps of the media the OS loaded from (Plan 7, A131): per floppy or CD, its kind, the label
+// What a Project state keeps of the media the OS loaded from (Plan 7, A129): per floppy or CD, its kind, the label
 // the OS knows it by and the blocks the OS read, kept from their first capture. A restore builds stand-ins from them.
 // JUCE-free, no file I/O; not thread-safe: the app calls it on the message thread (CdDrive::poll hands it the sectors
 // the reader thread served), under TsProcessor's media lock so a host may save from another thread (A129).

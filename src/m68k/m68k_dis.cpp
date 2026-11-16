@@ -365,7 +365,9 @@ DisLine disassemble(const std::function<uint16_t(uint32_t)>& read16, uint32_t ad
         const bool word = (op & 0xFF) == 0;
         const int32_t disp = word ? sext16(f.word()) : sext8(op);
         const uint32_t target = (at + static_cast<uint32_t>(disp)) & kAddrMask;
-        const std::string name = k == Op::Bsr ? "bsr" : (op & 0x0F00) == 0 ? "bra" : std::string("b") + kCond[(op >> 8) & 15];
+        const std::string name = k == Op::Bsr ? "bsr"
+                                 : (op & 0x0F00) == 0 ? "bra"
+                                                      : std::string("b") + kCond[(op >> 8) & 15];
         text = line(name + (word ? ".w" : ".s"), hex(target));
         break;
     }

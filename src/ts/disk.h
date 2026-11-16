@@ -47,8 +47,8 @@ public:
     uint32_t reads() const { return reads_; }
     void clearReads();
 
-    // Contents, writes() and the read marks; false, nothing copied, when the densities differ. The write-protect flag is not
-    // copied: it belongs to the drive (A119), which sets it on each disk it puts in.
+    // Contents, writes() and the read marks; false, nothing copied, when the densities differ. The write-protect flag is
+    // not copied: it belongs to the drive (A119), which sets it on each disk it puts in.
     bool copyInto(Disk& dst) const;
 
 private:

@@ -380,7 +380,8 @@ public:
     }
     // The timer: repaint when the parameter moved (a drag, automation, the host's own controls).
     void refresh() {
-        if (param_ != nullptr && (param_->getValue() < drawn_ || param_->getValue() > drawn_)) repaint();  // != without -Wfloat-equal
+        // != without -Wfloat-equal
+        if (param_ != nullptr && (param_->getValue() < drawn_ || param_->getValue() > drawn_)) repaint();
     }
 
     void paint(juce::Graphics& g) override {

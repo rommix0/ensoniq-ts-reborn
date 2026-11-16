@@ -77,7 +77,8 @@ void run(Engine& e, Served& cds, int ms, std::vector<float>* out = nullptr, int*
             out->insert(out->end(), mr, mr + kStep);
         }
         if (peak)
-            for (int i = 0; i < kStep; ++i) *peak = std::max({*peak, int(std::fabs(ml[i]) * 32768), int(std::fabs(mr[i]) * 32768)});
+            for (int i = 0; i < kStep; ++i)
+                *peak = std::max({*peak, int(std::fabs(ml[i]) * 32768), int(std::fabs(mr[i]) * 32768)});
     }
 }
 

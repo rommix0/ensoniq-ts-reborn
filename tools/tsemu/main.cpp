@@ -18,8 +18,8 @@
 // power-on if the file exists (otherwise a line says so and the RAM starts blank, a cold start) and written
 // back when boot or render ends without an error and the run covered at least kBootMs of emulated time (render
 // always does); a shorter boot --ms prints a line and leaves the file alone, so a diagnostic run cannot
-// replace a good settings image with a half-initialised one. --sqx70 fits the SQX-70 sequence expander (SEQEXP); the default is a stock
-// TS-10 (T13). Both use the same image layout.
+// replace a good settings image with a half-initialised one. --sqx70 fits the SQX-70 sequence expander (SEQEXP);
+// the default is a stock TS-10 (T13). Both use the same image layout.
 // --disk <image> puts a disk image (raw .img, GKH or Giebler EDE/EDA, told apart by content, T21) in the drive
 // from power-on; the file is only read. --save-disk <file> writes the disk as it is at the end of the run, in the
 // format the file's extension gives (.gkh GKH, .ede/.eda/.edt Giebler, anything else raw; the --disk file's
