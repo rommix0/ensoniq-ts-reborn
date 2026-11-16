@@ -109,17 +109,26 @@ inline std::unique_ptr<Machine> withFirstSound(const char* rel, std::string& nam
 }
 
 // A CD image answering the machine's sector port: called after every runFrame, it answers the pending ask from
-// the file at once, so runs are deterministic. The OS polls DBR in long counted loops (c1563e), so a sector
-// answered between frames is never a timeout. onRead, when set, sees each sector served.
+// the file, at once by default, so runs are deterministic. `delay` (CPU cycles) holds each answer that long after
+// the ask, as a slow reader would (T27: the OS waits about 66 s for a byte). onRead, when set, sees each sector
+// served.
 struct ServedCd {
     CdFile file;
     uint32_t medium = 1;
+    uint64_t delay = 0;
+    uint32_t seen = 0;     // the port's ask count when the ask being held was first seen
+    uint64_t askedAt = 0;  // its cycle
     uint8_t buf[SectorPort::kBytes] = {};
     std::function<void(uint32_t lba, const uint8_t* sector)> onRead;
     void serve(Machine& m) {
         SectorPort* p = m.cdPort();
         uint32_t med = 0, lba = 0;
         if (!p || !p->pending(med, lba)) return;
+        if (p->asks() != seen) {
+            seen = p->asks();
+            askedAt = m.cycles();
+        }
+        if (m.cycles() - askedAt < delay) return;
         const bool ok = med == medium && file.read(lba, buf);
         if (ok && onRead) onRead(lba, buf);
         p->reply(med, lba, buf, ok);
@@ -190,6 +199,38 @@ inline void openScsiStatus(Machine& m, ServedCd* cd) {
     press(m, cd, Button::Soft4);
     for (int i = 0; i < 4; ++i) press(m, cd, Button::Up);
     runServed(m, cd, 1500);
+}
+
+
+// The FILE=<name> field shows exactly `name` (names are 12 characters, space padded).
+inline bool showsFile(const Machine& m, const std::string& name) {
+    std::string f = name;
+    f.resize(12, ' ');
+    return rowText(m.panel(), 0).find("FILE=" + f) != std::string::npos;
+}
+
+// From the SCSI STATUS page with a volume mounted: *LOAD* (Soft4), then down `path`: on each level Soft1 puts the
+// cursor on the FILE field and Up steps to the entry, *YES* (Soft3) goes into a directory or, for the sound, asks for
+// the location (BANKSET=8) and `bank` loads it there. True once the OS is back on the Load page.
+inline bool loadFromCd(Machine& m, ServedCd& cd, const std::vector<std::string>& path, Button bank) {
+    press(m, &cd, Button::Soft4);  // *LOAD*
+    if (!until(m, &cd, "TYPE=", 5000)) return false;
+    for (const std::string& name : path) {
+        runServed(m, &cd, 500);
+        press(m, &cd, Button::Soft1);
+        for (int i = 0; i < 40 && !showsFile(m, name); ++i) press(m, &cd, Button::Up);
+        printRows(m);
+        if (!showsFile(m, name)) return false;
+        press(m, &cd, Button::Soft3);
+    }
+    if (!shows(m.panel(), "BANKSET=8")) return false;
+    m.button(bank, true);
+    runServed(m, &cd, 60);
+    m.button(bank, false);
+    if (!until(m, &cd, "LOADING " + path.back(), 2000)) return false;
+    const bool done = until(m, &cd, "LOAD FILE=", 60000);
+    printRows(m);
+    return done;
 }
 
 }  // namespace ts_disks

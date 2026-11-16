@@ -182,39 +182,6 @@ std::vector<float> playS8(Engine& e, Served& cds, ts::Button bank, int& voices, 
     return out;
 }
 
-// ---- machine side: loading from a CD by path ----
-
-// The FILE=<name> field shows exactly `name` (names are 12 characters, space padded).
-bool showsFile(const ts::Machine& m, const std::string& name) {
-    std::string f = name;
-    f.resize(12, ' ');
-    return rowText(m.panel(), 0).find("FILE=" + f) != std::string::npos;
-}
-
-// From the SCSI STATUS page with a volume mounted: *LOAD* (Soft4), then down `path`: on each level Soft1 puts the
-// cursor on the FILE field and Up steps to the entry, *YES* (Soft3) goes into a directory or, for the sound, asks for
-// the location (BANKSET=8) and `bank` loads it there. True once the OS is back on the Load page.
-bool loadFromCd(ts::Machine& m, ServedCd& cd, const std::vector<std::string>& path, ts::Button bank) {
-    press(m, &cd, ts::Button::Soft4);  // *LOAD*
-    if (!until(m, &cd, "TYPE=", 5000)) return false;
-    for (const std::string& name : path) {
-        runServed(m, &cd, 500);
-        press(m, &cd, ts::Button::Soft1);
-        for (int i = 0; i < 40 && !showsFile(m, name); ++i) press(m, &cd, ts::Button::Up);
-        printRows(m);
-        if (!showsFile(m, name)) return false;
-        press(m, &cd, ts::Button::Soft3);
-    }
-    if (!shows(m.panel(), "BANKSET=8")) return false;
-    m.button(bank, true);
-    runServed(m, &cd, 60);
-    m.button(bank, false);
-    if (!until(m, &cd, "LOADING " + path.back(), 2000)) return false;
-    const bool done = until(m, &cd, "LOAD FILE=", 60000);
-    printRows(m);
-    return done;
-}
-
 }  // namespace
 
 // The label the OS shows for a disk or volume is the 7 bytes at 31-37 of the Device ID block (block 1), trimmed:

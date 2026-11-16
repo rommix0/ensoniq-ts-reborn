@@ -169,3 +169,36 @@ TEST(ts_cd_empty_drive) {
     CHECK(shows(m->panel(), "DEVICE-ID=4"));
     CHECK(shows(m->panel(), "STATUS=STANDBY"));
 }
+
+
+// A slow reader (T27): every sector answered 100 ms of emulated time after it is asked, about 6 Windows timer ticks
+// and far inside the OS's wait for a byte (2^24 polls of about 60 cycles, 66 s; a sector never answered showed DISK
+// DRIVE NOT RESPONDING 66.1 s after its ask). CDR-13 mounts and BONGOS 1 (PERCUSSION/DRUMS, 546 blocks) loads
+// with no error, each sector taking the delay.
+TEST(ts_cd_slow_reader) {
+    ServedCd cd;
+    if (!openCd(kCdr13, cd)) return;
+    cd.delay = static_cast<uint64_t>(kCpuHz) / 10;
+    auto m = bootScsi(&cd);
+    if (!m) return;
+    openScsiStatus(*m, &cd);
+    CHECK(shows(m->panel(), "STATUS=CDR-013"));
+    const uint32_t asks = m->cdPort()->asks();
+    const uint64_t t0 = m->cycles();
+    CHECK(loadFromCd(*m, cd, {"PERCUSSION", "DRUMS", "BONGOS 1"}, Button::Bank0));
+    const uint32_t n = m->cdPort()->asks() - asks;
+    const double s = static_cast<double>(m->cycles() - t0) / kCpuHz;
+    std::printf("  %u sectors in %.1f s of emulated time\n", n, s);
+    CHECK(n > 100);
+    CHECK(s > n * 0.1);
+    CHECK(!shows(m->panel(), "NOT RESPONDING"));
+    press(*m, &cd, Button::Sounds);
+    m->button(Button::BankSet, true);  // BankSet held, Bank 8: BankSet S8
+    runServed(*m, &cd, 60);
+    press(*m, &cd, Button::Bank8);
+    m->button(Button::BankSet, false);
+    runServed(*m, &cd, 300);
+    printRows(*m);
+    CHECK(shows(m->panel(), "BONGOS 1"));
+    CHECK(!shows(m->panel(), "NOT LOADED"));
+}

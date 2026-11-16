@@ -501,13 +501,17 @@ ETHNIC PERC1 (4201) is refused with NOT ENOUGH ROOM, SHORTAGE=183 (4018 blocks f
 
 **Timing and sectors** (T27, T29). Selection, command and status take no time; the data phase waits
 (DBR clear) only while a 2048-byte sector is on its way through the sector port, answered between frames
-by the test loop or `tsemu --cd` (the app: a reader thread). The OS's counted DBR loops never time out.
+by the test loop or `tsemu --cd` (the app: a reader thread). The OS waits for each data byte in a counted
+loop (c15c04, c15ada, c159c4): 2^24 polls of Auxiliary Status of about 60 cycles each, the count restarted
+at every byte, so about 66 s of emulated time; past it the OS shows DISK DRIVE NOT RESPONDING (measured: a
+sector never answered, the error 66.1 s after the ask). Every sector answered 100 ms after its ask mounts
+CDR-13 and loads BONGOS 1 cleanly (ts_cd_slow_reader).
 
 **Confidence.** High for the decode, the step rule, the command flow and the mount (the OS mounts and
 loads with them); low for the INQUIRY strings (T28). **MAME.** Not compared.
 
 **Tests.** ts_scsi_probe_and_reset, ts_scsi_absent_is_unchanged, ts_cd_status_shows_volume,
-ts_cd_loads_and_plays, ts_cd_empty_drive; the chip and target alone: wd_*, cd_target_*.
+ts_cd_loads_and_plays, ts_cd_empty_drive, ts_cd_slow_reader; the chip and target alone: wd_*, cd_target_*.
 
 ## The ILLEGAL instructions at boot
 
