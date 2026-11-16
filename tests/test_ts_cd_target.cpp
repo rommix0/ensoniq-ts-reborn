@@ -191,3 +191,38 @@ TEST(cd_target_ignores_stale_reply) {
     r.serve();
     CHECK(r.t.ready());
 }
+
+// A disc taken out while a READ moves data must not end GOOD with a zero-padded block (the OS would accept a
+// half-loaded sound): the command ends CHECK CONDITION, and a disc change reports UNIT ATTENTION.
+TEST(cd_target_eject_mid_read_is_error) {
+    Rig r;
+    r.t.insert(7, 100);
+    r.simple(kTur);
+    r.sense();
+    auto cdb = read10(3, 2);
+    r.t.command(cdb.data(), 10, 4096);
+    r.t.ready();
+    r.serve();
+    for (int i = 0; i < 100; i++) { CHECK(r.t.ready()); r.t.readByte(); }
+    r.t.insert(0, 0);
+    while (r.t.phase() == ScsiTarget::Phase::DataIn) { r.t.ready(); r.t.readByte(); }
+    CHECK(r.t.phase() == ScsiTarget::Phase::Status);
+    CHECK_EQ(r.t.status(), 2);
+    auto s = r.sense();
+    CHECK_EQ(s[2], 2);
+    CHECK_EQ(s[12], 0x3A);
+
+    r.t.insert(7, 100);  // a change: UNIT ATTENTION, reported once
+    r.simple(kTur);
+    r.sense();
+    r.t.command(cdb.data(), 10, 4096);
+    r.t.ready();
+    r.serve();
+    for (int i = 0; i < 100; i++) { CHECK(r.t.ready()); r.t.readByte(); }
+    r.t.insert(8, 100);
+    CHECK_EQ(r.t.status(), 2);
+    s = r.sense();
+    CHECK_EQ(s[2], 6);
+    CHECK_EQ(s[12], 0x28);
+    CHECK_EQ(r.simple(kTur), 0);  // the attention was reported with that command
+}

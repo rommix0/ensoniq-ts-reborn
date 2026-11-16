@@ -18,11 +18,18 @@ void put32(uint8_t* p, uint32_t v) { p[0] = uint8_t(v >> 24); p[1] = uint8_t(v >
 }  // namespace
 
 void CdTarget::insert(uint32_t medium, uint32_t sectors) {
+    const bool moving = remaining_ != 0;
     medium_ = sectors ? medium : 0;
     sectors_ = sectors;
     blockLen_ = 2048;
     attention_ = true;
     remaining_ = 0;
+    // DECISION T28: a command still moving data ends CHECK CONDITION, never GOOD on a short block: NOT READY
+    // (2/0x3A) for an eject, UNIT ATTENTION (6/0x28) for a change, which that report also consumes.
+    if (moving) {
+        if (sectors) { attention_ = false; check(6, 0x28); }
+        else check(2, 0x3A);
+    }
     secValid_ = asked_ = failed_ = false;
 }
 
