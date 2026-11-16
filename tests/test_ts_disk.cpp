@@ -250,3 +250,21 @@ TEST(image_user_files) {
         CHECK(encodeImage(*d.disk, ImageFormat::Giebler, d.header) == f);
     }
 }
+
+TEST(disk_marks_reads) {
+    auto a = Disk::formatted(Density::Double);
+    a->noteRead(5);
+    a->noteRead(5);
+    CHECK_EQ(a->reads(), 1u);
+    CHECK(a->wasRead(5));
+    CHECK(!a->wasRead(6));
+    auto b = Disk::blank(Density::Double);
+    CHECK(a->copyInto(*b));
+    CHECK_EQ(b->reads(), 1u);
+    CHECK(b->wasRead(5));
+    CHECK(!b->wasRead(6));
+    b->clearReads();
+    CHECK_EQ(b->reads(), 0u);
+    CHECK(!b->wasRead(5));
+    CHECK(a->wasRead(5));
+}

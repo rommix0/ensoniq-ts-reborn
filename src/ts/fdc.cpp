@@ -59,7 +59,10 @@ uint8_t Fdc::read(bool a0) {
     }
     if (phase_ == Phase::ExecRead) {
         const uint8_t v = sec_[secPos_++];
-        if (secPos_ >= Disk::kSectorBytes) nextSector();
+        if (secPos_ >= Disk::kSectorBytes) {
+            disk_->noteRead((cmd_[2] * Disk::kHeads + cmd_[3]) * disk_->sectorsPerTrack() + curR_);
+            nextSector();
+        }
         return v;
     }
     if (!resultLeft_) return 0;

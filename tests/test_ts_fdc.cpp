@@ -298,3 +298,22 @@ TEST(fdc_control_reset_and_rate) {
     d.result7(r);
     CHECK_EQ(r[1], 0x01);
 }
+
+TEST(fdc_read_marks_blocks) {
+    auto disk = Disk::formatted(Density::Double);
+    Drv d;
+    d.f.setDisk(disk.get());
+    d.cmd({0x46, 0x00, 0, 1, 2, 2, 3, 0x1B, 0xFF});  // C0 H1 R2..R3 = blocks 12, 13
+    while (d.exm()) d.f.read(true);
+    uint8_t r[7];
+    d.result7(r);
+    CHECK_EQ(disk->reads(), 2u);
+    for (int n = 0; n < 1600; ++n) CHECK_EQ(disk->wasRead(n), n == 12 || n == 13);
+
+    auto w = Disk::formatted(Density::Double);
+    d.f.setDisk(w.get());
+    d.cmd({0x45, 0x00, 0, 1, 5, 2, 5, 0x1B, 0xFF});
+    for (int i = 0; i < 512; ++i) d.f.write(true, 0);
+    d.result7(r);
+    CHECK_EQ(w->reads(), 0u);
+}
