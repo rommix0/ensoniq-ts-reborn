@@ -95,10 +95,10 @@ purpose, record the new value here and in the current verification report.
 
 | Hash | Printed by | Value (Plan 3, unless noted) |
 |---|---|---|
-| Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `3bfc7336098a6def` |
-| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `3374892bfdc150e6` (Plan 5 Task 4, T4: the parked voice 0 now reads S8's first words in OTTO bank 3; one sample 1 LSB apart from Plan 3's `4a751109deae8b89`) |
-| Render | `tsemu render tests/data/full_chord.mid` | `524fcc64af78f175` |
-| Render | `tsemu render tests/data/filtered_patch.mid` | `01e3c8622cc8c8be` |
+| Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `ba7e34a4cf23d1e0` (OT16 free-running pot A/D, 2026-11-16; Plan 3 `3bfc7336098a6def`) |
+| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `23b6485893beb761` (OT16, 2026-11-16: the OS's analog scale is right from power-on; Plan 5 Task 4's `3374892bfdc150e6`) |
+| Render | `tsemu render tests/data/full_chord.mid` | `0aa23b0ebbdeeec6` (OT16; was `524fcc64af78f175`) |
+| Render | `tsemu render tests/data/filtered_patch.mid` | `e9d27e034e29b527` (OT16; was `01e3c8622cc8c8be`) |
 
 Firmware tests read the ROMs from `ENS_ROM_DIR` (default `roms/`) and print "skip: ROMs not found"
 without them. The disk tests read the user's disk images from `ENS_DISK_DIR` (a CMake cache variable, a

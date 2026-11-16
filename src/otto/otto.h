@@ -79,7 +79,7 @@ private:
     uint16_t s1_, s2_;   // words fetched by the current slot
     int32_t sum_[6][2];  // OT13: channel sums of the frame in progress
     uint32_t pot_ = 0;   // OT16: the pin's value; survives reset()
-    uint32_t potSlots_;  // OT16: slots left in the conversion in progress, 0 = idle
+    uint32_t potSlot_;   // OT16: slots into the current conversion period (0-511)
 };
 
 }  // namespace ens

@@ -319,7 +319,7 @@ TEST(ts_analog_resting_values) {
     auto m = bootFresh();
     if (!m) return;
     chord(*m, Button::Presets, Button::Compare);
-    runMs(*m, 3000);  // the readings are filtered; REF settles in about 2.2 s
+    runMs(*m, 3000);  // the readings are filtered
     const std::string r0 = rowText(m->panel(), 0), r1 = rowText(m->panel(), 1);
     std::printf("  |%s|\n  |%s|\n", r0.c_str(), r1.c_str());
     CHECK(r0 == "ANALOG  PTCH=064 MOD=000 PED=127 VOL=127");
@@ -327,6 +327,27 @@ TEST(ts_analog_resting_values) {
     const int ref = std::atoi(r1.substr(21, 3).c_str());
     CHECK(ref >= 180 && ref <= 220);
     CHECK(r1.compare(24, 9, " BAT=000 ") == 0);
+}
+
+// A pitch wheel back at its rest value after a move, as a released wheel springs back, sends the centre
+// bend (MSB 0x40). The OS sets the wheel's dead zone at power-on from 8-sample averages of REF and the
+// wheel, then scales every reading by REF's filtered value; a stale first REF sample (the battery's
+// conversion) left the dead zone 1/8 off once REF settled, and the wheel sent MSB 0x32-0x36 back at rest (OT16).
+TEST(ts_pitch_wheel_returns_to_centre) {
+    auto m = bootFresh();
+    if (!m) return;
+    runMs(*m, 3000);  // REF's filter settled
+    const uint16_t rest = kAnalogRest[static_cast<size_t>(Analog::PitchWheel)];
+    for (const int away : {0x000, 0x340}) {
+        m->setAnalog(Analog::PitchWheel, static_cast<uint16_t>(away));
+        runMs(*m, 500);
+        midiOut(*m);
+        m->setAnalog(Analog::PitchWheel, rest);
+        runMs(*m, 800);
+        const auto out = midiOut(*m);  // E0 lsb msb, then running status: the last byte is the last MSB
+        std::printf("  back from %03x: %zu bytes, last %02x\n", away, out.size(), out.empty() ? 0 : out.back());
+        CHECK(!out.empty() && out.back() == 0x40);
+    }
 }
 
 // The Volume slider scales a struck note: silent at 0, loud at 0x3FF; a request beyond 10 bits is
@@ -840,3 +861,4 @@ TEST(ts_effect_loads_verify_first_time) {
         CHECK_EQ(tries, 0u);
     }
 }
+

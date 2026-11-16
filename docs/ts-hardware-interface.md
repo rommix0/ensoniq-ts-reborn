@@ -249,9 +249,12 @@ it halted at the end of the boot. No error text either way.
   the conversion as PAR (OTTO location 0x34, bytes 0x300069-0x30006F), the raw 10-bit value in the
   low bits.
 - Every 2 ms the OS reads PAR, then writes OPR set = 0x07 (OP2..OP0 low) and OPR reset = n
-  (OP2..OP0 = n). The PAR read starts the OTTO's conversion (OT16), which ends 512 slots (0.54 ms)
-  later, after the new select: so each read returns the input selected 2 ms before. The mux switches
-  at once in the model; any settling time under about 1.9 ms would read the same.
+  (OP2..OP0 = n). The OTTO converts every 512 slots (0.54 ms), free-running (OT16), so the read 2 ms
+  later returns the input selected after the last one. The mux switches at once in the model; any
+  settling time under about 1.4 ms would read the same.
+- At power-on the OS averages 8 reads of REF and then of the pitch wheel, each 3-4 ms after the
+  select, to seed REF's filter, the scale every other reading is multiplied by (0xA3480000 / REF) and
+  the wheel's dead zone (OT16). A stale first read there leaves the wheel off centre once it moves.
 - Selects in the boot: 6 (battery) once at 1503 ms, 7 (reference) once at 1587 ms, 5 (data entry)
   at 1768 ms, 0 (pitch wheel) from 1843 ms, then the cycle 0 2 5 3 4 (10 ms) for good. The Analog
   Test page adds 7 and 6: 0 2 5 3 4 7 6 (14 ms). Select 1 (U69 Y1, not connected) is never used.
@@ -275,9 +278,10 @@ raw values (the others at rest, REF 0x324) and the settled reading noted:
   above do not change (VOL 52 at raw 0x100 for REF 0x80-0x2D0). Above it they shrink by about
   750 / REF (VOL at raw 0x100: 48 at REF 0x320, 43 at 0x370, 36 at 0x3FF). REF 0 gives a divide by
   zero (vector 5, "SYSTEM ERROR 130").
-- **Battery warning.** The OS reads the battery once in the boot, at 1503 ms. From raw 458 up the
-  boot stops at "WARNING -- LOW BATTERY VOLTAGE / SAVE DATA - SEE USER MANUAL *CONTINUE*" (bisected;
-  the same threshold at REF 0x2D0, 0x324 and 0x370). So a high reading is a bad battery, as the
+- **Battery warning.** The OS reads the battery once in the boot, at 1503 ms (8 reads, summed against
+  0x6400). From raw 401 up the boot stops at "WARNING -- LOW BATTERY VOLTAGE / SAVE DATA - SEE USER
+  MANUAL *CONTINUE*" (bisected with `tsemu boot --analog BATTERY=n`; 458 before OT16's free-running
+  A/D, when the first read was PAR's reset value; the same threshold at REF 0x2D0, 0x324 and 0x370). So a high reading is a bad battery, as the
   service manual says (p19, p28: a good unit shows BAT below 010).
 - **Data entry at raw 0.** Exactly 0 is special: on a page with a selected value the OS keeps
   rewriting it at its minimum (TUNE=-99), about 600 panel bytes a second, and on the Analog Test page
@@ -293,7 +297,7 @@ raw values (the others at rest, REF 0x324) and the settled reading noted:
 | Volume slider | 0x3FF | VOL=127 | Up, so a headless render is audible (at 0 the TS is silent) |
 | CV pedal | 0x3FF | PED=127 | Unplugged: "Check that the display shows: PED=127" (service manual p28, before the pedal is plugged in) |
 | Data entry | 0x14E | KNOB=127 | Middle of 0-255; not 0, which the OS takes as a slider held at its minimum |
-| Battery | 0x000 | BAT=000 | A good battery reads below 010 (p28); far from the warning at 458 |
+| Battery | 0x000 | BAT=000 | A good battery reads below 010 (p28); far from the warning at 401 |
 | Reference | 0x324 | REF=200 | The middle of the service manual's 180-220 (p28) |
 
 `setAnalog` clamps to 0-1023 (a request beyond 10 bits stays the maximum) and ignores an input outside

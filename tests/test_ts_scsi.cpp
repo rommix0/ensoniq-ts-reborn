@@ -52,7 +52,8 @@ TEST(ts_scsi_probe_and_reset) {
     CHECK(rowText(m->panel(), 1).find("SCSI") != std::string::npos);
 }
 
-// Without the board the SCSI block reads 0 as before (T12): the boot is bit-identical to Plan 3's.
+// Without the board the SCSI block reads 0 as before (T12): the boot trace is the reference (AGENTS.md; OT16 moved it
+// from Plan 3's 3bfc7336098a6def).
 TEST(ts_scsi_absent_is_unchanged) {
     auto m = loadTs();
     if (!m) return;
@@ -61,7 +62,7 @@ TEST(ts_scsi_absent_is_unchanged) {
     CHECK(m->cd() == nullptr);
     const uint64_t h = traceHash(*m, kBootMs);
     std::printf("  boot trace hash %016llx\n", static_cast<unsigned long long>(h));
-    CHECK_EQ(h, 0x3bfc7336098a6defull);
+    CHECK_EQ(h, 0xba7e34a4cf23d1e0ull);
 }
 
 // CDR-13 (InVision Percussion) at ID 4: the SCSI STATUS page shows its volume name, CDR-013 (as observed).

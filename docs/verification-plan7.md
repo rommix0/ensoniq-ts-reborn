@@ -99,3 +99,32 @@ Deferred minors from the per-task reviews, grouped.
 - Style: a ~140-column comment in the Task 4 test, `Audio boot;` shadows `boot()`, `tsemu bench --cd` ignores
   the image, a ~124-column comment at `disk.h:96`, stale comment `media_record.h:4`.
 - Carried from earlier plans: the open items in `docs/tsapp.md`.
+
+## After Plan 7: free-running pot A/D (OT16, 2026-11-16)
+
+The user's report: the pitch wheel sits off centre after a mouse drag. The app sends the rest value (0x200)
+on release; the OS sent pitch bend MSB 0x32-0x36 instead of 0x40. Cause and evidence: OT16. The OTTO's pot
+A/D now converts every 512 slots on its own (datasheet §10.4) instead of on a PAR read (§2.3).
+
+| Toolchain | `ens_tests` | `ens_rt_tests` | App checks |
+|---|---|---|---|
+| MinGW-w64 i686 (`build`) | 415 passed, 0 failed | 7 passed, 0 failed | n/a |
+| MSVC x64 (`build-msvc`, `build-app`) | 415 passed, 0 failed | 7 passed, 0 failed | `app_tests: all passed` |
+| Linux GCC x64 in WSL (`build-linux`, `build-linux-app`) | 415 passed, 0 failed | 7 passed, 0 failed | `app_tests: all passed` |
+
+- 415 = 414 + `ts_pitch_wheel_returns_to_centre`, which fails before the change (MSB 0x34 and 0x32) and passes
+  after. The three OTTO pot tests were rewritten for a free-running conversion.
+- `tsemu bench` (MSVC): x2.31. Warnings: 0 on all three.
+- The low-battery warning now starts at raw 401 (was 458).
+
+Hashes, identical on all three (changed on purpose; AGENTS.md updated):
+
+| Hash | Before | After |
+|---|---|---|
+| Boot trace | `3bfc7336098a6def` | `ba7e34a4cf23d1e0` |
+| Render `player_smoke.mid` | `3374892bfdc150e6` | `23b6485893beb761` |
+| Render `full_chord.mid` | `524fcc64af78f175` | `0aa23b0ebbdeeec6` |
+| Render `filtered_patch.mid` | `01e3c8622cc8c8be` | `e9d27e034e29b527` |
+
+User to run: drag the pitch wheel in the Standalone, let go, and check that a held note returns to its pitch.
+The `dist/` 1.0.0 packages predate this change.

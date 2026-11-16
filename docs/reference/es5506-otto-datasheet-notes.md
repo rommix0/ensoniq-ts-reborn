@@ -165,7 +165,8 @@ can force an interrupt by setting IRQE and IRQ.
 Reading PAR starts a conversion and sets PAR to 3FF. POT_RES discharges the capacitor for 4×1024 CLKs,
 then a CLK/4 counter runs until POT_IN reaches about 2.8 V and the count is loaded into PAR. A
 conversion takes 512 µs at 16 MHz. Use: read PAR, wait a timer tick, read again; each read returns
-the previous conversion and starts the next.
+the previous conversion and starts the next. §10.4 says instead that POT_RES is a 50-50 clock with a
+period of 2^13 master clocks, i.e. free-running conversions; the model follows §10.4 (OT16).
 
 ## 7. Dual OTTO (§3.2/p7, §10.1-10.2, §13/p39)
 
