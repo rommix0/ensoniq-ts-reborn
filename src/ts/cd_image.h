@@ -1,6 +1,6 @@
 #pragma once
 // CD image layouts: where a 2048-byte data sector sits in the image file. Pure arithmetic and text; the file
-// itself is read by the tools (tools/common/cd_file.h) or the app. DECISION T25 (Plan 7): .iso, or a .cue with
+// itself is read by the tools (tools/common/cd_file.h) or the app. DECISION T29 (Plan 7): .iso, or a .cue with
 // one MODE1/2352 track from 00:00:00.
 #include <cstdint>
 #include <string>

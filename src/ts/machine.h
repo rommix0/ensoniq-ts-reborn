@@ -12,9 +12,12 @@
 #include "duart/duart.h"
 #include "m68k/m68k.h"
 #include "ts/board.h"
+#include "ts/cd_target.h"
 #include "ts/fdc.h"
 #include "ts/panel.h"
 #include "ts/roms.h"
+#include "ts/sector_port.h"
+#include "ts/wd33c93.h"
 
 namespace ens::ts {
 
@@ -47,8 +50,10 @@ constexpr int kMidiChannel = 0;                                // DECISION T7: D
 class Machine : public m68k::Bus {
 public:
     // nullptr on a wrong ROM size, with err naming the file. DECISION T13: a stock TS-10 (design section 4)
-    // unless sqx70: the SQX-70 sequence expander's 256 KB (SEQEXP) fitted.
-    static std::unique_ptr<Machine> create(const RomSet& roms, std::string& err, bool sqx70 = false);
+    // unless sqx70: the SQX-70 sequence expander's 256 KB (SEQEXP) fitted. DECISION T25: scsi fits the SP-4 board
+    // (a WD33C93 at I/O1 n = 1) with a CD-ROM drive at SCSI ID 4; without it the block reads 0 (T12).
+    static std::unique_ptr<Machine> create(const RomSet& roms, std::string& err, bool sqx70 = false,
+                                           bool scsi = false);
     Machine(const Machine&) = delete;  // cpu_ holds a Bus& to *this
     Machine& operator=(const Machine&) = delete;
     void runFrame(Audio& out);                              // one OTTO frame (ACTV + 1 slots)
@@ -91,6 +96,17 @@ public:
     std::unique_ptr<Disk> insertDisk(std::unique_ptr<Disk> d);
     const Disk* disk() const { return disk_.get(); }
     Disk* disk() { return disk_.get(); }
+    // The CD-ROM drive at SCSI ID 4 (T25, T28, T29), only with the SP-4 board: nullptr without it. Its sectors come
+    // through cdPort(), answered by whoever owns the image (T29). insertCd applies at once (between frames) and never
+    // allocates: sectors 0 ejects, any change gives the OS one UNIT ATTENTION. The medium id names the image in the
+    // port's asks and replies, so a late reply for an earlier disc is never served: never reuse an id for a different
+    // image (0 means none). Does nothing without the board.
+    bool scsiFitted() const { return scsi_; }
+    SectorPort* cdPort() { return scsi_ ? &cdPort_ : nullptr; }
+    void insertCd(uint32_t medium, uint32_t sectors) {
+        if (scsi_) cd_.insert(medium, sectors);
+    }
+    const CdTarget* cd() const { return scsi_ ? &cd_ : nullptr; }
     m68k::Cpu& cpu() { return cpu_; }
     Board& board() { return board_; }
     duart::Duart& duart() { return duart_; }
@@ -136,6 +152,10 @@ private:
     bool indexLow_ = false;       // IP0 (DSTAT) low: the index hole is passing
     bool dskchg_ = true;          // IP1 (DSKCHG) high: a disk went in or out and the head has not stepped since
     int stepCyl_ = 0;             // the head's cylinder when the disk changed
+    bool scsi_ = false;           // the SP-4 board fitted (T25)
+    SectorPort cdPort_;
+    CdTarget cd_{cdPort_};        // SCSI ID 4 (T28)
+    Wd33c93 wd_;
     Panel panel_;
     m68k::Cpu cpu_{*this};
     std::vector<uint16_t> os_;  // 256K words, T2

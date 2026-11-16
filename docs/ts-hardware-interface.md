@@ -35,7 +35,7 @@ the confidence and the decision entry in `docs/decisions.md`.
 |---|---|
 | 0x000000–0x037FFF and 0xFC0000–0xFFFFFF | OSRAM, 256 KB (U3/U4). The top window aliases all of it; the OS uses only its top 32 KB there (0xFF8000–0xFFFFFF, the stack), which the low window does not reach. Reads of 0–7 come from the ROM until the first write into 0–7 |
 | 0x038000–0x077FFF | SEQEXP, 256 KB (U1/U2, the SQX-70 kit). Default: not fitted (a stock TS; reads 0, writes lost); `create(..., sqx70 = true)` fits it (Task 8) |
-| 0x200000 + 0x40000 n | I/O1: n = 0 DUART, 1 SCSI, 2 FDC, 3 IEXP (A19:A18 into U7/A) |
+| 0x200000 + 0x40000 n | I/O1: n = 0 DUART, 1 SCSI (the SP-4 board's WD33C93 when fitted, T25; reads 0 without it, T12), 2 FDC, 3 IEXP (A19:A18 into U7/A) |
 | 0x300000–0x37FFFF | OTTO (odd bytes, HA5..HA0 = A6..A1) |
 | 0x380000–0x3FFFFF | ESP (odd bytes, host register = A8..A1) |
 | 0x400000–0xBFFFFF | Sample RAM host window: OTTO bank 3 at 0x400000–0x7FFFFF (BankSet S8), bank 2 at 0x800000–0xBFFFFF (S9), word A21..A1 |
@@ -445,6 +445,69 @@ compared.
 
 **Tests.** ts_disk_load_page_lists_directory, ts_eject_mid_read_reports_error, ts_reads_both_densities,
 ts_empty_drive_still_reports_no_disk, fdc_control_reset_and_rate, rt_disk_in_the_drive_does_not_allocate.
+
+## SCSI: the SP-4 board and a CD-ROM drive (T25-T29)
+
+Found in Plan 7 from the OS v3.10 disassembly, the WD33C93B datasheet (`datasheets/WD_WD33C93B.pdf`) and
+the service manual, then checked by running the OS with the user's CDR-13 image (`tsemu boot --cd <image>
+--trace scsi`, tests in `tests/test_ts_scsi.cpp`).
+
+**The chip** (T25). The SP-4 kit (4090020601, a 34-pin ribbon to J9) carries a WD33C93 on I/O1 n = 1,
+odd bytes, chip A0 = CPU A1 as the FDC: 0x240001 writes the address register and reads Auxiliary Status
+(bit 7 INT, bit 6 LCI, bit 0 DBR), 0x240003 is the addressed register. The OS addresses indirectly:
+every access at 0x240003 steps the address register, except at Command (0x18) and Data (0x19)
+(datasheet 3.1.2). The model fits the board only when asked (`Machine::create(..., scsi = true)`,
+`tsemu --cd`, the app); without it the block reads 0 (T12) and the STORAGE page has no SCSI field.
+
+**No interrupt, no DMA** (T26). The autovectors of levels 2 and 4-7 go to the fatal path (c00d62, code
+0x8B), so INTRQ reaches no level. The Control register is 0x00 (polled I/O) and every data byte goes
+through the Data register while DBR is set; the OS checks INT before each byte.
+
+**Boot.** The probe (c0f820) writes register 2 with 0x00, 0x55, 0xAA, 0xFF and reads each back,
+rewriting the address before each access. On a match (c0f7d4): Own ID = 3, Reset (0x00), a 15 ms wait,
+INT polled, SCSI Status read (0x00); `$12b6` bit 3 is set and STORAGE shows "SELECT STORAGE OPTION
+*LOAD*" over "SCSI DISK SYS-EX" (service manual p. 53, step 14).
+
+**Commands** (c1563e). Control 0 and Timeout 0x0D, the CDB into registers 3.., Target LUN 0,
+Synchronous 0, the 24-bit Transfer Count, Destination ID (`$f5` - 1), then Select-and-Transfer without
+ATN (0x09). The OS expects interrupt 0x16 with Command Phase 0x60 and the status byte in register 0x0F,
+then after it reads SCSI Status a second interrupt 0x85 (bus free, datasheet 4.6.1). 0x42 (selection
+timeout) is "no device" and shows INVALID. A CHECK CONDITION is followed by REQUEST SENSE; sense key 6
+with ASC 0x28 is a media change (c154cc). In the runs the OS wrote only the commands 0x00 and 0x09.
+
+**The SCSI STATUS page.** Storage, then Soft4 (under SCSI): "SCSI DEVICE-ID=0 STATUS=INVALID" over
+"*LOAD* *EXIT*" on a fresh memory, the cursor on DEVICE-ID; Up steps the ID. While the page is up the
+OS polls the ID about every 500 ms: Reset, then TEST UNIT READY. With CDR-13 put in at power-on at ID 4
+(ts_cd_status_shows_volume):
+
+| Poll | CDBs and answers | Shown |
+|---|---|---|
+| 1 | TEST UNIT READY: CHECK CONDITION; REQUEST SENSE (14 bytes): UNIT ATTENTION, 0x28 | STANDBY |
+| 2 | TEST UNIT READY: GOOD; INQUIRY (0x24 bytes): type 5; Reset; TEST UNIT READY; MODE SELECT(6), 12 bytes `00 00 00 08 00 00 00 00 00 00 02 00` (512-byte blocks); READ(10) of block 1, one block | CDR-013 |
+
+The mount (c1548c) refuses ID 3 (the TS itself); for a type 0 device (disk) it sends READ CAPACITY and
+needs 512-byte blocks; a CD-ROM (type 5) gets MODE SELECT(6) instead. No MODE SENSE or READ CAPACITY
+was sent to the CD. The drive empty (ts_cd_empty_drive): TEST UNIT READY answers NOT READY, MEDIUM NOT
+PRESENT (2/0x3A) and the page shows STANDBY, the manual's "removable media device ... contains no
+volume". The answers are T28.
+
+**Loading.** *LOAD* (Soft4 on the STATUS page) lists the root: "LOAD FILE=PERCUSSION *YES*" over
+"TYPE=DIRECTORY DIR=ROOT *NO *"; *YES* (Soft3) enters a directory ("LOADING PERCUSSION"). The cursor
+starts on TYPE (Up/Down change the type); Soft1 selects the FILE field, where Up steps the files. All block
+reads go through c0f43e: `$f5` = 0 is the floppy, otherwise SCSI ID `$f5` - 1 (c15a22: READ(10) of
+512-byte blocks, up to 5 tries); the Ensoniq file system code is the floppy's (c0e372). From CDR-13's
+PERC KITS, ETHNIC PERC2 (3927 blocks) loads into S8-0 and plays from sample RAM (ts_cd_loads_and_plays);
+ETHNIC PERC1 (4201) is refused with NOT ENOUGH ROOM, SHORTAGE=183 (4018 blocks free).
+
+**Timing and sectors** (T27, T29). Selection, command and status take no time; the data phase waits
+(DBR clear) only while a 2048-byte sector is on its way through the sector port, answered between frames
+by the test loop or `tsemu --cd` (the app: a reader thread). The OS's counted DBR loops never time out.
+
+**Confidence.** High for the decode, the step rule, the command flow and the mount (the OS mounts and
+loads with them); low for the INQUIRY strings (T28). **MAME.** Not compared.
+
+**Tests.** ts_scsi_probe_and_reset, ts_scsi_absent_is_unchanged, ts_cd_status_shows_volume,
+ts_cd_loads_and_plays, ts_cd_empty_drive; the chip and target alone: wd_*, cd_target_*.
 
 ## The ILLEGAL instructions at boot
 

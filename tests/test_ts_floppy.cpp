@@ -175,21 +175,6 @@ TEST(ts_empty_drive_still_reports_no_disk) {
 
 namespace {
 
-// A voice started from sample RAM: a CR write (pages 0x00-0x3F, register 0) with BS1:BS0 = 3, the bank the OS
-// gives BankSet S8 (T4). Follows the page register (15) and CR's byte 2 (bits 15-8); byte 3 completes the write.
-struct SampleVoices {
-    int count = 0;
-    unsigned page = 0, bs = 0;
-    void operator()(const BusEvent& e) {
-        if (e.dev != Device::Otto || !e.write) return;
-        const unsigned ha = (e.addr >> 1) & 0x3F, reg = ha >> 2, byte = ha & 3;
-        if (reg == 15 && byte == 3) page = e.value & 0x7F;
-        if (reg != 0 || page >= 0x40) return;
-        if (byte == 2) bs = (e.value >> 6) & 3;
-        if (byte == 3 && bs == 3) ++count;
-    }
-};
-
 // A machine booted with the disk that has loaded the disk's first sampled sound into S8-0 (Musician's Manual,
 // Section 14, "Loading a Sampled Sound"); null without the ROMs or the image.
 std::unique_ptr<Machine> withFirstSound(const char* rel, std::string& name) {

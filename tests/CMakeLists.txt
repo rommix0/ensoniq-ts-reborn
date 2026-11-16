@@ -31,6 +31,7 @@ set(ENS_TEST_SOURCES
   test_ts_cd_image.cpp
   test_ts_cd_target.cpp
   test_ts_wd33c93.cpp
+  test_ts_scsi.cpp
   test_app_engine.cpp
   test_app_panel_layout.cpp
 )
