@@ -29,6 +29,7 @@ public:
     const uint8_t* sector(int cyl, int head, int id) const;
     // Ensoniq block order: n = (cyl * 2 + head) * sectorsPerTrack + id. Ignores the formatted flag.
     uint8_t* block(int n);
+    const uint8_t* block(int n) const { return const_cast<Disk*>(this)->block(n); }
 
     void noteWrite() { ++writes_; }
     uint32_t writes() const { return writes_; }  // writes and formats, never reset

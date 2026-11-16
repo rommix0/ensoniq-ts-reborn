@@ -11,6 +11,7 @@
 #include "app/engine.h"
 #include "cd_file.h"
 #include "check.h"
+#include "ts_disks.h"
 #include "ts_firmware.h"
 
 namespace {
@@ -302,6 +303,49 @@ TEST(rt_engine_cd_load_does_not_allocate) {
     CHECK_EQ(n, 0u);
     CHECK(served > 2);  // not hollow: the OS really read the CD
     CHECK_EQ(e->snapshot().cdMedium, 1u);
+}
+
+// Real time (A131): a restore whose first stand-in is the wrong disk (ED-001 renamed OTHER), so the OS prompts for
+// ED-001 and the engine swaps in the second stand-in and presses *OK*; it loads FLUTE 1 and the restore ends with
+// the drive emptied. Render allocates nothing from power-on to the end.
+TEST(rt_engine_restore_does_not_allocate) {
+    std::string name;
+    auto m = ts_disks::withFirstSound(ts_disks::kEd001, name);
+    if (!m) return;
+    const auto ram = m->ramImage();
+    auto other = ts_disks::loadDisk(ts_disks::kEd001);
+    std::memcpy(other->block(1) + 31, "  OTHER", 7);
+    m.reset();
+    RomSet roms;
+    CHECK(readTsRoms(roms));
+    std::string err;
+    auto e = ens::app::Engine::create(roms, err, true);
+    CHECK(e != nullptr);
+    if (!e) return;
+    CHECK(e->loadRam(ram, err));
+    ens::app::Engine::StandIns s;
+    s.floppies.push_back(std::move(other));
+    s.floppies.push_back(ts_disks::loadDisk(ts_disks::kEd001));
+    s.floppyLabels = {"OTHER", "ED-001"};
+    e->setRestore(std::move(s));
+    constexpr int kBlock = 480;
+    e->prepare(48000, kBlock);
+    float ml[kBlock], mr[kBlock], al[kBlock], ar[kBlock];
+    ens::app::Snapshot snap;
+    bool restoring = false, prompted = false;
+    allocStart();
+    for (int b = 0; b < 3000 && !(restoring && !snap.restoring); ++b) {
+        e->render(ml, mr, al, ar, kBlock);
+        snap = e->snapshot();
+        restoring = restoring || snap.restoring;
+        prompted = prompted || std::memcmp(snap.panel.text[0], "INSERT DISK", 11) == 0;
+    }
+    const size_t n = allocStop();
+    std::printf("  allocations: %zu, frames %llu\n", n, static_cast<unsigned long long>(snap.frames));
+    CHECK_EQ(n, 0u);
+    CHECK(restoring && prompted && !snap.restoring && !snap.diskIn);
+    const auto back = e->takeStandIns();
+    CHECK(back.size() == 2 && back[1] && back[1]->reads() > 0);
 }
 
 // Usage: ens_rt_tests [substring]  -- runs only tests whose name contains the substring.

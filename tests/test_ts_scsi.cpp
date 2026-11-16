@@ -7,99 +7,12 @@
 #include <string>
 #include <vector>
 
-#include "cd_file.h"
 #include "check.h"
+#include "ts_disks.h"
 #include "ts_firmware.h"
 
 using namespace ens::ts;
-
-namespace {
-
-const char* const kCdr13 = "/CD-ROMs/Ensoniq.CDR-13.InVision.Percussion.ENSONiQ-DELiRiUM/dlm-cdr13.cue";
-
-// A CD image answering the machine's sector port: called after every runFrame, it answers the pending ask from
-// the file at once, so runs are deterministic. The OS polls DBR in long counted loops (c1563e), so a sector
-// answered between frames is never a timeout.
-struct ServedCd {
-    CdFile file;
-    uint32_t medium = 1;
-    uint8_t buf[SectorPort::kBytes] = {};
-    void serve(Machine& m) {
-        SectorPort* p = m.cdPort();
-        uint32_t med = 0, lba = 0;
-        if (!p || !p->pending(med, lba)) return;
-        const bool ok = med == medium && file.read(lba, buf);
-        p->reply(med, lba, buf, ok);
-    }
-};
-
-void runServed(Machine& m, ServedCd* cd, uint32_t ms) {
-    const uint64_t end = m.cycles() + static_cast<uint64_t>(ms) * kCpuHz / 1000;
-    Audio a;
-    while (m.cycles() < end) {
-        m.runFrame(a);
-        if (cd) cd->serve(m);
-    }
-}
-
-// tap() from ts_firmware.h with the CD served.
-void press(Machine& m, ServedCd* cd, Button b) {
-    m.button(b, true);
-    runServed(m, cd, 60);
-    m.button(b, false);
-    runServed(m, cd, 300);
-}
-
-// Runs until `text` shows on the display or ms pass; whether it showed.
-bool until(Machine& m, ServedCd* cd, const std::string& text, uint32_t ms) {
-    const uint64_t end = m.cycles() + static_cast<uint64_t>(ms) * kCpuHz / 1000;
-    Audio a;
-    while (m.cycles() < end) {
-        if (shows(m.panel(), text.c_str())) return true;
-        m.runFrame(a);
-        if (cd) cd->serve(m);
-    }
-    return shows(m.panel(), text.c_str());
-}
-
-void printRows(const Machine& m) {
-    std::printf("  |%s|\n  |%s|\n", rowText(m.panel(), 0).c_str(), rowText(m.panel(), 1).c_str());
-}
-
-// The CD image under ENS_DISK_DIR opened into cd; false with a skip line when it is missing.
-bool openCd(const char* rel, ServedCd& cd) {
-    const std::string dir = ENS_DISK_DIR;
-    std::string err;
-    if (dir.empty() || !cd.file.open(dir + rel, err)) {
-        std::printf("  skip: disk images not found\n");
-        return false;
-    }
-    return true;
-}
-
-// A TS with SCSI, the CD (when given) in the drive at ID 4 from power-on, booted for kBootMs.
-std::unique_ptr<Machine> bootScsi(ServedCd* cd) {
-    auto m = loadTs(false, true);
-    if (!m) return nullptr;
-    if (cd) m->insertCd(cd->medium, cd->file.sectors());
-    runServed(*m, cd, kBootMs);
-    return m;
-}
-
-// The SCSI STATUS page (Musician's Manual, Section 13, "SCSI Option"), found by running: Storage shows SELECT
-// STORAGE OPTION with SCSI under Soft4 (the lower left soft button); Soft4 opens "SCSI DEVICE-ID=0 STATUS=INVALID"
-// with DEVICE-ID underlined (the cursor field) on a fresh memory; Up four times sets DEVICE-ID=4. The OS polls the
-// ID about every 500 ms (Reset, then TEST UNIT READY, ...), so 1.5 s more lets it mount: with a disc just inserted
-// the first poll gets UNIT ATTENTION and shows STANDBY, the next one INQUIRY, MODE SELECT (512-byte blocks) and
-// READ(10) of block 1, and shows the volume name.
-void openScsiStatus(Machine& m, ServedCd* cd) {
-    press(m, cd, Button::Storage);
-    press(m, cd, Button::Soft4);
-    for (int i = 0; i < 4; ++i) press(m, cd, Button::Up);
-    runServed(m, cd, 1500);
-}
-
-}  // namespace
+using namespace ts_disks;
 
 // The probe (c0f820) writes 0x55, 0xAA and 0xFF to register 2 and reads each back equal; on the match (c0f7d4) the
 // OS issues Reset (0x00 to the Command register, 0x18). The OS then boots to the play screen and the STORAGE page

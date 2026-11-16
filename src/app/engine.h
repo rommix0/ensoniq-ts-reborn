@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -50,6 +51,7 @@ struct Snapshot {
     uint32_t diskSwaps = 0;     // inserts and ejects applied, so a copy can be matched to its disk
     uint32_t diskReads = 0;     // Disk::reads() of the disk in the drive
     uint32_t cdMedium = 0;      // the medium id of the CD in the drive; 0 none (applied, not pending)
+    bool restoring = false;     // the auto-load is restoring from stand-ins (A131); booted waits for its end
 };
 
 class Engine {
@@ -67,6 +69,22 @@ public:
     // DECISION A124: answer the OS's power-on AUTO-LOAD ALL SAMPLED-SOUNDS question with *NO * (the VST3's
     // engines). Before the audio starts; kept across loadRam.
     void setAnswerAutoLoad(bool on);
+    // DECISION A130, A131: stand-in media built from what the OS read when the sounds were loaded (media_record.h).
+    // Labels are as ensoniqLabel gives them, one per floppy and per CD; CD medium ids are answered on cdPort().
+    struct StandIns {
+        std::vector<std::unique_ptr<ts::Disk>> floppies;
+        std::vector<std::string> floppyLabels;
+        std::vector<uint32_t> cdMedia, cdSizes;
+        std::vector<std::string> cdLabels;
+    };
+    // Message thread, after loadRam, before the audio starts, with the drive empty (a new engine): the first floppy
+    // and the first CD go in at once, the power-on question gets *YES*, each insert prompt the stand-in it names and
+    // *OK* (*SKIP* when none matches), and the A118/A119/A128 slots wait until the auto-load ends (so a disk or CD
+    // queued now goes in after it). Empty stand-ins, or a disk in the drive: nothing changes (A124 as today).
+    void setRestore(StandIns s);
+    // Message thread, once snapshot().restoring is false: the floppy stand-ins (the drive is left empty and the CD
+    // ejected), with the blocks the auto-load read marked; empty while restoring.
+    std::vector<std::unique_ptr<ts::Disk>> takeStandIns();
     ts::Machine& machine();  // tests, and the RAM at shut-down
     // Message thread, audio running:
     bool post(const Event&);    // false when the queue is full (A102)
@@ -113,7 +131,10 @@ private:
     void renderPiece(float* const out[4], int frames);
     void feedMidi(uint64_t upTo);  // the stored bytes due before block frame upTo
     void blockStart();             // sends the requested sound, applies the analogs (A105, A106)
-    void answerAutoLoad();         // A124: presses and releases *NO * under the power-on question
+    void answerAutoLoad();         // A124: presses and releases *NO * under the power-on question (A130: *YES*)
+    void restoreStep();            // A131: answers the insert prompts, ends the restore
+    void putFloppy(int i);         // A131: stand-in i into the drive, the one in it back to its slot
+    void endRestore();
     void sendSelect(const uint8_t* b, int n);
 
     struct MidiByte {
@@ -158,6 +179,14 @@ private:
     bool answerAutoLoad_ = false;
     AutoLoad autoLoad_ = AutoLoad::Off;
     uint64_t autoLoadAt_ = 0;
+    ts::Button autoLoadButton_ = ts::Button::Soft6;
+    // A131: the stand-ins (audio thread while restoring_, then takeStandIns), the one in the drive, the prompt press.
+    StandIns restore_;
+    std::atomic<bool> restoring_{false};
+    int floppyIn_ = -1;
+    bool promptArmed_ = true, promptHeld_ = false;
+    ts::Button promptButton_ = ts::Button::Soft6;
+    uint64_t promptAt_ = 0;
     int requested_ = -1, current_ = -1;
     bool dirty_ = false, sending_ = false;
     uint32_t programSeq_ = 0;
