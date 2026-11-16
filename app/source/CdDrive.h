@@ -5,6 +5,7 @@
 // the plugin state (A128).
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -35,7 +36,7 @@ public:
     void poll();
     // After every restart: the engine whose port the reader answers (null with none).
     void setEngine(ens::app::Engine* e);
-    // A stand-in (Task 9): asks for `medium` are answered from m's recorded sectors, a sector it lacks with failure.
+    // A stand-in (A129): asks for `medium` are answered from m's recorded sectors, a sector it lacks with failure.
     // nullptr stops serving it; call that before m is freed or changed.
     void serveFrom(const ens::app::SavedMedium* m, uint32_t medium);
     // A fresh medium id for serveFrom: the drive's ids count up from 1 and are never reused (T29).
@@ -62,7 +63,7 @@ private:
     juce::String notNow() const;
 
     TsProcessor& proc_;
-    uint32_t next_ = 1;  // the next medium id
+    std::atomic<uint32_t> next_{1};  // the next medium id; a host may restore a state (A129) off the message thread
     juce::File file_;  // the image in the drive (the .iso or .cue chosen); none when empty
     std::unique_ptr<juce::FileChooser> chooser_;
     // DECISION A128: the reader thread and the message thread share these under mu_ (neither is the audio thread).

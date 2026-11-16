@@ -44,7 +44,9 @@ public:
     // The file name, plus " (modified)"; "Untitled (blank)" for a new disk; empty with no disk.
     juce::String slotText() const;
 
-    // TsProcessor::tick: frees the disk a swap took out and writes a save whose copy has come.
+    // TsProcessor::tick: frees the disk a swap took out and writes a save whose copy has come. DECISION A129: in
+    // Project mode it also asks for a copy when the OS has read new blocks, and hands each copy and each disk that
+    // left the drive to TsProcessor::capture.
     void poll();
 
     // The dialogs (A119, A120), message thread. The drive's menu, at the control clicked.
@@ -89,6 +91,9 @@ private:
     uint32_t baseWrites_ = 0;      // Disk::writes() at the last open, new or save
     std::unique_ptr<Save> save_;   // the save waiting for its copy
     bool copyAsked_ = false;       // the engine holds a copy request of ours
+    // A129: Snapshot::diskReads and diskSwaps when a copy was last asked for the record; ~0u after a restart.
+    uint32_t readsSeen_ = ~0u, swapsSeen_ = ~0u;
+    bool forRecord_ = false;  // A129: the copy asked is the record's, not a save's
     std::unique_ptr<juce::FileChooser> chooser_;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE(DiskDrive)

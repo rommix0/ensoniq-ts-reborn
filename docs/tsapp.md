@@ -76,7 +76,7 @@ The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`
 
 ## The VST3: the state in the project
 
-The VST3 saves its state with the host's project, so a saved project brings each TS Reborn back as it was (A117). What is saved: the six parameters below, the sound to select again, and the instance's whole 512 KB RAM (about 700 KB in the project). It is the running RAM once the machine has booted. Before the boot ends, it is the RAM the machine started from, so a project saved in the first seconds does not lose its memory.
+The VST3 saves its state with the host's project, so a saved project brings each TS Reborn back as it was (A117). What is saved: the six parameters below, the sound to select again, the instance's whole 512 KB RAM (about 700 KB in the project) and the disk and CD blocks its sampled sounds were loaded from (see "What a project keeps" below). It is the running RAM once the machine has booted. Before the boot ends, it is the RAM the machine started from, so a project saved in the first seconds does not lose its memory.
 
 When a project loads, the instance restarts from the project's RAM. Once the boot has ended, the app selects the saved sound and sets the analogs. A new instance, one not loaded from a project, starts from the shared memory file.
 
@@ -84,7 +84,8 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 |---|---|---|
 | Start | from the memory file | from the project's RAM if the project has one, else from the memory file |
 | Saves to the memory file on close and every 60 s | yes (A116) | **no** |
-| "AUTO-LOAD ALL SAMPLED-SOUNDS" at power-on (memory that remembers a loaded sampled sound) | asked, as on the TS | answered *NO* by the app during the boot (A124); the question after loading a SAMPLE-BANKS file is still asked |
+| "AUTO-LOAD ALL SAMPLED-SOUNDS" at power-on (memory that remembers a loaded sampled sound) | asked, as on the TS | answered by the app during the boot: *YES* when the project holds the disks and CDs the sounds came from (A129, A130), else *NO* (A124); the question after loading a SAMPLE-BANKS file is still asked |
+| Disk and CD blocks the OS read | not kept (A121) | kept in the project (A129, "What a project keeps") |
 | Sound and the controls | not brought back (A121): the controls start at their defaults, and the sound is the one the memory boots on | from the project |
 | **Erase memory...** | zeros to the file, then a cold boot (Sound goes to 0) | this instance only; the file is left alone |
 | **Copy to shared memory...** | not shown | asks first, then writes this instance's RAM to the shared file (once booted) |
@@ -92,6 +93,18 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 **The six parameters** (A111): Volume, Data Entry, Pitch Wheel, Mod Wheel and CV Pedal (0 to 1, the position of the control as drawn) and Sound (a whole number, 0 to 127). A drag on a slider or wheel is one host gesture, so the host records automation. The pitch wheel springs back to centre. The Sound parameter follows the sound picked on the panel or by MIDI. With a Sound lane in read mode, the lane overrides panel picks, as automation does in any host.
 
 **Data Entry never reaches raw 0** (A110). The slider's bottom is raw 1, because at raw 0 the OS rewrites the selected value and shows SYSTEM ERROR 144. A host lane at 0 is mapped the same way.
+
+**What a project keeps** (A129). A VST3 instance also keeps, in its state, what the OS read from floppies and CDs
+since the instance started or its project was last loaded: for each disk or CD volume, its kind (DD or HD floppy,
+CD), its name as the OS asks for it, and the blocks read, with their bytes as first read. So a sampled sound loaded
+from disk or CD comes back with the project even where the image files are not: when the project loads, the app
+answers the power-on AUTO-LOAD question *YES*, puts stand-in media built from those blocks in the drives, and
+answers each "INSERT DISK WITH NAME ..." prompt with the right one (A130, A131). This takes as long as the first
+load did, up to about half a minute for a large CD sound; the display shows the OS loading. A disk or CD that is in
+a drive when the project loads goes back in once that is done. A project saved meanwhile keeps the media it was
+loaded with. Afterwards the project keeps only what this load read, so blocks of sounds no longer in memory, or of
+files only browsed, drop out. There is no size limit: the project grows by about 1.35 times the bytes read (a
+546-block CD sound, read as 143 CD sectors, adds about 400 KB). The Standalone keeps none of this (A121).
 
 **Which sounds come back** (A105). The app replays the last selection it saw (bank select and program change) once the boot has ended. The firmware always powers on to U0-0, so the display shows U0-0 for the boot and then changes. The rest of the memory (edited sounds, sequences, the system settings) is kept.
 

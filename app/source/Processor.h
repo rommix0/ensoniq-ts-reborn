@@ -45,8 +45,11 @@ public:
     DiskDrive& drive() { return drive_; }
     // The CD-ROM drive at SCSI ID 4 (A128), message thread. The CD is not part of the state either.
     CdDrive& cdDrive() { return cd_; }
-    // DECISION A131: what the OS read from each medium, Project mode only (A121); message thread.
+    // DECISION A129: what the OS read from each medium, Project mode only (A121); message thread.
     ens::app::MediaRecord& record() { return record_; }
+    // DECISION A129: a floppy's newly read blocks into the record (Project mode only), from a copy of the disk in the
+    // drive or a disk leaving it (DiskDrive::poll). Message thread.
+    void capture(const ens::ts::Disk& d);
     // Counts the engines made by restart, so the drive knows its counts belong to a replaced one (A119).
     uint32_t engineGeneration() const { return engineGen_.load(); }
 
@@ -93,7 +96,8 @@ public:
     const juce::String getProgramName(int) override { return {}; }
     void changeProgramName(int, const juce::String&) override {}
 
-    // DECISION A117: <TSState version="1" select="..."> with the parameters and, in Project mode, <RAM>.
+    // DECISION A117: <TSState version="1" select="..."> with the parameters and, in Project mode, <RAM> and <Media>
+    // (A129).
     void getStateInformation(juce::MemoryBlock& dest) override;
     void setStateInformation(const void* data, int size) override;
 
@@ -101,7 +105,10 @@ private:
     // Keep: the running RAM once booted, else the start image. File: the memory file. Start: the start image.
     enum class Ram { Keep, File, Start };
     // Both: the caller holds stateMu_.
-    bool restart(Ram ram);       // a new engine from roms_; the old one stays if that fails
+    // A new engine from roms_; the old one stays if that fails. fromState: a project's RAM (A129).
+    bool restart(Ram ram, bool fromState = false);
+    void finishRestore();  // A129: the restore has ended: the stand-ins into the record, restored_ dropped
+    void unserve();        // A129: the CD drive stops serving the stand-in CDs (before restored_ changes)
     std::vector<uint8_t> ram();  // the RAM a state or a copy saves (A117); empty when there is none
     std::vector<uint8_t> select(const ens::app::Snapshot& snap) const;  // the select a state saves
     int soundNow() const;  // `sound` 0-127; NaN reads as 0
@@ -141,8 +148,17 @@ private:
     std::atomic<float>* sound_ = nullptr;
     std::atomic<uint32_t> engineGen_{0};
     DiskDrive drive_{*this};
+    // DECISION A129: record_ is changed on the message thread under mediaMu_, so a host may save from any thread.
+    std::mutex mediaMu_;
     ens::app::MediaRecord record_;
-    CdDrive cd_{*this};  // after engine_ and record_: its reader stops before either goes
+    // DECISION A129: the media of the project state restored last, kept (under stateMu_) while its restore is due or
+    // running: the stand-ins are built and the CD drive serves from them, and a state saved meanwhile writes them.
+    std::vector<ens::app::SavedMedium> restored_;
+    bool restoreWanted_ = false;          // restored_ goes with startImage_
+    std::atomic<bool> restoreRan_{false};  // the engine was given stand-ins and tick has not seen the end yet
+    std::vector<uint32_t> standInCds_;     // their CD medium ids and floppies, to tell them from the user's media
+    std::vector<const ens::ts::Disk*> standInDisks_;
+    CdDrive cd_{*this};  // after engine_, record_ and restored_: its reader stops before any of them goes
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TsProcessor)
 };

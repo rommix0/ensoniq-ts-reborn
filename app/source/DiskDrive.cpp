@@ -1,5 +1,7 @@
 #include "DiskDrive.h"
 
+#include <utility>
+
 #include "MemoryFile.h"
 #include "Processor.h"
 
@@ -29,6 +31,8 @@ void DiskDrive::follow() {
     gen_ = g;
     swaps_ = in_ ? 1u : 0u;
     copyAsked_ = false;  // the old engine's copy request went with it
+    readsSeen_ = swapsSeen_ = ~0u;  // A129: and so did a capture's copy: ask again
+    forRecord_ = false;
     auto* e = proc_.engine();
     if (e == nullptr) return;
     e->setWriteProtect(protect_);  // a request the old engine had not applied yet
@@ -55,7 +59,7 @@ bool DiskDrive::insert(std::unique_ptr<Disk> d) {
     auto* e = engine();
     // DECISION A119: with no audio running the swap would never be applied; refuse it (notNow says why).
     if (e == nullptr || !proc_.prepared()) return false;
-    e->takeRemoved();
+    if (const auto out = e->takeRemoved()) proc_.capture(*out);  // DECISION A129: its last reads
     if (!e->insertDisk(std::move(d))) return false;
     ++swaps_;
     // DECISION A119: a save waiting for its copy is given up when the disk changes (it may never come while
@@ -201,8 +205,17 @@ bool DiskDrive::startSave(Save s, juce::String& err) {
         err = "A save is already running.";
     } else if (e == nullptr || !proc_.prepared()) {
         err = "The machine is not running (no audio device), so the disk cannot be copied.";
-    } else if (!askCopy(e)) {
-        err = "The drive is busy. Try again.";
+    } else {
+        // DECISION A129: a copy the record asked for and the engine already made may predate this save: the record
+        // keeps it, and the save asks anew. One not made yet is made after this, so it serves the save.
+        std::unique_ptr<Disk> made;
+        bool ok = false;
+        uint32_t at = 0;
+        if (std::exchange(forRecord_, false) && copyAsked_ && e->takeDisk(made, ok, at)) {
+            copyAsked_ = false;
+            if (ok) proc_.capture(*made);
+        }
+        if (!askCopy(e)) err = "The drive is busy. Try again.";
     }
     if (err.isNotEmpty()) return false;
     s.swaps = swaps_;
@@ -213,13 +226,27 @@ bool DiskDrive::startSave(Save s, juce::String& err) {
 void DiskDrive::poll() {
     auto* e = engine();
     if (e == nullptr) return;
-    e->takeRemoved();  // DECISION A118: freed on the message thread
+    // DECISION A118: freed on the message thread. DECISION A129: a disk leaving the drive is captured first.
+    if (const auto out = e->takeRemoved()) proc_.capture(*out);
+    // DECISION A129: on the first tick after the OS read new blocks (or another disk went in), a copy for the record.
+    // While the restore runs the stand-ins own the drive and the copy slot waits (A131): nothing is asked.
+    // The gap: a block the OS writes between its read and the copy is kept as written.
+    if (!copyAsked_ && proc_.memoryMode() == MemoryMode::Project) {
+        const auto s = e->snapshot();
+        if (!s.restoring && s.diskIn && (s.diskReads != readsSeen_ || s.diskSwaps != swapsSeen_) && askCopy(e)) {
+            readsSeen_ = s.diskReads;
+            swapsSeen_ = s.diskSwaps;
+            forRecord_ = true;
+        }
+    }
     std::unique_ptr<Disk> copy;
     bool ok = false;
     uint32_t at = 0;
     if (!copyAsked_ || !e->takeDisk(copy, ok, at)) return;
     copyAsked_ = false;
-    if (!save_) return;  // the save it was for was given up: dropped
+    forRecord_ = false;
+    if (ok) proc_.capture(*copy);  // DECISION A129: a save's copy too; capture keeps only new blocks
+    if (!save_) return;  // the save it was for, if any, was given up: dropped
     if (at != save_->swaps || !ok) {
         // A copy of another disk (the one to save still waiting to go in), or a scratch of the density before:
         // ask again while the disk to save is in, else the save fails.
