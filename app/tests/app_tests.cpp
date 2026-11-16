@@ -1132,6 +1132,9 @@ void diskDrive(const juce::File& dir) {
     auto slot = control(ens::app::ControlKind::Decor, -1).r;
     slot = {slot.x + 26, slot.y + 22, slot.w - 52, slot.h - 44};
     std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    // A click on the drive reaches the drive's control (its mouseDown opens the menu), not the board under it.
+    auto* tip = dynamic_cast<juce::SettableTooltipClient*>(&part(*ed, control(ens::app::ControlKind::Decor, -1)));
+    CHECK(tip != nullptr && tip->getTooltip().contains("disk menu"));
     const int withDisk = brightPixels(paintEditor(*ed, "panel-disk.png"), slot, 0, 120);
     d.eject();
     step();
