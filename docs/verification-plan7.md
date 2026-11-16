@@ -66,7 +66,7 @@ floppy and a CD, and the app checks' project round trip (floppy ED-001 and CD CD
 
 ## User to run
 
-Not claimed as passed.
+Done by the user on 2026-11-16 and approved.
 
 - Insert a CD image in the Standalone (menu or drag-and-drop of a `.iso` / `.cue`), browse it on the OS's Load
   page and load a sound; eject; try a file chooser and a real drop.
