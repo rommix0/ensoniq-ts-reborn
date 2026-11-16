@@ -759,6 +759,65 @@ void romsBesideApp(const juce::File& dir) {
     beside.deleteRecursively();
 }
 
+// rom_folder_in_use (A125): a folder used but not stored (a VST3 package's own ROMs) is still the folder the
+// settings page shows and the memory-file guard checks: a memory file inside it is refused.
+void romFolderInUse(const juce::File& dir) {
+    setSettingsDir(dir);
+    const auto packaged = dir.getChildFile("Contents/Resources/roms");
+    dummyRoms(packaged);
+    TsProcessor p;
+    juce::String err;
+    p.setRomFolder(packaged, err, false);
+    CHECK(p.romFolder() == packaged && !p.romFolderStored() && p.settings().romFolder() == juce::File());
+    CHECK(!p.setMemoryFile(packaged.getChildFile("os/ts10_310l.bin"), err) && err.isNotEmpty());
+    CHECK(p.settings().memoryFile() != packaged.getChildFile("os/ts10_310l.bin"));
+    const auto chosen = dir.getChildFile("chosen");
+    dummyRoms(chosen);
+    p.setRomFolder(chosen, err);
+    CHECK(p.romFolder() == chosen && p.romFolderStored() && p.settings().romFolder() == chosen);
+    // The stored folder taken again without storing (the start-up path for a bad stored folder) is still the
+    // stored one: the page must not call it the package's.
+    p.setRomFolder(chosen, err, false);
+    CHECK(p.romFolderStored());
+}
+
+// rom_folder_order (A125): the stored folder if it holds the six ROMs, else "roms" beside the program
+// (stored), else Contents/Resources/roms when the program sits in a VST3 package (not stored), else the
+// stored folder as it is (its problem is shown), not stored.
+void romFolderOrder(const juce::File& dir) {
+    const auto is = [](const RomFolderChoice& c, const juce::File& want, bool store) {
+        return c.dir == want && c.store == store;
+    };
+    // stored good
+    const auto a = dir.getChildFile("a"), b = dir.getChildFile("b/roms");
+    dummyRoms(a);
+    dummyRoms(b);
+    CHECK(is(findRomFolder(a, dir.getChildFile("b/TS Reborn.exe")), a, false));
+    // stored missing: the folder beside the program, stored
+    const auto app = dir.getChildFile("app");
+    dummyRoms(app.getChildFile("roms"));
+    CHECK(is(findRomFolder(dir.getChildFile("gone"), app.getChildFile("TS Reborn.exe")), app.getChildFile("roms"),
+             true));
+    // package: Contents/Resources/roms, not stored
+    const auto contents = dir.getChildFile("pkg/TS Reborn.vst3/Contents");
+    contents.getChildFile("x86_64-win").createDirectory();
+    dummyRoms(contents.getChildFile("Resources/roms"));
+    const auto plugin = contents.getChildFile("x86_64-win/TS Reborn.vst3");
+    CHECK(is(findRomFolder({}, plugin), contents.getChildFile("Resources/roms"), false));
+    // not a package: a ../Resources/roms is never taken
+    const auto plain = dir.getChildFile("plain");
+    plain.getChildFile("bin").createDirectory();
+    dummyRoms(plain.getChildFile("Resources/roms"));
+    CHECK(is(findRomFolder({}, plain.getChildFile("bin/TS Reborn.exe")), juce::File(), false));
+    // only a bad stored folder: kept, so its problem is reported
+    const auto bad = dir.getChildFile("bad");
+    write(bad.getChildFile("os/ts10_310h.bin"), 0x40000);
+    CHECK(is(findRomFolder(bad, plain.getChildFile("bin/TS Reborn.exe")), bad, false));
+    // beside beats the package
+    dummyRoms(contents.getChildFile("x86_64-win/roms"));
+    CHECK(is(findRomFolder({}, plugin), contents.getChildFile("x86_64-win/roms"), true));
+}
+
 // processor_aux_bus_off_mixes_into_main (A109): two processors get the same blocks. After the boot the
 // running OS routes track 1 to the Aux outputs (Track Effects, Effects Bus Routing stepped with Up from
 // VOICE to -AUX-), then both get 90 3C 7F. The one with Aux disabled plays on Main exactly the other's
@@ -1166,16 +1225,17 @@ void diskDrive(const juce::File& dir) {
 
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
 // naming the ROM folder, so neither the user's settings nor their memory file is touched. Aux is off,
-// as the Standalone plays it (A109).
-void vst3(const juce::File& dir) {
-    const juce::File bundle(TSR_VST3_PATH);
+// as the Standalone plays it (A109). With `ownRoms` (the release VST3, A125, A126) the settings folder names
+// no ROM folder: the plugin must boot on the ROMs in its own package, and must not store that folder.
+void vst3(const juce::File& dir, const juce::File& bundle, bool ownRoms) {
     if (!bundle.exists()) {
-        std::printf("  skip: VST3 not found\n");
+        std::printf("  skip: VST3 not found: %s\n", bundle.getFullPathName().toRawUTF8());
+        CHECK(!ownRoms);  // a release VST3 that was asked for must be there
         return;
     }
-    if (!haveRoms()) return;
+    if (!ownRoms && !haveRoms()) return;
     setSettingsDir(dir);  // the plugin DLL reads this process's environment, so it lands here too
-    AppSettings().setRomFolder(juce::File(TSR_ROM_DIR));
+    if (!ownRoms) AppSettings().setRomFolder(juce::File(TSR_ROM_DIR));
 
     juce::VST3PluginFormat format;
     juce::OwnedArray<juce::PluginDescription> types;
@@ -1224,6 +1284,7 @@ void vst3(const juce::File& dir) {
     ed.reset();
     plugin->releaseResources();
     plugin.reset();
+    if (ownRoms) CHECK(AppSettings().romFolder() == juce::File());
 }
 
 }  // namespace
@@ -1251,10 +1312,18 @@ int main() {
     dataEntryRestored(dir.getChildFile("data-entry"), r2);
     zeroAndBypassedBlocks(dir.getChildFile("zero"));
     romsBesideApp(dir.getChildFile("beside"));
+    romFolderOrder(dir.getChildFile("order"));
+    romFolderInUse(dir.getChildFile("inuse"));
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
-    vst3(dir.getChildFile("vst3"));
+    vst3(dir.getChildFile("vst3"), juce::File(TSR_VST3_PATH), false);
+    // TSR_RELEASE_VST3=<a release folder's TS Reborn.vst3>: that package, on its own ROMs (A125, A126).
+    const auto release = juce::SystemStats::getEnvironmentVariable("TSR_RELEASE_VST3", {});
+    if (release.isEmpty())
+        std::printf("  skip: TSR_RELEASE_VST3 not set\n");
+    else
+        vst3(dir.getChildFile("release"), juce::File(release), true);
     dir.deleteRecursively();
     std::printf(failures == 0 ? "app_tests: all passed\n" : "app_tests: %d failed\n", failures);
     return failures == 0 ? 0 : 1;

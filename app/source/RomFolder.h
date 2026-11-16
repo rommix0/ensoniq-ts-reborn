@@ -14,3 +14,13 @@ struct RomFileStatus {
 // One entry per file: the OS high and low, then the wave ROMs U41, U43, U45, U46. When every file is
 // found with a size Machine::create takes and outIfAllGood is set, the files are read into it.
 std::vector<RomFileStatus> checkRomFolder(const juce::File& dir, ens::ts::RomSet* outIfAllGood);
+
+struct RomFolderChoice {
+    juce::File dir;      // empty: none found
+    bool store = false;  // write it to settings.xml
+};
+
+// The folder the app starts on (A125): `stored` if it holds the six ROMs; else a "roms" folder beside
+// `program`, stored; else, when `program` sits in a VST3 package (its parent's parent is named "Contents"),
+// Contents/Resources/roms, not stored; else `stored` as it is (its problem is reported), not stored.
+RomFolderChoice findRomFolder(const juce::File& stored, const juce::File& program);

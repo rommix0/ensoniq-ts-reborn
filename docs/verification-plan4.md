@@ -193,7 +193,7 @@ attributes `E7` and `7F`, SACK/, wait states, the CPU clock, the levels.
 
 ## User to run
 
-Nothing below has been checked by a person.
+Checked by the user on 2026-11-15 (the user's report at the start of Plan 6: "The checks have already been done"). The list is kept as it was written.
 
 **Mouse checks of Task 4 (Standalone):**
 - First start with no ROM folder: the panel shows the ROM message, the gear opens the settings page, and

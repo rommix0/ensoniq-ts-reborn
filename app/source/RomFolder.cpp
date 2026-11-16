@@ -44,3 +44,26 @@ std::vector<RomFileStatus> checkRomFolder(const juce::File& dir, ens::ts::RomSet
     }
     return list;
 }
+
+namespace {
+bool holdsRoms(const juce::File& dir) {
+    if (!dir.isDirectory()) return false;
+    for (const auto& s : checkRomFolder(dir, nullptr))
+        if (s.state != RomFileStatus::Found) return false;
+    return true;
+}
+}  // namespace
+
+// DECISION A125: the stored folder, "roms" beside the program (stored), the VST3 package's own ROMs (not
+// stored: the package can be moved or removed), else the stored folder as it is, so its problem is shown.
+RomFolderChoice findRomFolder(const juce::File& stored, const juce::File& program) {
+    if (stored != juce::File() && holdsRoms(stored)) return {stored, false};
+    const auto beside = program.getSiblingFile("roms");
+    if (holdsRoms(beside)) return {beside, true};
+    const auto contents = program.getParentDirectory().getParentDirectory();
+    if (contents.getFileName() == "Contents") {
+        const auto packaged = contents.getChildFile("Resources").getChildFile("roms");
+        if (holdsRoms(packaged)) return {packaged, false};
+    }
+    return {stored, false};
+}

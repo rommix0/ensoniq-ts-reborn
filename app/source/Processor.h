@@ -45,8 +45,13 @@ public:
     uint32_t engineGeneration() const { return engineGen_.load(); }
 
     // Message thread. Each suspends processing around the engine swap itself.
-    // Stores dir and, when all six ROMs are good, re-creates the machine keeping its memory.
-    bool setRomFolder(const juce::File& dir, juce::String& err);
+    // Stores dir (unless `store` is false: a VST3 package's own ROMs, A125) and, when all six ROMs are
+    // good, re-creates the machine keeping its memory.
+    bool setRomFolder(const juce::File& dir, juce::String& err, bool store = true);
+    // DECISION A125: the ROM folder in use (what the settings page shows and the memory guard checks), and
+    // whether it is the stored one; a VST3 package's own ROMs are used, not stored.
+    juce::File romFolder() const { return romFolder_; }
+    bool romFolderStored() const { return romStored_; }
     // Stores file and, when it holds an image, restarts the machine from it. A file in the ROM
     // folder, one that cannot be written or one of the wrong size is refused (err) and the setting stays.
     bool setMemoryFile(const juce::File& file, juce::String& err);
@@ -116,6 +121,8 @@ private:
     std::unique_ptr<ens::app::Engine> engine_;
     juce::String romError_, memoryError_;
     double rate_ = 0;  // 0 until prepareToPlay
+    juce::File romFolder_;    // the last folder setRomFolder took (A125)
+    bool romStored_ = false;  // ... and whether it is the stored one
     int block_ = 0;
     std::vector<float> auxL_, auxR_;  // Aux when its bus is off, added into Main (A109); block_ frames
     int ticks_ = 0;            // timer ticks (30 Hz) since the last save request
