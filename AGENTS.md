@@ -55,7 +55,8 @@ cmake --build build-msvc --config Release
 cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-linux
 
-# App (Plan 4), MSVC x64: Standalone, VST3 and the app checks. Needs JUCE; see docs/tsapp.md
+# App (Plan 4), MSVC x64: Standalone, VST3 and the app checks. The first configure downloads JUCE
+# 8.0.16-security into the build folder (git and network once); see docs/tsapp.md
 cmake -S . -B build-app -G "Visual Studio 17 2022" -A x64 -DENS_BUILD_APP=ON
 cmake --build build-app --config Release --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
 
