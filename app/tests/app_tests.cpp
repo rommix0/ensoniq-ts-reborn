@@ -1678,6 +1678,35 @@ void mediaStateKeepsUnrestored(const juce::File& dir, const juce::MemoryBlock& f
     CHECK(after.media.contains("cd CDR-013 " + juce::String(cdBlocks - 1)));
 }
 
+// project_state_after_a_restore_untouched (A129): a restore ends and, before a tick has seen the end, the host gives
+// the processor a project again (the timer runs on the message thread; a host may load a state from another). The
+// new project's restore must still run: restart must not finish the old restore over the new project's media.
+void mediaStateTwiceWithoutTick(const juce::File& dir, const juce::MemoryBlock& full) {
+    if (full.isEmpty() || !realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    restoreFrom(p, full);
+    juce::AudioBuffer<float> buf(4, 480);
+    juce::MidiBuffer none;
+    bool ended = false;
+    for (int i = 0; i < 13000 && !ended; ++i) {  // as runCd, without tick(), at most 130 s
+        buf.clear();
+        p.processBlock(buf, none);
+        uint32_t medium = 0, lba = 0;
+        auto* port = p.engine()->cdPort();
+        for (int t = 0; port != nullptr && t < 1000 && port->pending(medium, lba); ++t) juce::Thread::sleep(1);
+        const auto s = p.engine()->snapshot();
+        ended = s.frames > 0 && !s.restoring && s.booted;
+    }
+    CHECK(ended);
+    p.setStateInformation(full.getData(), static_cast<int>(full.getSize()));
+    runCd(p, 2000);
+    CHECK(p.engine()->snapshot().restoring);
+    CHECK(runRestore(p) > 0);
+    openS8(p, ens::ts::Button::Bank0);
+    CHECK(shows(p, "FLUTE 1"));
+}
+
 // project_state_trims_on_reopen (A129): after FLUTE 1 is loaded from ED-001, CDR-13 is browsed (mounted on the SCSI
 // STATUS page, its Load page opened and stepped through the root), loading nothing from it; ED-001 holds no other
 // sampled sound to browse past (its Load page steps from FLUTE 1 to *NO-FILES*). So the first state holds blocks no
@@ -1925,6 +1954,7 @@ int main() {
     standaloneHasNoMedia(dir.getChildFile("media-standalone"));
     const auto media = mediaStateRoundTrip(dir.getChildFile("media-round-trip"));
     mediaStateKeepsUnrestored(dir.getChildFile("media-keep"), media);
+    mediaStateTwiceWithoutTick(dir.getChildFile("media-twice"), media);
     mediaStateTrimsOnReopen(dir.getChildFile("media-trim"));
     vst3(dir.getChildFile("vst3"), juce::File(TSR_VST3_PATH), false);
     // TSR_RELEASE_VST3=<a release folder's TS Reborn.vst3>: that package, on its own ROMs (A125, A126).

@@ -17,6 +17,10 @@ so the app checks get `TSR_DISK_DIR`).
 - Counts after the final review's fix wave (the four findings below): 414 = 412 + `ts_cd_slow_reader` +
   `media_merge_keeps_record_first`; the app checks gained `project_state_keeps_unrestored_media`. The
   `TSR_RELEASE_VST3` run below was not repeated in the fix wave (the packaging did not change).
+- Then the restart race the fix wave's re-review found (a project loaded before a tick saw the previous restore end
+  skipped its own restore): `project_state_after_a_restore_untouched` failed before the one-line fix in `restart`
+  and passes after; MSVC app checks `app_tests: all passed`. That last change is app-only and was not rebuilt on
+  Linux.
 - Real-time suite: 0 allocations on all three. `rt_engine_cd_load_does_not_allocate`: 0 allocations, 6 sectors
   served. `rt_engine_restore_does_not_allocate`: 0 allocations over 158036 frames.
 - No `skip:` line was printed by `ens_tests` on any toolchain: the image tests (floppy and CD) ran everywhere.

@@ -249,7 +249,9 @@ bool TsProcessor::saved(bool ok) {
 bool TsProcessor::restart(Ram ram, bool fromState) {
     suspendProcessing(true);  // from here the audio thread is out of processBlock, and stays out
     const auto snap = engine_ ? engine_->snapshot() : ens::app::Snapshot{};
-    if (restoreRan_ && snap.frames > 0 && !snap.restoring) finishRestore(snap.restoreClean);  // before tick saw it
+    // Before tick saw it; not for a state load, which has already replaced restored_ and cleared the record with the
+    // new project's (A129): finishing would merge the new media into the old restore's and skip the new restore.
+    if (!fromState && restoreRan_ && snap.frames > 0 && !snap.restoring) finishRestore(snap.restoreClean);
     std::vector<uint8_t> img;
     // DECISION A117: Start replays the start image's select; Keep and File keep the select a state would
     // save (the running one once booted, else the start one), so a new memory file keeps the sound.
