@@ -1,6 +1,6 @@
 # Builds the TS Reborn Standalone and VST3 (MSVC x64, Release, static C++ runtime) in build-dist and
-# assembles "dist\TS Reborn-<version>": TS Reborn.exe, the TS Reborn.vst3 package, README.md, LICENSE, the app
-# guide, and the six ROM files the app loads, in roms\ beside the exe and again inside the VST3 package
+# assembles "dist\TS Reborn-<version>": TS Reborn.exe, the TS Reborn.vst3 package, README.md with panel.png,
+# LICENSE, the app guide, and the six ROM files the app loads, in roms\ beside the exe and again inside the VST3 package
 # (Contents\Resources\roms), so the VST3 finds them wherever it is installed. DECISION A126.
 # The ROMs are Ensoniq's.
 #
@@ -46,7 +46,7 @@ if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item -LiteralPath "$art\Standalone\TS Reborn.exe" $out
 Copy-Item -LiteralPath "$art\VST3\TS Reborn.vst3" $out -Recurse
-Copy-Item -LiteralPath README.md, LICENSE $out
+Copy-Item -LiteralPath README.md, panel.png, LICENSE $out
 Copy-Item -LiteralPath docs\tsapp.md "$out\APP-GUIDE.md"
 foreach ($dest in "$out\roms", "$out\TS Reborn.vst3\Contents\Resources\roms") {
     foreach ($f in $roms.Keys) {
