@@ -12,9 +12,15 @@ namespace {
 constexpr uint64_t kBootFrames = static_cast<uint64_t>(ts::kBootMs) * ts::kCpuHz / 512'000;
 // A soft button held for an answer (A124, A131): 100 ms of frames.
 constexpr uint64_t kHold = 100ull * ts::kCpuHz / 512'000;
-// DECISION A131: a restore that has not come back to the play screen after 120 s of emulated time since power-on
-// (an error page the OS waits on) ends anyway, so the boot (A104) is never held for good. The longest restore seen
-// is a 3927-block CD sound, 23.6 s (A130). ponytail: a fixed cap; watch for the OS's error pages if one shows up.
+// DECISION A131: the restore also ends after 10 s with no floppy block read, no CD sector asked and no display change
+// (a page the engine does not answer; with the error page left unanswered it ends 10 s after it, A131). The longest
+// such quiet seen in a good restore is 3.9 s (the CD mount's WORKING..., A131).
+constexpr uint64_t kRestoreIdle = 10'000ull * ts::kCpuHz / 512'000;
+// DECISION A131: a prompt still showing 2 s after the engine's answer was released gets *SKIP* (the OS takes a
+// button within a frame; an answered prompt is gone or redrawn within 0.4 s).
+constexpr uint64_t kPromptAgain = 2'000ull * ts::kCpuHz / 512'000;
+// DECISION A131: and at 120 s of emulated time since power-on in any case, so the boot (A104) is never held for good.
+// The longest restore seen is a 3927-block CD sound, 23.6 s (A130).
 constexpr uint64_t kRestoreCap = 120'000ull * ts::kCpuHz / 512'000;
 }  // namespace
 
@@ -237,6 +243,8 @@ void Engine::setRestore(StandIns s) {
     if (nc > 0) m_->insertCd(restore_.cdMedia[0], restore_.cdSizes[0]);
     promptArmed_ = true;
     promptHeld_ = false;
+    lastOkFloppy_ = lastOkCd_ = -1;
+    activeAt_ = 0;
     autoLoad_ = AutoLoad::Watch;
     restoring_.store(true, std::memory_order_release);
 }
@@ -265,14 +273,28 @@ void Engine::endRestore() {
 //   row 0 "INSERT DISK WITH NAME " + the 7-byte label (columns 22-28) ... "* OK *" (Soft3, columns 34-39)
 //   row 1 "INTO DISK DRIVE" or "INTO SCSI DEVICE 4"                ... "*SKIP*" (Soft6, columns 34-39)
 // The engine puts in the stand-in of that kind with that label and presses *OK*, or presses *SKIP* when it has none,
-// then waits for the prompt to go before answering another. The restore ends once the boot time (A104) has passed
-// and row 0 is the play screen the OS shows after the auto-load as after any boot (U0-0, A105), or at kRestoreCap.
+// when the prompt is the one it just answered *OK* (the OS did not take that stand-in), or when its answer has not
+// moved the prompt for kPromptAgain. A page that says PRESS ANY BUTTON TO CONTINUE (DISK DRIVE NOT RESPONDING after a
+// sector a stand-in lacks) gets Up, after which the OS asks for the volume again (as UNKNOWN) and gets *SKIP*. The
+// restore ends once the boot time (A104) has passed and row 0 is the play screen the OS shows after the auto-load as
+// after any boot (U0-0, A105), or after kRestoreIdle with no floppy read, CD ask or display change, or at kRestoreCap.
 // Audio thread, at the block start: it only moves the stand-ins, never allocates or frees one.
 void Engine::restoreStep() {
+    const auto& p = m_->panel();
+    const ts::Disk* d = m_->disk();
+    const uint32_t reads = d ? d->reads() : 0, asks = m_->cdPort() ? m_->cdPort()->asks() : 0;
+    if (d != actDisk_ || reads != actReads_ || asks != actAsks_ || std::memcmp(p.text, actText_, sizeof actText_) != 0) {
+        actDisk_ = d;
+        actReads_ = reads;
+        actAsks_ = asks;
+        std::memcpy(actText_, p.text, sizeof actText_);
+        activeAt_ = frames_;
+    }
     if (promptHeld_) {
         if (frames_ - promptAt_ >= kHold && m_->panelRoom() >= 2) {
             m_->button(promptButton_, false);
             promptHeld_ = false;
+            releasedAt_ = frames_;
         }
         return;
     }
@@ -280,36 +302,50 @@ void Engine::restoreStep() {
         endRestore();
         return;
     }
-    const auto& p = m_->panel();
     const bool prompt = std::memcmp(p.text[0], "INSERT DISK WITH NAME ", 22) == 0 &&
                         std::memcmp(&p.text[0][34], "* OK *", 6) == 0 && std::memcmp(&p.text[1][34], "*SKIP*", 6) == 0;
-    if (!prompt) {
+    // An error page that waits for a button (DISK DRIVE NOT RESPONDING after a sector a stand-in lacks): Up, as a
+    // player would, so the OS goes on with the auto-load while the stand-ins are still in.
+    const bool error = std::string_view(p.text[1], sizeof p.text[1]).find("PRESS ANY BUTTON TO CONTINUE") !=
+                       std::string_view::npos;
+    if (!prompt && !error) {
         promptArmed_ = true;
-        if (frames_ >= kBootFrames && autoLoad_ != AutoLoad::Held && std::memcmp(p.text[0], "U0-0 ", 5) == 0)
+        if (frames_ >= kBootFrames && autoLoad_ != AutoLoad::Held &&
+            (std::memcmp(p.text[0], "U0-0 ", 5) == 0 || frames_ - activeAt_ >= kRestoreIdle))
             endRestore();
         return;
     }
-    if (!promptArmed_ || m_->panelRoom() < 2) return;
-    int a = 22, b = 29;
-    while (a < b && p.text[0][a] == ' ') ++a;
-    while (b > a && p.text[0][b - 1] == ' ') --b;
-    const std::string_view name(&p.text[0][a], size_t(b - a));
+    if (m_->panelRoom() < 2) return;
     bool found = false;
-    if (std::memcmp(p.text[1], "INTO DISK DRIVE ", 16) == 0) {
-        for (size_t i = 0; i < restore_.floppyLabels.size() && !found; ++i)
-            if (restore_.floppyLabels[i] == name && (restore_.floppies[i] || floppyIn_ == int(i))) {
-                putFloppy(int(i));
-                found = true;
-            }
-    } else if (std::memcmp(p.text[1], "INTO SCSI DEVICE 4 ", 19) == 0) {
-        for (size_t i = 0; i < restore_.cdLabels.size() && !found; ++i)
-            if (restore_.cdLabels[i] == name) {
-                if (m_->cd() && m_->cd()->medium() != restore_.cdMedia[i])
-                    m_->insertCd(restore_.cdMedia[i], restore_.cdSizes[i]);
-                found = true;
-            }
+    if (prompt && promptArmed_) {
+        int a = 22, b = 29;
+        while (a < b && p.text[0][a] == ' ') ++a;
+        while (b > a && p.text[0][b - 1] == ' ') --b;
+        const std::string_view name(&p.text[0][a], size_t(b - a));
+        int floppy = -1, cd = -1;
+        if (std::memcmp(p.text[1], "INTO DISK DRIVE ", 16) == 0) {
+            for (size_t i = 0; i < restore_.floppyLabels.size() && floppy < 0; ++i)
+                if (restore_.floppyLabels[i] == name && (restore_.floppies[i] || floppyIn_ == int(i))) floppy = int(i);
+        } else if (std::memcmp(p.text[1], "INTO SCSI DEVICE 4 ", 19) == 0) {
+            for (size_t i = 0; i < restore_.cdLabels.size() && cd < 0; ++i)
+                if (restore_.cdLabels[i] == name) cd = int(i);
+        }
+        // The same prompt again right after *OK* for it: the OS did not accept that stand-in.
+        if (floppy >= 0 && floppy != lastOkFloppy_) {
+            putFloppy(floppy);
+            found = true;
+        } else if (cd >= 0 && cd != lastOkCd_) {
+            if (m_->cd() && m_->cd()->medium() != restore_.cdMedia[size_t(cd)])
+                m_->insertCd(restore_.cdMedia[size_t(cd)], restore_.cdSizes[size_t(cd)]);
+            found = true;
+        }
+        lastOkFloppy_ = found ? floppy : -1;
+        lastOkCd_ = found ? cd : -1;
+    } else if (!promptArmed_) {
+        if (frames_ - releasedAt_ < kPromptAgain) return;  // answered; waiting for the OS to take the button
+        if (prompt) lastOkFloppy_ = lastOkCd_ = -1;  // the answer did not move the prompt: *SKIP*; a page: Up again
     }
-    promptButton_ = found ? ts::Button::Soft3 : ts::Button::Soft6;
+    promptButton_ = !prompt ? ts::Button::Up : found ? ts::Button::Soft3 : ts::Button::Soft6;
     m_->button(promptButton_, true);
     promptAt_ = frames_;
     promptHeld_ = true;

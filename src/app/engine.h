@@ -186,7 +186,13 @@ private:
     int floppyIn_ = -1;
     bool promptArmed_ = true, promptHeld_ = false;
     ts::Button promptButton_ = ts::Button::Soft6;
-    uint64_t promptAt_ = 0;
+    uint64_t promptAt_ = 0, releasedAt_ = 0;
+    int lastOkFloppy_ = -1, lastOkCd_ = -1;  // the stand-in the last *OK* was for
+    // A131: the last floppy read, CD ask or display change, for the restore's idle end.
+    const ts::Disk* actDisk_ = nullptr;
+    uint32_t actReads_ = 0, actAsks_ = 0;
+    char actText_[ts::kPanelRows][ts::kPanelCols] = {};
+    uint64_t activeAt_ = 0;
     int requested_ = -1, current_ = -1;
     bool dirty_ = false, sending_ = false;
     uint32_t programSeq_ = 0;

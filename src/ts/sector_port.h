@@ -42,6 +42,7 @@ public:
         return true;
     }
     const uint8_t* data() const { return buf_; }
+    uint32_t asks() const { return askSeq_.load(std::memory_order_relaxed) >> 1; }  // asks made so far
 
     // reader side
     bool pending(uint32_t& medium, uint32_t& lba) const {

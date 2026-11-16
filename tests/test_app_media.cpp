@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <string>
@@ -46,12 +47,13 @@ constexpr int kStep = 48;  // 1 ms blocks at 48 kHz: a CD sector asked is answer
 struct Served {
     std::map<uint32_t, const SavedMedium*> saved;
     std::map<uint32_t, CdFile*> files;
-    uint32_t missing = 0;
+    uint32_t missing = 0, asks = 0;
     uint8_t buf[ts::SectorPort::kBytes] = {};
     void serve(Engine& e) {
         ts::SectorPort* p = e.cdPort();
         uint32_t med = 0, lba = 0;
         if (!p || !p->pending(med, lba)) return;
+        ++asks;
         bool ok = false;
         if (const auto s = saved.find(med); s != saved.end()) {
             const auto b = s->second->blocks.find(lba);
@@ -90,7 +92,9 @@ struct Restored {
     std::unique_ptr<Engine> e;
     bool wasRestoring = false;
     std::vector<std::string> prompts;  // each distinct insert prompt seen, both rows
+    std::vector<std::string> screens;  // each display held 200 ms, with its time
     double endMs = 0;
+    int idleMs = 0, idleAt = 0;  // the longest time without a block read, a CD ask or a display change, from 5300 ms
 };
 
 // A fresh SCSI engine on `ram`, set up as the VST3's (A124), restoring from `s`; run until restoring ends and the
@@ -110,11 +114,27 @@ Restored restore(const std::vector<uint8_t>& ram, Engine::StandIns s, Served& cd
     CHECK(r.e->loadRam(ram, err));
     r.e->setRestore(std::move(s));
     r.e->prepare(48000, kStep);
+    std::string last, logged;
+    uint32_t reads = 0, asks = 0;
+    int changedAt = 0, activeAt = 0;
     for (int ms = 0; ms < maxMs; ms += 10) {
         run(*r.e, cds, 10);
         const ens::app::Snapshot snap = r.e->snapshot();
         r.wasRestoring = r.wasRestoring || snap.restoring;
         const std::string rows = rowText(snap.panel, 0) + "|" + rowText(snap.panel, 1);
+        if (rows != last || snap.diskReads != reads || cds.asks != asks) activeAt = ms;
+        if (rows != last) changedAt = ms;
+        last = rows;
+        reads = snap.diskReads;
+        asks = cds.asks;
+        if (ms - changedAt >= 200 && rows != logged) {
+            logged = rows;
+            r.screens.push_back(std::to_string(changedAt) + " ms |" + rows + "|");
+        }
+        if (ms >= 5300 && snap.restoring && ms - activeAt > r.idleMs) {
+            r.idleMs = ms - activeAt;
+            r.idleAt = ms;
+        }
         if (rows.rfind("INSERT DISK", 0) == 0 && rows.find("*SKIP*") != std::string::npos &&
             std::find(r.prompts.begin(), r.prompts.end(), rows) == r.prompts.end())
             r.prompts.push_back(rows);
@@ -123,14 +143,15 @@ Restored restore(const std::vector<uint8_t>& ram, Engine::StandIns s, Served& cd
             break;
         }
     }
+    for (const auto& p : r.screens) std::printf("  %s\n", p.c_str());
     for (const auto& p : r.prompts) std::printf("  prompt |%s|\n", p.c_str());
+    std::printf("  longest idle while restoring after 5300 ms: %d ms (at %d ms)\n", r.idleMs, r.idleAt);
     std::printf("  restore ended at %.0f ms, |%s|\n", r.endMs, rowText(r.e->machine().panel(), 0).c_str());
     return r;
 }
 
-// Sounds, BankSet S8 (BankSet held, Bank 8), then `bank` for S8-1 to S8-9, the sound selected (Soft5, its name on
-// that page), then C-E-G for 400 ms: Main L and R, the voices started from sample RAM and the peak.
-std::vector<float> playS8(Engine& e, Served& cds, ts::Button bank, int& voices, int& peak, const std::string& name) {
+// Sounds, BankSet S8 (BankSet held, Bank 8), then `bank` for S8-1 to S8-9.
+void openS8(Engine& e, Served& cds, ts::Button bank) {
     post(e, cds, ts::Button::Sounds);
     e.post({Event::Kind::Button, static_cast<uint8_t>(ts::Button::BankSet), true, 0});
     run(e, cds, 100);
@@ -139,6 +160,12 @@ std::vector<float> playS8(Engine& e, Served& cds, ts::Button bank, int& voices, 
     run(e, cds, 300);
     if (bank != ts::Button::Bank0) post(e, cds, bank);
     std::printf("  |%s|\n  |%s|\n", rowText(e.machine().panel(), 0).c_str(), rowText(e.machine().panel(), 1).c_str());
+}
+
+// openS8, the sound selected (Soft5, its name on that page), then C-E-G for 400 ms: Main L and R, the voices started
+// from sample RAM and the peak.
+std::vector<float> playS8(Engine& e, Served& cds, ts::Button bank, int& voices, int& peak, const std::string& name) {
+    openS8(e, cds, bank);
     CHECK(shows(e.machine().panel(), name.c_str()));
     post(e, cds, ts::Button::Soft5);
     SampleVoices v;
@@ -475,4 +502,74 @@ TEST(engine_restore_without_question_ends_at_boot) {
     CHECK(!snap.diskIn);
     auto back = e->takeStandIns();
     CHECK(back.size() == 1 && back[0] && back[0]->reads() == 0);
+}
+
+// Review: a stand-in CD missing a sector the auto-load reads (the last recorded one, sample data of BONGOS 1). The
+// test answers it as a failure, so the target ends that read MEDIUM ERROR (T28). The restore still ends in seconds,
+// on the play screen, with that sound skipped (it held the boot for 120 s before the error page was answered).
+TEST(engine_restore_missing_sector) {
+    ServedCd cd;
+    if (!openCd(kCdr13, cd)) return;
+    MediaRecord rec;
+    cd.onRead = [&](uint32_t lba, const uint8_t* s) { rec.captureCd(cd.file.sectors(), lba, s); };
+    auto m = bootScsi(&cd);
+    if (!m) return;
+    openScsiStatus(*m, &cd);
+    CHECK(loadFromCd(*m, cd, {"PERCUSSION", "DRUMS", "BONGOS 1"}, ts::Button::Bank0));
+    if (rec.media().size() != 1) return;
+    SavedMedium c = rec.media()[0];
+    const auto last = std::prev(c.blocks.end());
+    CHECK(std::any_of(last->second.begin(), last->second.end(), [](uint8_t b) { return b != 0; }));
+    std::printf("  sector %u erased\n", last->first);
+    c.blocks.erase(last);
+    const auto ram = m->ramImage();
+    m.reset();
+    Engine::StandIns s;
+    s.cdMedia.push_back(31);
+    s.cdSizes.push_back(c.size);
+    s.cdLabels.push_back(c.label);
+    Served cds;
+    cds.saved[31] = &c;
+    Restored r = restore(ram, std::move(s), cds, 150000);
+    if (!r.e) return;
+    CHECK(r.wasRestoring);
+    CHECK(cds.missing >= 1);
+    // What the OS did: DISK DRIVE NOT RESPONDING / PRESS ANY BUTTON TO CONTINUE... (the engine presses Up), then
+    // INSERT DISK WITH NAME UNKNOWN / INTO SCSI DEVICE 4 (no stand-in has that name: *SKIP*), then U0-0.
+    CHECK(std::any_of(r.screens.begin(), r.screens.end(),
+                      [](const std::string& x) { return x.find("DISK DRIVE NOT RESPONDING") != std::string::npos; }));
+    CHECK_EQ(r.prompts.size(), 1u);
+    CHECK(!r.prompts.empty() && r.prompts[0].find("NAME UNKNOWN") != std::string::npos);
+    CHECK(r.endMs > 0 && r.endMs < 30000);
+    CHECK(rowText(r.e->machine().panel(), 0).rfind("U0-0 ", 0) == 0);
+    CHECK_EQ(r.e->snapshot().cdMedium, 0u);
+    CHECK(r.e->snapshot().booted);
+    openS8(*r.e, cds, ts::Button::Bank0);
+    CHECK(shows(r.e->machine().panel(), "--NOT LOADED--"));  // BONGOS 1 skipped, the name kept
+}
+
+// Review: a prompt the OS shows again after *OK*: the stand-in is listed as ED-001 but its ID block says OTHER, so
+// the OS asks for ED-001 again after the engine's *OK*. The engine answers *SKIP* the second time and the boot ends.
+TEST(engine_restore_skips_prompt_shown_again) {
+    std::string name;
+    auto m = withFirstSound(kEd001, name);
+    if (!m) return;
+    MediaRecord rec;
+    rec.captureFloppy(*m->disk());
+    if (rec.media().size() != 1) return;
+    SavedMedium wrong = rec.media()[0];
+    std::memcpy(wrong.blocks[1].data() + 31, "  OTHER", 7);  // the label stays ED-001 in the stand-ins
+    const auto ram = m->ramImage();
+    m.reset();
+    Engine::StandIns s;
+    s.floppies.push_back(app::standInFloppy(wrong));
+    s.floppyLabels.push_back("ED-001");
+    Served cds;
+    Restored r = restore(ram, std::move(s), cds, 150000);
+    if (!r.e) return;
+    CHECK(r.wasRestoring);
+    CHECK_EQ(r.prompts.size(), 1u);  // asked for ED-001 (twice: *OK*, then *SKIP*)
+    CHECK(r.endMs > 0 && r.endMs < 30000);
+    CHECK(!r.e->snapshot().diskIn);
+    CHECK(rowText(r.e->machine().panel(), 0).rfind("U0-0 ", 0) == 0);
 }
