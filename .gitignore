@@ -1,5 +1,6 @@
 build*/
 dist/
+misc/
 testdata/
 .worktrees/
 .superpowers/
