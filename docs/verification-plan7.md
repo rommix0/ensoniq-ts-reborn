@@ -10,10 +10,13 @@ so the app checks get `TSR_DISK_DIR`).
 
 | Toolchain | `ens_tests` | `ens_rt_tests` | App checks |
 |---|---|---|---|
-| MinGW-w64 i686 (`build`) | 412 passed, 0 failed | 7 passed, 0 failed | n/a |
-| MSVC x64 (`build-msvc`, `build-app`) | 412 passed, 0 failed | 7 passed, 0 failed | `app_tests: all passed` |
-| Linux GCC x64 in WSL (`build-linux`, `build-linux-app`) | 412 passed, 0 failed | 7 passed, 0 failed | `app_tests: all passed` |
+| MinGW-w64 i686 (`build`) | 414 passed, 0 failed | 7 passed, 0 failed | n/a |
+| MSVC x64 (`build-msvc`, `build-app`) | 414 passed, 0 failed | 7 passed, 0 failed | `app_tests: all passed` |
+| Linux GCC x64 in WSL (`build-linux`, `build-linux-app`) | 414 passed, 0 failed | 7 passed, 0 failed | `app_tests: all passed` |
 
+- Counts after the final review's fix wave (the four findings below): 414 = 412 + `ts_cd_slow_reader` +
+  `media_merge_keeps_record_first`; the app checks gained `project_state_keeps_unrestored_media`. The
+  `TSR_RELEASE_VST3` run below was not repeated in the fix wave (the packaging did not change).
 - Real-time suite: 0 allocations on all three. `rt_engine_cd_load_does_not_allocate`: 0 allocations, 6 sectors
   served. `rt_engine_restore_does_not_allocate`: 0 allocations over 158036 frames.
 - No `skip:` line was printed by `ens_tests` on any toolchain: the image tests (floppy and CD) ran everywhere.
@@ -38,6 +41,22 @@ These read `ENS_DISK_DIR` and skip without it: `cd_file_reads_user_cds`, `ts_cd_
 the Load page on a CD, a CD sound loaded and played), the engine and media tests that restore sounds from a
 floppy and a CD, and the app checks' project round trip (floppy ED-001 and CD CDR-013; the state holds 314 and
 316 blocks, and after a restore and a new save only the blocks the auto-load read). The images were only read.
+
+## Final review fixes
+
+- The restore's end is read under the state mutex in `tick`, so a host's `setStateInformation` on another
+  thread cannot have a new restore finished early (A129). No deterministic test: the window is between two
+  statements of `tick`; all app checks pass.
+- The CD reader's latency (T27, T29, A128): the OS waits for each data byte in loops of 2^24 polls of about 60
+  cycles, about 66 s of emulated time (c15c04, c15ada, c159c4). Measured: a sector never answered gives DISK
+  DRIVE NOT RESPONDING 66.1 s after its ask. `ts_cd_slow_reader`: every sector 100 ms late, CDR-13 mounts and
+  BONGOS 1 (147 sectors) loads cleanly in 21.0 s. So the latency only sets the load speed; `processBlock` never
+  waits for the reader, and no yield burst was added.
+- A restore that does not end clean (a *SKIP*, an error page, the idle or cap end) keeps the restored media in
+  the record (`Snapshot::restoreClean`, `MediaRecord::merge`; A129, A131). `project_state_keeps_unrestored_media`:
+  one CDR-013 sector removed from the round trip's state; after the restore the next state holds CDR-013's 142
+  sectors (74 before the fix) and ED-001's 314. The clean-restore trim check still trims (316 to 314).
+- `cd_drive_missing_file` checks `STATUS=TEST-CD` before the image is deleted and `STATUS=INVALID` after Up.
 
 ## User to run
 
@@ -67,10 +86,8 @@ Deferred minors from the per-task reviews, grouped.
 - Restore: the end rule is untested for its 2 s and 120 s limits; an error page ignoring Up gets Up every ~2.1 s
   until the cap; `setRestore` silently no-ops on bad preconditions; `loadRam` after `setRestore` resets the
   auto-load; no CD SKIP test; `captureCd` hard-codes 2048; first capture wins after the user writes the disk.
-- App: the A128 read-rate figure is unmeasured (reader `wait(1)` adds ~8-16 ms a sector on Windows; a brief yield
-  burst would fix it); `cdDriveMissingFile` lacks the STATUS checks before and after; `~CdDrive` `stopThread(2000)`
-  may kill a hung read; `tick` reads the snapshot outside `stateMu_` (a `setState` right after a restore ends
-  can finish the new restore); capture lags up to 2 ticks; the audio thread copies up to 30 times a second while
+- App: the A128 read-rate figure is unmeasured in the app (reader `wait(1)` adds ~8-16 ms a sector on Windows; a
+  speed matter only, T27); `~CdDrive` `stopThread(2000)` may kill a hung read; capture lags up to 2 ticks; the audio thread copies up to 30 times a second while
   the OS reads; the state parser is lenient ("12abc", overlapping runs, duplicate media, NUL in a label); no
   restart-during-restore check; the CD trim check proves whole-medium trimming only.
 - Style: a ~140-column comment in the Task 4 test, `Audio boot;` shadows `boot()`, `tsemu bench --cd` ignores
