@@ -86,7 +86,25 @@ same as the build's VST3 with the ROM folder set, and the settings still name no
 The "User to run" lists of `docs/verification-plan4.md` and `docs/verification-plan5.md` were done by the user
 (2026-11-15) and are marked so.
 
+## Final review
+
+A fresh whole-branch review found two Important issues, both fixed:
+- With the VST3 on its packaged ROMs, the settings page said "No folder chosen" and marked all six files missing.
+  The processor now keeps the folder in use (`romFolder()`, `romFolderStored()`); the page shows it, marked
+  "(inside the VST3 package)". The memory-file guard checks the same folder, so a memory file inside the
+  package's ROM folder is refused (it was accepted before: `rom_folder_in_use` failed 3 checks, now passes).
+- "Needs nothing installed" was false on Linux: the build uses the system's glibc 2.38 or later and its desktop
+  libraries. README, `docs/tsapp.md` and A126 now say so.
+
+The release folders were built again after the fixes; the release VST3 check passes on both systems.
+
 ## Left open
+
+- Deferred from the review: a relative `-RomFolder` / `--rom-folder` resolves against the repository, not the
+  caller's folder; an existing `build-dist` cache skips configure (a later `-JuceSource` is ignored);
+  `dist.sh` with no VERSION stops before its message; a Linux release copied through Windows tools may lose the
+  exec bit (`chmod +x "TS Reborn"`); a stored ROM folder on a drive that is only unplugged is replaced by a
+  `roms` folder beside the program.
 
 - The release has no installer, zip or code signing (design non-goals). Windows may warn about an unsigned
   program the first time it runs.

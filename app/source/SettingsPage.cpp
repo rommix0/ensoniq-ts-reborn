@@ -99,8 +99,11 @@ SettingsPage::SettingsPage(TsProcessor& p)
 SettingsPage::~SettingsPage() { setLookAndFeel(nullptr); }
 
 void SettingsPage::refresh() {
-    const auto dir = proc_.settings().romFolder();
-    romField_.setText(dir == juce::File() ? juce::String("No folder chosen") : dir.getFullPathName(),
+    // DECISION A125: the folder in use; the VST3 package's own ROMs are shown as such, though not stored.
+    const auto dir = proc_.romFolder();
+    romField_.setText(dir == juce::File()            ? juce::String("No folder chosen")
+                      : proc_.romFolderStored() ? dir.getFullPathName()
+                                                : dir.getFullPathName() + " (inside the VST3 package)",
                       juce::dontSendNotification);
     roms_ = checkRomFolder(dir, nullptr);
     memField_.setText(proc_.settings().memoryFile().getFullPathName(), juce::dontSendNotification);

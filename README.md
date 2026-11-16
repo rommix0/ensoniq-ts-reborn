@@ -20,8 +20,10 @@ The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11
 
 `tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0`
 (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README, the license, the app guide, and the
-six ROMs, beside the program and inside the VST3 package. It needs nothing installed: run the program, or
-copy `TS Reborn.vst3` to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`), and it finds its ROMs.
+six ROMs, beside the program and inside the VST3 package. On Windows it needs nothing installed: run the
+program, or copy `TS Reborn.vst3` to `C:\Program Files\Common Files\VST3`, and it finds its ROMs. The Linux
+folder (built on Ubuntu 24.04) needs glibc 2.38 or later (Ubuntu 24.04, Debian 13, Fedora 39 and newer) and
+the ALSA, fontconfig and freetype libraries a desktop system has; copy `TS Reborn.vst3` to `~/.vst3`.
 A release folder holds Ensoniq's ROMs (below).
 
 ## The ROMs

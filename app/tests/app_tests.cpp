@@ -759,6 +759,28 @@ void romsBesideApp(const juce::File& dir) {
     beside.deleteRecursively();
 }
 
+// rom_folder_in_use (A125): a folder used but not stored (a VST3 package's own ROMs) is still the folder the
+// settings page shows and the memory-file guard checks: a memory file inside it is refused.
+void romFolderInUse(const juce::File& dir) {
+    setSettingsDir(dir);
+    const auto packaged = dir.getChildFile("Contents/Resources/roms");
+    dummyRoms(packaged);
+    TsProcessor p;
+    juce::String err;
+    p.setRomFolder(packaged, err, false);
+    CHECK(p.romFolder() == packaged && !p.romFolderStored() && p.settings().romFolder() == juce::File());
+    CHECK(!p.setMemoryFile(packaged.getChildFile("os/ts10_310l.bin"), err) && err.isNotEmpty());
+    CHECK(p.settings().memoryFile() != packaged.getChildFile("os/ts10_310l.bin"));
+    const auto chosen = dir.getChildFile("chosen");
+    dummyRoms(chosen);
+    p.setRomFolder(chosen, err);
+    CHECK(p.romFolder() == chosen && p.romFolderStored() && p.settings().romFolder() == chosen);
+    // The stored folder taken again without storing (the start-up path for a bad stored folder) is still the
+    // stored one: the page must not call it the package's.
+    p.setRomFolder(chosen, err, false);
+    CHECK(p.romFolderStored());
+}
+
 // rom_folder_order (A125): the stored folder if it holds the six ROMs, else "roms" beside the program
 // (stored), else Contents/Resources/roms when the program sits in a VST3 package (not stored), else the
 // stored folder as it is (its problem is shown), not stored.
@@ -1291,6 +1313,7 @@ int main() {
     zeroAndBypassedBlocks(dir.getChildFile("zero"));
     romsBesideApp(dir.getChildFile("beside"));
     romFolderOrder(dir.getChildFile("order"));
+    romFolderInUse(dir.getChildFile("inuse"));
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));

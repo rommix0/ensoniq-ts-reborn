@@ -97,6 +97,8 @@ bool TsProcessor::setRomFolder(const juce::File& dir, juce::String& err, bool st
     err = memoryInRomFolder(settings_.memoryFile(), dir);
     if (err.isNotEmpty()) return false;
     if (store) settings_.setRomFolder(dir);  // DECISION A125: a VST3 package's own ROMs are not stored
+    romFolder_ = dir;
+    romStored_ = settings_.romFolder() == dir;
     ens::ts::RomSet roms;
     const auto problem = romProblem(checkRomFolder(dir, &roms));
     if (problem.isNotEmpty()) {
@@ -109,7 +111,7 @@ bool TsProcessor::setRomFolder(const juce::File& dir, juce::String& err, bool st
 }
 
 bool TsProcessor::setMemoryFile(const juce::File& file, juce::String& err) {
-    err = memoryTargetProblem(file, settings_.romFolder());
+    err = memoryTargetProblem(file, romFolder_);  // DECISION A125: the folder in use, stored or not
     if (err.isNotEmpty()) return false;
     if (file.existsAsFile()) {
         loadMemoryFile(file, err);
