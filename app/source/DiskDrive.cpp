@@ -66,6 +66,9 @@ bool DiskDrive::insert(std::unique_ptr<Disk> d) {
 
 juce::String DiskDrive::notNow() const {
     if (proc_.engine() == nullptr) return "The machine is not running: choose the ROM folder first.";
+    // DECISION A128: while the restore runs (A131) the slots wait for it; saying so is kinder than "busy".
+    if (proc_.prepared() && proc_.engine()->snapshot().restoring)
+        return "The machine is restoring the project's sounds. Try again when it has done.";
     return proc_.prepared() ? "The drive is busy. Try again."
                             : "The machine is not running (no audio device), so the disk cannot be changed.";
 }
@@ -276,6 +279,15 @@ void DiskDrive::showMenu(juce::Component* target) {
     });
     m.addSeparator();
     m.addItem("Write Protected", true, protect_, [this] { setWriteProtected(!protect_); });
+    // DECISION A128: the CD drive has no place on the panel (the TS-10 has only the rear SCSI connector), so its
+    // menu is a submenu here: the CD's name (greyed), Insert and Eject.
+    auto& cd = proc_.cdDrive();
+    juce::PopupMenu cdMenu;
+    cdMenu.addItem(cd.name().isEmpty() ? juce::String("No CD") : cd.name(), false, false, nullptr);
+    cdMenu.addItem("Insert CD Image...", [&cd] { cd.chooseInsert(); });
+    cdMenu.addItem("Eject CD", cd.name().isNotEmpty(), false, [&cd] { cd.ejectAsked(); });
+    m.addSeparator();
+    m.addSubMenu("CD-ROM (SCSI ID 4)", cdMenu);
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(target));
 }
 

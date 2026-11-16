@@ -108,6 +108,11 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
   - **Write Protected** (off at start) applies to the disk in the drive and to each disk put in: the OS then cannot write, as with the tab on a real disk.
   - Open, New, Eject, a dropped file and closing the Standalone ask first (Save, Don't Save, Cancel) when the disk has unsaved writes. The VST3 cannot ask when a project closes or the plugin is removed: unsaved writes are lost, and "(modified)" is the warning.
   - The drive starts empty: the disk is not remembered across a restart of the app, and the VST3's project state does not carry it. A ROM-folder change or Erase keeps the disk in the drive.
+- **The CD-ROM drive** (A127, A128). The emulated TS has the SP-4 SCSI board with a CD-ROM drive at SCSI ID 4 (the TS's own ID is 3). The panel has no CD drive, as the real TS-10 has only the rear connector: the disk drive's menu ends with the submenu **CD-ROM (SCSI ID 4)**, showing the CD's file name (greyed), **Insert CD Image...** and **Eject CD**. An `.iso` or `.cue` dropped on the panel goes in the CD drive.
+  - Images: `.iso` (2048-byte sectors) and `.cue` with one `TRACK 01 MODE1/2352` from `INDEX 01 00:00:00` and its `.bin`. When the `.cue` names a path that does not exist (rippers write their own, such as `E:\...\DLM-CDR13.BIN`), the file of that name beside the `.cue` is used, in any case. Other layouts are refused with a message naming what is supported. The image is only read.
+  - Sectors are read from the file as the OS asks for them, on a thread of the app's, so the image stays where it is and is never loaded whole. If the file goes away while in the drive (moved, deleted, a USB drive pulled out) the next read fails and the OS shows "DISK DRIVE NOT RESPONDING"; the TS keeps running.
+  - To use it: Storage, then SCSI (Soft4), DEVICE-ID=4: STATUS shows the volume name once mounted (about 1.5 s after the page opens), and *LOAD* lists its directories (Musician's Manual Section 13, "SCSI Option").
+  - Insert and eject need the audio running, as the floppy's. The CD stays in across a ROM-folder change or Erase, starts empty when the app starts, and is not in the VST3's project state.
 - **Size.** The window opens at 1546 x 552 and resizes from 1030 x 368 up, keeping the panel's shape (A112).
 
 ## Firmware behaviours to know
@@ -128,7 +133,7 @@ Environment variables read when the app starts. Neither is needed for normal use
 
 ## Open items
 
-- **SCSI** is absent. Disk images in `.hfe` and `.efe` formats are not read (`docs/verification-plan5.md`).
+- **SCSI** has a CD-ROM drive at ID 4 only; no SCSI hard disk. Disk images in `.hfe` and `.efe` formats are not read (`docs/verification-plan5.md`).
 - **The TS-12** is out of scope for this project; this is the TS-10 only.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.

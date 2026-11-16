@@ -179,7 +179,8 @@ bool TsProcessor::restart(Ram ram) {
         img = loadMemoryFile(settings_.memoryFile(), memoryError_);  // wrong size: reported, cold boot
     }
     std::string e;
-    auto fresh = ens::app::Engine::create(roms_, e);
+    // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4.
+    auto fresh = ens::app::Engine::create(roms_, e, true);
     // DECISION A124: the VST3 answers the power-on auto-load question; the Standalone asks, as the TS does.
     if (fresh) fresh->setAnswerAutoLoad(mode_ == MemoryMode::Project);
     if (fresh && !img.empty() && !fresh->loadRam(img, e)) fresh.reset();
@@ -190,7 +191,11 @@ bool TsProcessor::restart(Ram ram) {
         // DECISION A119: the disk in the drive goes into the new machine (the OS sees a disk change).
         if (engine_)
             if (auto disk = engine_->releaseDisk()) fresh->insertDisk(std::move(disk));
+        // DECISION A128: so does the CD, under the same medium id (the same image).
+        if (engine_)
+            if (const auto [medium, sectors] = engine_->releaseCd(); sectors != 0) fresh->insertCd(medium, sectors);
         engine_.swap(fresh);  // fresh now holds the old engine, freed below after the resume
+        cd_.setEngine(engine_.get());  // before the old engine (and its port) is freed
         startImage_ = std::move(img);
         startSelect_ = std::move(sel);
         haveStart_ = true;
@@ -212,6 +217,7 @@ bool TsProcessor::restart(Ram ram) {
 void TsProcessor::tick() {
     if (!engine_) return;
     drive_.poll();  // A119: a removed disk freed, a save's copy written
+    cd_.poll();     // A128: the sectors served to the record
     // DECISION A111 (as KS-32 A18): follow a program change tracked from the panel or MIDI (programSeq
     // moved), never the engine's own sends. followed_ is stored first, then `sound` is written, so a
     // processBlock that sees the new `sound` also finds the marker (and adopts the value instead of

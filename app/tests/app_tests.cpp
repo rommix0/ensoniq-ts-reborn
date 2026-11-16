@@ -2,7 +2,8 @@
 // size (never ROM content), the memory file's load and save, the processor's memory-file guards and its
 // parameters (A111). On the real ROMs: the sound follow (A111), the plugin state and memory per format
 // (A117), the two output buses (A109), the panel editor clicked and painted offscreen (A113-A115), the disk
-// drive on temp files (A119), and the built TS Reborn.vst3 loaded, played and its editor opened through JUCE's
+// drive on temp files (A119), the CD drive (A127, A128; CDR-13 under TSR_DISK_DIR, else synthetic images), and the
+// built TS Reborn.vst3 loaded, played and its editor opened through JUCE's
 // own VST3 host, as a DAW would.
 // No check puts a window on the desktop. Every check sets TSR_SETTINGS_DIR to a temp folder.
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -17,6 +18,7 @@
 #include <thread>
 
 #include "../source/AppSettings.h"
+#include "../source/CdDrive.h"
 #include "../source/DiskDrive.h"
 #include "../source/MemoryFile.h"
 #include "../source/PanelEditor.h"
@@ -1223,6 +1225,215 @@ void diskDrive(const juce::File& dir) {
     ed.reset();
 }
 
+// The CD drive (A127, A128). CDR-13's .cue under TSR_DISK_DIR (the user's images, read only); an empty File and
+// a skip line without it.
+juce::File cdr13() {
+    const juce::String dir = TSR_DISK_DIR;
+    if (dir.isNotEmpty()) {
+        const auto f = juce::File(dir).getChildFile(
+            "CD-ROMs/Ensoniq.CDR-13.InVision.Percussion.ENSONiQ-DELiRiUM/dlm-cdr13.cue");
+        if (f.existsAsFile()) return f;
+    }
+    std::printf("  skip: disk images not found\n");
+    return {};
+}
+
+// As run(), but after each block it gives the reader thread up to a second to answer the sector the block asked
+// for, then ticks: the machine sees the CD at about the pace it would in real time, whatever the speed here.
+void runCd(TsProcessor& p, int ms) {
+    juce::AudioBuffer<float> buf(4, 480);
+    juce::MidiBuffer none;
+    for (int i = 0; i < ms / 10; ++i) {
+        buf.clear();
+        p.processBlock(buf, none);
+        uint32_t medium = 0, lba = 0;
+        auto* port = p.engine()->cdPort();
+        for (int t = 0; port != nullptr && t < 1000 && port->pending(medium, lba); ++t) juce::Thread::sleep(1);
+        p.tick();
+    }
+}
+
+void pressCd(TsProcessor& p, ens::ts::Button b) {  // held 100 ms, then 300 ms for the display
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), true, 0});
+    runCd(p, 100);
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), false, 0});
+    runCd(p, 300);
+}
+
+bool shows(TsProcessor& p, const char* text) {
+    const auto& panel = p.engine()->snapshot().panel;
+    return ens::ts::rowText(panel, 0).find(text) != std::string::npos ||
+           ens::ts::rowText(panel, 1).find(text) != std::string::npos;
+}
+
+void printRows(TsProcessor& p) {
+    const auto& panel = p.engine()->snapshot().panel;
+    std::printf("  |%s|\n  |%s|\n", ens::ts::rowText(panel, 0).c_str(), ens::ts::rowText(panel, 1).c_str());
+}
+
+// The SCSI STATUS page at DEVICE-ID 4, as ts_cd_status_shows_volume opens it (tests/ts_disks.h): Storage, Soft4,
+// Up four times, then 1.5 s for the OS's poll to mount the volume.
+void openScsiStatus(TsProcessor& p) {
+    pressCd(p, ens::ts::Button::Storage);
+    pressCd(p, ens::ts::Button::Soft4);
+    for (int i = 0; i < 4; ++i) pressCd(p, ens::ts::Button::Up);
+    runCd(p, 1500);
+}
+
+// cd_drive (A127, A128): insert CDR-13's .cue, the refusals, a restart that keeps the CD, eject, and new medium ids.
+void cdDrive(const juce::File& dir) {
+    const auto cue = cdr13();
+    if (cue == juce::File() || !realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, 100);
+    auto& cd = p.cdDrive();
+    CHECK(cd.name().isEmpty() && p.engine()->snapshot().cdMedium == 0);
+
+    juce::String err;
+    CHECK(cd.insert(cue, err));
+    runCd(p, 10);
+    const uint32_t medium = p.engine()->snapshot().cdMedium;
+    CHECK(cd.name() == "dlm-cdr13.cue" && medium != 0);
+
+    // An .iso that is not whole 2048-byte sectors, and a .cue of another layout: refused, the CD in stays.
+    const auto iso = dir.getChildFile("short.iso");
+    write(iso, 1000);
+    CHECK(!cd.insert(iso, err) && err.contains("2048"));
+    const auto mode2 = dir.getChildFile("mode2.cue");
+    CHECK(mode2.replaceWithText("FILE \"x.bin\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n"));
+    CHECK(!cd.insert(mode2, err) && err.contains("MODE1/2352"));
+    CHECK(!cd.insert(dir.getChildFile("x.wav"), err) && err.isNotEmpty());
+    runCd(p, 10);
+    CHECK(cd.name() == "dlm-cdr13.cue" && p.engine()->snapshot().cdMedium == medium);
+
+    // A restart (the same ROM folder) keeps the CD in, under the same medium id.
+    const auto* engine = p.engine();
+    CHECK(p.setRomFolder(juce::File(TSR_ROM_DIR), err) && p.engine() != engine);
+    runCd(p, 10);
+    CHECK(cd.name() == "dlm-cdr13.cue" && p.engine()->snapshot().cdMedium == medium);
+
+    CHECK(cd.eject());
+    runCd(p, 10);
+    CHECK(cd.name().isEmpty() && p.engine()->snapshot().cdMedium == 0);
+
+    // The same file again is a new medium: ids are never reused.
+    CHECK(cd.insert(cue, err));
+    runCd(p, 10);
+    CHECK(p.engine()->snapshot().cdMedium > medium);
+
+    // No audio running: refused at once, saying so.
+    TsProcessor q;
+    if (q.engine()) CHECK(!q.cdDrive().insert(cue, err) && err.contains("no audio"));
+}
+
+// cd_drive_loads: CDR-13 in the drive from power-on; the SCSI STATUS page shows its volume, read through the reader
+// thread. In Project mode the sectors served are in the record (A131).
+void cdDriveLoads(const juce::File& dir) {
+    const auto cue = cdr13();
+    if (cue == juce::File() || !realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    juce::String err;
+    CHECK(p.cdDrive().insert(cue, err));
+    runCd(p, kBoot);
+    openScsiStatus(p);
+    printRows(p);
+    CHECK(shows(p, "DEVICE-ID=4") && shows(p, "STATUS=CDR-013"));
+    bool recorded = false;
+    for (const auto& m : p.record().media())
+        recorded |= m.kind == ens::app::SavedMedium::Kind::Cd && m.label == "CDR-013" && m.blocks.count(0) != 0;
+    CHECK(recorded);
+    if (!recorded) return;
+
+    // serveFrom (a stand-in, Task 9): asks for its medium id are answered from the recorded sectors only. Asked here
+    // between blocks, as the CD target would (the test thread is the audio thread), with no read in progress.
+    const auto& saved = p.record().media().back();
+    const uint32_t id = p.cdDrive().newMedium();
+    p.cdDrive().serveFrom(&saved, id);
+    auto* port = p.engine()->cdPort();
+    const auto answer = [&](uint32_t lba, bool& ok) {
+        port->ask(id, lba);
+        for (int t = 0; t < 1000; ++t) {
+            if (port->answered(id, lba, ok)) return true;
+            juce::Thread::sleep(1);
+        }
+        return false;
+    };
+    bool ok = false;
+    CHECK(answer(0, ok) && ok && std::memcmp(port->data(), saved.blocks.at(0).data(), 2048) == 0);
+    CHECK(saved.blocks.count(5) == 0 && answer(5, ok) && !ok);  // a sector not recorded fails
+    p.cdDrive().serveFrom(nullptr, id);
+    CHECK(answer(0, ok) && !ok);  // no longer served
+}
+
+// cd_drive_missing_file (Review Focus 1): a small synthetic .iso, mounted, then deleted before *LOAD* reads it: the
+// reader answers failure, the machine keeps running and the display shows the OS's error, not the Load page. In
+// File mode (the Standalone) nothing is recorded (A121).
+void cdDriveMissingFile(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    // 64 zero sectors with an Ensoniq Device ID block (512-byte block 1, in sector 0): 0xFF at 30, the label at
+    // 31-37, "ID" at 38-39 (A131).
+    std::vector<char> img(64 * 2048);
+    char* id = img.data() + 512;
+    id[30] = static_cast<char>(0xFF);
+    std::memcpy(id + 31, "TEST-CD", 7);
+    id[38] = 'I';
+    id[39] = 'D';
+    const auto iso = dir.getChildFile("test.iso");
+    CHECK(dir.createDirectory() && iso.replaceWithData(img.data(), img.size()));
+    TsProcessor p(MemoryMode::File);
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    juce::String err;
+    CHECK(p.cdDrive().insert(iso, err));
+    runCd(p, kBoot);
+    openScsiStatus(p);
+    printRows(p);
+    CHECK(shows(p, "DEVICE-ID=4"));
+    CHECK(iso.deleteFile());
+    const auto frames = p.engine()->snapshot().frames;
+    pressCd(p, ens::ts::Button::Soft4);  // *LOAD*
+    runCd(p, 3000);
+    printRows(p);
+    CHECK(p.engine()->snapshot().frames > frames + 90000);  // 3.4 s of 29 762 frames a second, nearly all
+    CHECK(!shows(p, "TYPE=") && !shows(p, "LOAD FILE="));
+    // As observed: "DISK DRIVE NOT RESPONDING / PRESS ANY BUTTON TO CONTINUE..."; a button takes the OS on.
+    CHECK(shows(p, "NOT RESPONDING"));
+    pressCd(p, ens::ts::Button::Up);
+    printRows(p);
+    CHECK(!shows(p, "NOT RESPONDING"));
+    CHECK(p.record().media().empty());
+}
+
+// drop_goes_to_cd: a .cue dropped on the panel goes in the CD drive (here a synthetic one whose FILE names another
+// folder in capitals: found beside the .cue without case, A127), an .img in the floppy drive.
+void dropGoesToCd(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, 10);
+    const auto cue = dir.getChildFile("data.cue");
+    CHECK(cue.replaceWithText("FILE \"E:\\RIPS\\DATA.BIN\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"));
+    write(dir.getChildFile("data.bin"), 4 * 2352);
+    const auto img = dir.getChildFile("d.img");
+    write(img, 819200);
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    auto* drop = dynamic_cast<juce::FileDragAndDropTarget*>(ed.get());
+    CHECK(drop != nullptr);
+    if (drop == nullptr) return;
+    drop->filesDropped(juce::StringArray(cue.getFullPathName()), 0, 0);
+    run(p, 10);
+    CHECK(p.cdDrive().name() == "data.cue" && p.engine()->snapshot().cdMedium != 0 && !p.engine()->snapshot().diskIn);
+    drop->filesDropped(juce::StringArray(img.getFullPathName()), 0, 0);
+    run(p, 10);
+    CHECK(p.drive().slotText() == "d.img" && p.engine()->snapshot().diskIn && p.cdDrive().name() == "data.cue");
+    ed.reset();
+}
+
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
 // naming the ROM folder, so neither the user's settings nor their memory file is touched. Aux is off,
 // as the Standalone plays it (A109). With `ownRoms` (the release VST3, A125, A126) the settings folder names
@@ -1317,6 +1528,10 @@ int main() {
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
+    cdDrive(dir.getChildFile("cd"));
+    cdDriveLoads(dir.getChildFile("cd-loads"));
+    cdDriveMissingFile(dir.getChildFile("cd-missing"));
+    dropGoesToCd(dir.getChildFile("drop"));
     vst3(dir.getChildFile("vst3"), juce::File(TSR_VST3_PATH), false);
     // TSR_RELEASE_VST3=<a release folder's TS Reborn.vst3>: that package, on its own ROMs (A125, A126).
     const auto release = juce::SystemStats::getEnvironmentVariable("TSR_RELEASE_VST3", {});

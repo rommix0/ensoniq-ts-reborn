@@ -8,8 +8,10 @@
 #include <vector>
 
 #include "AppSettings.h"
+#include "CdDrive.h"
 #include "DiskDrive.h"
 #include "app/engine.h"
+#include "app/media_record.h"
 
 // DECISION A117: File, the Standalone: the memory file is the machine's memory, saved on close and every
 // 60 s (A116). Project, every plugin format: the instance starts from the shared file, then its memory
@@ -41,6 +43,10 @@ public:
     const AppSettings& settings() const { return settings_; }
     // The floppy drive's file side (A119), message thread. The disk is not part of the state (A119).
     DiskDrive& drive() { return drive_; }
+    // The CD-ROM drive at SCSI ID 4 (A128), message thread. The CD is not part of the state either.
+    CdDrive& cdDrive() { return cd_; }
+    // DECISION A131: what the OS read from each medium, Project mode only (A121); message thread.
+    ens::app::MediaRecord& record() { return record_; }
     // Counts the engines made by restart, so the drive knows its counts belong to a replaced one (A119).
     uint32_t engineGeneration() const { return engineGen_.load(); }
 
@@ -135,6 +141,8 @@ private:
     std::atomic<float>* sound_ = nullptr;
     std::atomic<uint32_t> engineGen_{0};
     DiskDrive drive_{*this};
+    ens::app::MediaRecord record_;
+    CdDrive cd_{*this};  // after engine_ and record_: its reader stops before either goes
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TsProcessor)
 };

@@ -26,7 +26,7 @@ juce_add_binary_data(TSReborn_Art HEADER_NAME TsArt.h NAMESPACE TsArt
   SOURCES resources/ts10_logo.svg resources/ensoniq_logo.svg)
 
 set(TSR_SOURCES source/Processor.cpp source/PanelEditor.cpp source/AppSettings.cpp source/RomFolder.cpp
-  source/MemoryFile.cpp source/SettingsPage.cpp source/DiskDrive.cpp)
+  source/MemoryFile.cpp source/SettingsPage.cpp source/DiskDrive.cpp source/CdDrive.cpp)
 
 # StandaloneApp.cpp is the Standalone's application (A120): the wrapper takes it instead of JUCE's own.
 target_sources(TSReborn PRIVATE ${TSR_SOURCES} source/StandaloneApp.cpp)
@@ -44,7 +44,7 @@ juce_add_console_app(TSReborn_AppTests PRODUCT_NAME "TSReborn_AppTests" VERSION 
 target_sources(TSReborn_AppTests PRIVATE tests/app_tests.cpp ${TSR_SOURCES})
 target_compile_definitions(TSReborn_AppTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_PLUGINHOST_VST3=1
   JucePlugin_Name="TS Reborn" JucePlugin_Build_Standalone=0
-  TSR_ROM_DIR="${ENS_ROM_DIR}"
+  TSR_ROM_DIR="${ENS_ROM_DIR}" TSR_DISK_DIR="${ENS_DISK_DIR}"
   TSR_VST3_PATH="$<GENEX_EVAL:$<TARGET_PROPERTY:TSReborn_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
 add_dependencies(TSReborn_AppTests TSReborn_VST3)
 target_link_libraries(TSReborn_AppTests
