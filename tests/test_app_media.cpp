@@ -270,6 +270,34 @@ TEST(media_capture_cd_by_volume) {
     CHECK(app::standInFloppy(ma) == nullptr);
 }
 
+// DECISION A129: after a restore that did not end clean, the restored media go back under what the auto-load read:
+// a block the record holds keeps its bytes, the others are added, and a medium the auto-load never read is appended.
+TEST(media_merge_keeps_record_first) {
+    MediaRecord rec;
+    uint8_t s0[2048] = {}, s5[2048] = {};
+    writeId(s0 + 512, "VOL-A  ");
+    s5[0] = 1;
+    rec.captureCd(100, 0, s0);
+    rec.captureCd(100, 5, s5);
+    SavedMedium a{SavedMedium::Kind::Cd, "VOL-A", 100, {}};
+    a.blocks[5] = std::vector<uint8_t>(2048, 9);  // the record's byte wins
+    a.blocks[7] = std::vector<uint8_t>(2048, 7);  // not read at the restore: added
+    SavedMedium f{SavedMedium::Kind::FloppyDD, "ED-001", 1600, {}};
+    f.blocks[3] = std::vector<uint8_t>(512, 3);
+    rec.merge({a, f});
+    CHECK_EQ(rec.media().size(), 2u);
+    if (rec.media().size() != 2) return;
+    const SavedMedium& c = rec.media()[0];
+    CHECK_EQ(c.blocks.size(), 3u);  // 0, 5, 7
+    CHECK_EQ(c.blocks.at(5)[0], 1);
+    CHECK_EQ(c.blocks.at(7)[0], 7);
+    CHECK_EQ(rec.media()[1].label, std::string("ED-001"));
+    CHECK_EQ(rec.media()[1].blocks.size(), 1u);
+    uint8_t s6[2048] = {6};
+    rec.captureCd(100, 6, s6);  // the current CD is still VOL-A
+    CHECK_EQ(rec.media()[0].blocks.size(), 4u);
+}
+
 // The spike as a test: ED-001's FLUTE 1 loaded into S8-0 and the blocks the OS read recorded; a fresh engine on that
 // RAM with only the recorded floppy as a stand-in answers *YES*, the OS loads FLUTE 1 from it without a prompt, the
 // restore ends with the drive empty, and C-E-G renders the same samples as a restore from the full ED-001 disk.
@@ -297,6 +325,7 @@ TEST(engine_restore_floppy) {
         CHECK(r.wasRestoring);
         CHECK(r.prompts.empty());
         CHECK(!r.e->snapshot().restoring);
+        CHECK(r.e->snapshot().restoreClean);
         CHECK(!r.e->snapshot().diskIn);
         auto back = r.e->takeStandIns();
         CHECK_EQ(back.size(), 1u);
@@ -349,6 +378,7 @@ TEST(engine_restore_cd) {
         CHECK(r.wasRestoring);
         CHECK(r.prompts.empty());
         CHECK_EQ(cds.missing, 0u);
+        CHECK(r.e->snapshot().restoreClean);
         CHECK_EQ(r.e->snapshot().cdMedium, 0u);  // ejected at the end
         CHECK(r.e->takeStandIns().empty());
         int voices = 0, peak = 0;
@@ -402,6 +432,7 @@ TEST(engine_restore_two_cds) {
     CHECK_EQ(r.prompts.size(), 1u);
     CHECK(!r.prompts.empty() && r.prompts[0].find("CDR-015") != std::string::npos);
     CHECK_EQ(cds.missing, 0u);
+    CHECK(r.e->snapshot().restoreClean);  // a prompt answered *OK* is clean
     int voices = 0, peak = 0;
     playS8(*r.e, cds, ts::Button::Bank0, voices, peak, "BONGOS 1");
     CHECK(voices >= 3);
@@ -437,6 +468,7 @@ TEST(engine_restore_skips_unknown_disk) {
     CHECK(!r.prompts.empty() && r.prompts[0].find("ED-001") != std::string::npos);
     CHECK(r.endMs > 0);
     CHECK(!r.e->snapshot().restoring);
+    CHECK(!r.e->snapshot().restoreClean);  // *SKIP*
     CHECK(r.e->snapshot().booted);
     CHECK(rowText(r.e->machine().panel(), 0).rfind("U0-0 ", 0) == 0);
 }
@@ -465,6 +497,7 @@ TEST(engine_restore_without_question_ends_at_boot) {
     const ens::app::Snapshot snap = e->snapshot();
     std::printf("  |%s|\n", rowText(snap.panel, 0).c_str());
     CHECK(!snap.restoring);
+    CHECK(snap.restoreClean);
     CHECK(snap.booted);
     CHECK(!snap.diskIn);
     auto back = e->takeStandIns();
@@ -511,6 +544,7 @@ TEST(engine_restore_missing_sector) {
     CHECK(rowText(r.e->machine().panel(), 0).rfind("U0-0 ", 0) == 0);
     CHECK_EQ(r.e->snapshot().cdMedium, 0u);
     CHECK(r.e->snapshot().booted);
+    CHECK(!r.e->snapshot().restoreClean);  // the error page answered Up, then *SKIP*
     openS8(*r.e, cds, ts::Button::Bank0);
     CHECK(shows(r.e->machine().panel(), "--NOT LOADED--"));  // BONGOS 1 skipped, the name kept
 }
@@ -538,5 +572,6 @@ TEST(engine_restore_skips_prompt_shown_again) {
     CHECK_EQ(r.prompts.size(), 1u);  // asked for ED-001 (twice: *OK*, then *SKIP*)
     CHECK(r.endMs > 0 && r.endMs < 30000);
     CHECK(!r.e->snapshot().diskIn);
+    CHECK(!r.e->snapshot().restoreClean);
     CHECK(rowText(r.e->machine().panel(), 0).rfind("U0-0 ", 0) == 0);
 }

@@ -57,6 +57,18 @@ void MediaRecord::captureCd(uint32_t size, uint32_t lba, const uint8_t* sector) 
 
 void MediaRecord::clear() { setMedia({}); }
 
+void MediaRecord::merge(const std::vector<SavedMedium>& under) {
+    for (const auto& u : under) {
+        const auto it = std::find_if(media_.begin(), media_.end(), [&](const SavedMedium& m) {
+            return m.kind == u.kind && m.label == u.label && m.size == u.size;
+        });
+        if (it == media_.end())
+            media_.push_back(u);  // appended: cd_ still names the same medium
+        else
+            it->blocks.insert(u.blocks.begin(), u.blocks.end());  // map::insert keeps the blocks already there
+    }
+}
+
 void MediaRecord::setMedia(std::vector<SavedMedium> m) {
     media_ = std::move(m);
     cd_ = -1;

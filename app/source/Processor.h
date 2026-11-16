@@ -107,7 +107,7 @@ private:
     // Both: the caller holds stateMu_.
     // A new engine from roms_; the old one stays if that fails. fromState: a project's RAM (A129).
     bool restart(Ram ram, bool fromState = false);
-    void finishRestore();  // A129: the restore has ended: the stand-ins into the record, restored_ dropped
+    void finishRestore(bool clean);  // A129: the restore has ended: the stand-ins into the record, restored_ dropped
     void unserve();        // A129: the CD drive stops serving the stand-in CDs (before restored_ changes)
     std::vector<uint8_t> ram();  // the RAM a state or a copy saves (A117); empty when there is none
     std::vector<uint8_t> select(const ens::app::Snapshot& snap) const;  // the select a state saves

@@ -245,6 +245,7 @@ void Engine::setRestore(StandIns s) {
     promptHeld_ = false;
     lastOkFloppy_ = lastOkCd_ = -1;
     activeAt_ = 0;
+    restoreClean_ = true;
     autoLoad_ = AutoLoad::Watch;
     restoring_.store(true, std::memory_order_release);
 }
@@ -278,6 +279,7 @@ void Engine::endRestore() {
 // sector a stand-in lacks) gets Up, after which the OS asks for the volume again (as UNKNOWN) and gets *SKIP*. The
 // restore ends once the boot time (A104) has passed and row 0 is the play screen the OS shows after the auto-load as
 // after any boot (U0-0, A105), or after kRestoreIdle with no floppy read, CD ask or display change, or at kRestoreCap.
+// It is clean (Snapshot::restoreClean, A129) only on the play screen with no *SKIP* and no error page answered.
 // Audio thread, at the block start: it only moves the stand-ins, never allocates or frees one.
 void Engine::restoreStep() {
     const auto& p = m_->panel();
@@ -299,6 +301,7 @@ void Engine::restoreStep() {
         return;
     }
     if (frames_ >= kRestoreCap) {
+        restoreClean_ = false;
         endRestore();
         return;
     }
@@ -310,9 +313,11 @@ void Engine::restoreStep() {
                        std::string_view::npos;
     if (!prompt && !error) {
         promptArmed_ = true;
-        if (frames_ >= kBootFrames && autoLoad_ != AutoLoad::Held &&
-            (std::memcmp(p.text[0], "U0-0 ", 5) == 0 || frames_ - activeAt_ >= kRestoreIdle))
+        const bool play = std::memcmp(p.text[0], "U0-0 ", 5) == 0;
+        if (frames_ >= kBootFrames && autoLoad_ != AutoLoad::Held && (play || frames_ - activeAt_ >= kRestoreIdle)) {
+            restoreClean_ = restoreClean_ && play;
             endRestore();
+        }
         return;
     }
     if (m_->panelRoom() < 2) return;
@@ -346,6 +351,8 @@ void Engine::restoreStep() {
         if (prompt) lastOkFloppy_ = lastOkCd_ = -1;  // the answer did not move the prompt: *SKIP*; a page: Up again
     }
     promptButton_ = !prompt ? ts::Button::Up : found ? ts::Button::Soft3 : ts::Button::Soft6;
+    // DECISION A129: a *SKIP* or an error page leaves a sound unloaded; the app then keeps the restored media.
+    if (promptButton_ != ts::Button::Soft3) restoreClean_ = false;
     m_->button(promptButton_, true);
     promptAt_ = frames_;
     promptHeld_ = true;
@@ -542,6 +549,7 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         snap_.panel = m_->panel();
         snap_.seqLed = m_->seqLed();
         snap_.restoring = restoring_.load(std::memory_order_relaxed);
+        snap_.restoreClean = restoreClean_;
         snap_.booted = frames_ >= kBootFrames && !snap_.restoring;
         snap_.frames = frames_;
         snap_.midiDropped = storeDropped_ + m_->duart().rxDropped(ts::kMidiChannel);

@@ -103,7 +103,8 @@ answers each "INSERT DISK WITH NAME ..." prompt with the right one (A130, A131).
 load did, up to about half a minute for a large CD sound; the display shows the OS loading. A disk or CD that is in
 a drive when the project loads goes back in once that is done. A project saved meanwhile keeps the media it was
 loaded with. Afterwards the project keeps only what this load read, so blocks of sounds no longer in memory, or of
-files only browsed, drop out. There is no size limit: the project grows by about 1.35 times the bytes read (a
+files only browsed, drop out. If a sound could not be brought back (a prompt skipped, a read error), the project
+keeps everything it was loaded with, so saving it again loses nothing (A129). There is no size limit: the project grows by about 1.35 times the bytes read (a
 546-block CD sound, read as 143 CD sectors, adds about 400 KB). The Standalone keeps none of this (A121).
 
 **Which sounds come back** (A105). The app replays the last selection it saw (bank select and program change) once the boot has ended. The firmware always powers on to U0-0, so the display shows U0-0 for the boot and then changes. The rest of the memory (edited sounds, sequences, the system settings) is kept.

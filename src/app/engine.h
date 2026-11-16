@@ -52,6 +52,7 @@ struct Snapshot {
     uint32_t diskReads = 0;     // Disk::reads() of the disk in the drive
     uint32_t cdMedium = 0;      // the medium id of the CD in the drive; 0 none (applied, not pending)
     bool restoring = false;     // the auto-load is restoring from stand-ins (A131); booted waits for its end
+    bool restoreClean = false;  // the last restore ended on the play screen with no *SKIP* and no error page (A129)
 };
 
 class Engine {
@@ -183,6 +184,7 @@ private:
     // A131: the stand-ins (audio thread while restoring_, then takeStandIns), the one in the drive, the prompt press.
     StandIns restore_;
     std::atomic<bool> restoring_{false};
+    bool restoreClean_ = false;  // no *SKIP*, no error page answered, no idle or cap end so far
     int floppyIn_ = -1;
     bool promptArmed_ = true, promptHeld_ = false;
     ts::Button promptButton_ = ts::Button::Soft6;

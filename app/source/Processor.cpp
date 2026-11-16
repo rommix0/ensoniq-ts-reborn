@@ -249,7 +249,7 @@ bool TsProcessor::saved(bool ok) {
 bool TsProcessor::restart(Ram ram, bool fromState) {
     suspendProcessing(true);  // from here the audio thread is out of processBlock, and stays out
     const auto snap = engine_ ? engine_->snapshot() : ens::app::Snapshot{};
-    if (restoreRan_ && snap.frames > 0 && !snap.restoring) finishRestore();  // ended, before tick saw it
+    if (restoreRan_ && snap.frames > 0 && !snap.restoring) finishRestore(snap.restoreClean);  // before tick saw it
     std::vector<uint8_t> img;
     // DECISION A117: Start replays the start image's select; Keep and File keep the select a state would
     // save (the running one once booted, else the start one), so a new memory file keeps the sound.
@@ -336,12 +336,15 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
 }
 
 // DECISION A129: the floppy stand-ins come back with the blocks the auto-load read marked, and the record (cleared at
-// the restore) keeps them; the CD's sectors reached it as they were served. restored_ is dropped once the drive no
+// the restore) keeps them; the CD's sectors reached it as they were served. A restore that did not end clean (a
+// *SKIP*, an error page, the idle or cap end) left a sound unloaded that the RAM still names: the restored media stay
+// in the record under what was read, so the next save does not lose them. restored_ is dropped once the drive no
 // longer serves from it. The caller holds stateMu_; the restore of the current engine has ended.
-void TsProcessor::finishRestore() {
+void TsProcessor::finishRestore(bool clean) {
     auto back = engine_->takeStandIns();
     {
         const std::lock_guard<std::mutex> lock(mediaMu_);
+        if (!clean) record_.merge(restored_);
         for (const auto& d : back)
             if (d) record_.captureFloppy(*d);
     }
@@ -378,7 +381,7 @@ void TsProcessor::tick() {
     if (restoreRan_) {
         const std::lock_guard<std::mutex> lock(stateMu_);
         const auto s = engine_->snapshot();
-        if (restoreRan_ && s.frames > 0 && !s.restoring) finishRestore();
+        if (restoreRan_ && s.frames > 0 && !s.restoring) finishRestore(s.restoreClean);
     }
     // DECISION A111 (as KS-32 A18): follow a program change tracked from the panel or MIDI (programSeq
     // moved), never the engine's own sends. followed_ is stored first, then `sound` is written, so a

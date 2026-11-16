@@ -1581,16 +1581,17 @@ void restoreFrom(TsProcessor& b, const juce::MemoryBlock& s) {
 // project_state_restores_sounds (A129): ED-001's FLUTE 1 into S8-0 and CDR-13's BONGOS 1 into S8-1 by posted presses;
 // the state is saved and both images ejected; a new processor given the state, with no image anywhere, has both
 // sounds back on their bank pages and plays C-E-G from S8-0. A state taken during that restore holds the saved media
-// unchanged (Review Focus 3), and one taken after it holds what the auto-load read: both media again.
-void mediaStateRoundTrip(const juce::File& dir) {
+// unchanged (Review Focus 3), and one taken after it holds what the auto-load read: both media again. Returns the
+// first state (empty without the images).
+juce::MemoryBlock mediaStateRoundTrip(const juce::File& dir) {
     using ens::ts::Button;
     const auto ed = ed001();
     const auto cue = cdr13();
-    if (ed == juce::File() || cue == juce::File() || !realRoms(dir)) return;
+    if (ed == juce::File() || cue == juce::File() || !realRoms(dir)) return {};
     juce::MemoryBlock s;
     {
         TsProcessor a;
-        if (!a.engine()) return;
+        if (!a.engine()) return {};
         a.prepareToPlay(48000, 480);
         juce::String err;
         CHECK(a.drive().open(ed, err));
@@ -1612,7 +1613,7 @@ void mediaStateRoundTrip(const juce::File& dir) {
     std::printf("  state: %d bytes\n", static_cast<int>(s.getSize()));
 
     TsProcessor b;
-    if (!b.engine()) return;
+    if (!b.engine()) return {};
     restoreFrom(b, s);
     runCd(b, 2000);
     CHECK(b.engine()->snapshot().restoring);
@@ -1630,6 +1631,51 @@ void mediaStateRoundTrip(const juce::File& dir) {
     const auto after = mediaOf(xmlOf(stateOf(b)).get());
     CHECK(after.media.size() == 2 && after.media.joinIntoString(",").contains("ED-001") &&
           after.media.joinIntoString(",").contains("CDR-013"));
+    return s;
+}
+
+// project_state_keeps_unrestored_media (A129): the round trip's state with one CD sector of BONGOS 1 taken out (the
+// middle of the CD's longest run, its sample data): the restore loads FLUTE 1, the OS stops BONGOS 1 at the gap
+// (DISK DRIVE NOT RESPONDING, Up, the UNKNOWN prompt, *SKIP*), so the restore does not end clean. The state saved
+// after it still holds every restored block: ED-001's and CDR-013's but the one taken out, not only the sectors the
+// auto-load read before the gap.
+void mediaStateKeepsUnrestored(const juce::File& dir, const juce::MemoryBlock& full) {
+    if (full.isEmpty() || !realRoms(dir)) return;
+    auto x = xmlOf(full);
+    juce::XmlElement* run = nullptr;
+    int cdBlocks = 0;
+    for (auto* m : x->getChildByName("Media")->getChildWithTagNameIterator("Medium"))
+        if (m->getStringAttribute("kind") == "cd")
+            for (auto* r : m->getChildWithTagNameIterator("Run")) {
+                cdBlocks += r->getIntAttribute("count");
+                if (run == nullptr || r->getIntAttribute("count") > run->getIntAttribute("count")) run = r;
+            }
+    CHECK(run != nullptr && run->getIntAttribute("count") >= 3);
+    if (run == nullptr || run->getIntAttribute("count") < 3) return;
+    juce::MemoryOutputStream bytes;
+    CHECK(juce::Base64::convertFromBase64(bytes, run->getAllSubText()));
+    const int first = run->getIntAttribute("first"), count = run->getIntAttribute("count"), mid = count / 2;
+    const auto* b = static_cast<const char*>(bytes.getData());
+    auto* medium = x->getChildByName("Media")->getChildByAttribute("kind", "cd");
+    medium->removeChildElement(run, true);
+    for (const auto& [from, n] : {std::pair<int, int>{0, mid}, std::pair<int, int>{mid + 1, count - mid - 1}}) {
+        auto* r = medium->createNewChildElement("Run");
+        r->setAttribute("first", first + from);
+        r->setAttribute("count", n);
+        r->addTextElement(juce::Base64::toBase64(b + from * 2048, static_cast<size_t>(n) * 2048));
+    }
+    std::printf("  CD sector %d taken out of %d\n", first + mid, cdBlocks);
+    juce::MemoryBlock s;
+    juce::AudioProcessor::copyXmlToBinary(*x, s);
+    TsProcessor p;
+    if (!p.engine()) return;
+    restoreFrom(p, s);
+    CHECK(runRestore(p) > 0);
+    CHECK(!p.engine()->snapshot().restoreClean);
+    runCd(p, 200);
+    const auto after = mediaOf(xmlOf(stateOf(p)).get());
+    CHECK(after.media.contains("floppy-dd ED-001 314"));
+    CHECK(after.media.contains("cd CDR-013 " + juce::String(cdBlocks - 1)));
 }
 
 // project_state_trims_on_reopen (A129): after FLUTE 1 is loaded from ED-001, CDR-13 is browsed (mounted on the SCSI
@@ -1877,7 +1923,8 @@ int main() {
     mediaStateDuringRestore(dir.getChildFile("media-during"));
     mediaStateBadBlobs(dir.getChildFile("media-bad"));
     standaloneHasNoMedia(dir.getChildFile("media-standalone"));
-    mediaStateRoundTrip(dir.getChildFile("media-round-trip"));
+    const auto media = mediaStateRoundTrip(dir.getChildFile("media-round-trip"));
+    mediaStateKeepsUnrestored(dir.getChildFile("media-keep"), media);
     mediaStateTrimsOnReopen(dir.getChildFile("media-trim"));
     vst3(dir.getChildFile("vst3"), juce::File(TSR_VST3_PATH), false);
     // TSR_RELEASE_VST3=<a release folder's TS Reborn.vst3>: that package, on its own ROMs (A125, A126).

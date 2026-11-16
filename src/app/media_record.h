@@ -30,6 +30,9 @@ public:
     void captureFloppy(const ts::Disk& copy);                            // keeps newly read blocks, first capture wins
     void captureCd(uint32_t size, uint32_t lba, const uint8_t* sector);  // a sector served to the OS
     void clear();
+    // DECISION A129: media added under the record: a medium it holds (same kind, label and size) gains only the blocks
+    // it lacks, any other is appended.
+    void merge(const std::vector<SavedMedium>& under);
     const std::vector<SavedMedium>& media() const { return media_; }
     void setMedia(std::vector<SavedMedium> m);
 
