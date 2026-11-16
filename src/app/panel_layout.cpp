@@ -88,8 +88,8 @@ std::vector<Control> build() {
         {K::Label, -1, {1314, 350, 77, 12}, "Sampled Sound BankSets", Ink::Dim},
 
         // Block titles and the Track Parameters / Programming rows of the fourth row.
-        {K::Label, -1, {1465, 100, 140, 14}, "Track Parameters"},
-        {K::Label, -1, {1765, 100, 140, 14}, "Programming"},
+        {K::Label, -1, {1465, 92, 140, 14}, "Track Parameters"},
+        {K::Label, -1, {1765, 92, 140, 14}, "Programming"},
         {K::Label, -1, {1506, 346, 76, 14}, "Seq/Song Tracks"},
         {K::Label, -1, {1654, 346, 36, 12}, "Continue", Ink::Dim},
     };
