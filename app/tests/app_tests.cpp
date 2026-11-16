@@ -1203,16 +1203,17 @@ void diskDrive(const juce::File& dir) {
 
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
 // naming the ROM folder, so neither the user's settings nor their memory file is touched. Aux is off,
-// as the Standalone plays it (A109).
-void vst3(const juce::File& dir) {
-    const juce::File bundle(TSR_VST3_PATH);
+// as the Standalone plays it (A109). With `ownRoms` (the release VST3, A125, A126) the settings folder names
+// no ROM folder: the plugin must boot on the ROMs in its own package, and must not store that folder.
+void vst3(const juce::File& dir, const juce::File& bundle, bool ownRoms) {
     if (!bundle.exists()) {
-        std::printf("  skip: VST3 not found\n");
+        std::printf("  skip: VST3 not found: %s\n", bundle.getFullPathName().toRawUTF8());
+        CHECK(!ownRoms);  // a release VST3 that was asked for must be there
         return;
     }
-    if (!haveRoms()) return;
+    if (!ownRoms && !haveRoms()) return;
     setSettingsDir(dir);  // the plugin DLL reads this process's environment, so it lands here too
-    AppSettings().setRomFolder(juce::File(TSR_ROM_DIR));
+    if (!ownRoms) AppSettings().setRomFolder(juce::File(TSR_ROM_DIR));
 
     juce::VST3PluginFormat format;
     juce::OwnedArray<juce::PluginDescription> types;
@@ -1261,6 +1262,7 @@ void vst3(const juce::File& dir) {
     ed.reset();
     plugin->releaseResources();
     plugin.reset();
+    if (ownRoms) CHECK(AppSettings().romFolder() == juce::File());
 }
 
 }  // namespace
@@ -1292,7 +1294,13 @@ int main() {
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
-    vst3(dir.getChildFile("vst3"));
+    vst3(dir.getChildFile("vst3"), juce::File(TSR_VST3_PATH), false);
+    // TSR_RELEASE_VST3=<a release folder's TS Reborn.vst3>: that package, on its own ROMs (A125, A126).
+    const auto release = juce::SystemStats::getEnvironmentVariable("TSR_RELEASE_VST3", {});
+    if (release.isEmpty())
+        std::printf("  skip: TSR_RELEASE_VST3 not set\n");
+    else
+        vst3(dir.getChildFile("release"), juce::File(release), true);
     dir.deleteRecursively();
     std::printf(failures == 0 ? "app_tests: all passed\n" : "app_tests: %d failed\n", failures);
     return failures == 0 ? 0 : 1;

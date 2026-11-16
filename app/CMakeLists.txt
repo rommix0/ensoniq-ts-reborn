@@ -11,7 +11,7 @@ FetchContent_MakeAvailable(juce)
 
 juce_add_plugin(TSReborn
   PRODUCT_NAME "TS Reborn"
-  VERSION 0.4.0
+  VERSION 1.0.0
   BUNDLE_ID com.tsreborn.tsreborn
   COMPANY_NAME "TS Reborn"
   PLUGIN_MANUFACTURER_CODE Tsre
@@ -40,7 +40,7 @@ target_link_libraries(TSReborn
 # processor's memory-file guards (dummy files only), its two buses, the panel editor painted offscreen and
 # the built VST3 loaded through JUCE's VST3 host (the last three need the ROMs, but for the editor's no-ROM
 # case). The processor is compiled in as a plain class (no wrapper).
-juce_add_console_app(TSReborn_AppTests PRODUCT_NAME "TSReborn_AppTests" VERSION 0.4.0)
+juce_add_console_app(TSReborn_AppTests PRODUCT_NAME "TSReborn_AppTests" VERSION 1.0.0)
 target_sources(TSReborn_AppTests PRIVATE tests/app_tests.cpp ${TSR_SOURCES})
 target_compile_definitions(TSReborn_AppTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_PLUGINHOST_VST3=1
   JucePlugin_Name="TS Reborn" JucePlugin_Build_Standalone=0
