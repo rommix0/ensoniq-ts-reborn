@@ -361,6 +361,9 @@ void TsProcessor::getStateInformation(juce::MemoryBlock& dest) {
 // mode a version 1 RAM of 524 288 bytes restarts the machine from it with that selection; with no ROMs it
 // waits as the start image. No RAM, a wrong size or another version leaves the machine as it is.
 void TsProcessor::setStateInformation(const void* data, int size) {
+    // DECISION A121: only a plugin restores a state; the Standalone starts with the controls at their
+    // defaults and the sound its memory file boots on, whatever JUCE's wrapper saved.
+    if (mode_ == MemoryMode::File) return;
     const auto xml = getXmlFromBinary(data, size);
     if (!xml || !xml->hasTagName("TSState")) return;
     juce::ValueTree tree;
@@ -401,8 +404,8 @@ void TsProcessor::setStateInformation(const void* data, int size) {
         haveStart_ = true;
         if (engine_) restart(Ram::Start);  // with no ROMs, setRomFolder starts from it
     } else if (!sel.empty()) {
-        // The Standalone's wrapper state arrives before the first block; its select is the one the next
-        // boot replays, and with no ROMs it waits for setRomFolder's restart. Once booted the running
+        // A state with no RAM arriving before the first block: its select is the one the next boot
+        // replays, and with no ROMs it waits for setRomFolder's restart. Once booted the running
         // select stays what a state saves, and the engine sends this one when `sound` asks for it.
         if (!engine_ || !engine_->snapshot().booted) startSelect_ = sel;
         if (engine_) {

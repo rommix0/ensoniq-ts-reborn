@@ -49,7 +49,7 @@ The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`
 - **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder and the memory file. Each change is saved at once. The Standalone and the VST3 share it.
 - **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, the machine starts cold, and the first save (on close or after 60 s, once booted) replaces it with the running memory. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page.
 - **Erase memory...** asks first, then writes 512 KB of zeros to the memory file and restarts the machine from it. If the file cannot be written, nothing is erased and the settings page says so.
-- **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. It also holds the wrapper's saved plugin state (the sound and the controls). `TSR_SETTINGS_DIR` does not move it.
+- **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. JUCE also writes the wrapper's plugin state there (the sound and the controls); the Standalone ignores it, and the Options menu's "Load a saved state..." too (A121). `TSR_SETTINGS_DIR` does not move it.
 - **The VST3 does not write the shared memory file by itself.** A VST3 instance keeps its memory in the host's project (below) and never saves to the file on close or on a timer, so many instances cannot overwrite each other. A new instance starts from the file. **Copy to shared memory...** is the one way a VST3 writes it.
 
 ## Audio and MIDI
@@ -69,7 +69,7 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 |---|---|---|
 | Start | from the memory file | from the project's RAM if the project has one, else from the memory file |
 | Saves to the memory file on close and every 60 s | yes (A116) | **no** |
-| Sound and the controls | from JUCE's own wrapper state; the RAM is not in it | from the project |
+| Sound and the controls | not brought back (A121): the controls start at their defaults, and the sound is the one the memory boots on | from the project |
 | **Erase memory...** | zeros to the file, then a cold boot (Sound goes to 0) | this instance only; the file is left alone |
 | **Copy to shared memory...** | not shown | asks first, then writes this instance's RAM to the shared file (once booted) |
 

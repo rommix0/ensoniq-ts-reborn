@@ -719,9 +719,9 @@ void zeroAndBypassedBlocks(const juce::File& dir) {
     std::printf("  zero-length and bypassed blocks: note 60 held %d\n", static_cast<int>(held()));
 }
 
-// standalone_state_before_boot (A117, as KS-32 A23): a File processor given a Project state (R2-2,
-// TUNE=+02) before its first block comes back on R2-2, its memory still the file's (none here: cold, so
-// TUNE=+00).
+// standalone_ignores_state (A121): a File processor given a Project state (R2-2, TUNE=+02) before its first
+// block ignores it: no sound to replay, so it boots on U0-0 with `sound` 0, its memory still the file's
+// (none here: cold, so TUNE=+00).
 void standaloneStateBeforeBoot(const juce::File& dir, const juce::MemoryBlock& s) {
     if (s.isEmpty() || !realRoms(dir)) return;
     TsProcessor p(MemoryMode::File);
@@ -729,7 +729,9 @@ void standaloneStateBeforeBoot(const juce::File& dir, const juce::MemoryBlock& s
     p.prepareToPlay(48000, 480);
     p.setStateInformation(s.getData(), static_cast<int>(s.getSize()));
     run(p, kRestored);
-    CHECK(rowStarts(p, 0, "R2-2"));
+    CHECK(rowStarts(p, 0, "U0-0") && p.engine()->snapshot().programsSent == 0);
+    CHECK(p.getParameters()[0] != nullptr);
+    for (auto* prm : p.getParameters()) CHECK(std::abs(prm->getValue() - prm->getDefaultValue()) < 1e-6f);
     press(p, ens::ts::Button::System);
     CHECK(rowStarts(p, 0, "SYSTEM  TUNE=+00"));
 }
