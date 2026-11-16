@@ -65,7 +65,16 @@ cmake -S . -B build-linux-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_AP
 cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
 ```
 
-The release-folder (Plan 6) commands are added by that plan. The app and its checks never open a
+```powershell
+# Release folder (Plan 6, A126): builds in build-dist and writes "dist\TS Reborn-<version>" with the six ROMs
+powershell -ExecutionPolicy Bypass -File tools\dist.ps1 [-RomFolder <folder>] [-JuceSource <JUCE checkout>]
+
+# Linux (in WSL): builds in build-dist-linux and writes "dist/TS Reborn-<version>-linux"
+tools/dist.sh [--rom-folder <folder>] [--juce-source <JUCE checkout>]
+```
+
+`TSR_RELEASE_VST3=<a release folder's TS Reborn.vst3>` makes the app checks also load that package with no ROM
+folder set: it must boot on its own ROMs (A125). The app and its checks never open a
 window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an agent session.
 
 ## Testing

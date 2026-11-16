@@ -7,21 +7,27 @@ emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP e
 a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of
 [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
-**Status:** Plan 5: the TS-10 machine runs the unmodified OS v3.10 in a Standalone app and a VST3
-instrument, "TS Reborn", with the front panel drawn and playable (Windows x64 and Linux x64; see
-[docs/tsapp.md](docs/tsapp.md)). The floppy drive works: the OS reads and writes disk images (raw `.img`,
-`.gkh`, Giebler `.ede`/`.eda`) of its own and of the ASR-10 and EPS families, from the drive on the panel or
-`tsemu --disk`. `tsemu` boots the machine headless, renders a MIDI file to WAV and measures its speed. Five
-sounds were checked by ear on 2026-11-14 (CRUNCH-ELEC, ZEP-KIT, SUITCASE-74, TRANS-CLAV, JAM-WITH-IT); levels and
-filters are still unchecked by ear, and the drive has not been used in a real window yet. What a
-person must still check is in [docs/verification-plan5.md](docs/verification-plan5.md) and
-[docs/verification-plan4.md](docs/verification-plan4.md).
+**Status:** version 1.0.0 (Plan 6). The TS-10 machine runs the unmodified OS v3.10 in a Standalone app and
+a VST3 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64 and Linux x64; see
+[docs/tsapp.md](docs/tsapp.md), named `APP-GUIDE.md` in a release folder). The floppy drive works: the OS
+reads and writes disk images (raw `.img`, `.gkh`, Giebler `.ede`/`.eda`) of its own and of the ASR-10 and
+EPS families, from the drive on the panel or `tsemu --disk`. `tsemu` boots the machine headless, renders a
+MIDI file to WAV and measures its speed. The person-only checks of Plans 4 and 5 (sound, the panel, the
+drive, a DAW) were done by the user on 2026-11-15. The release scripts build a ready-to-use folder (below).
 The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).
+
+## The release folder
+
+`tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0`
+(Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README, the license, the app guide, and the
+six ROMs, beside the program and inside the VST3 package. It needs nothing installed: run the program, or
+copy `TS Reborn.vst3` to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`), and it finds its ROMs.
+A release folder holds Ensoniq's ROMs (below).
 
 ## The ROMs
 
-The ROMs are Ensoniq's copyrighted firmware and samples. The emulator needs six files
-(see [roms/README.txt](roms/README.txt)):
+The ROMs are Ensoniq's copyrighted firmware and samples. The emulator needs six files, which the
+release folder includes (see [roms/README.txt](roms/README.txt)):
 
 | File | Size | What it is |
 |---|---|---|

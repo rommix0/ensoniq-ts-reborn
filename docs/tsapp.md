@@ -4,7 +4,7 @@ TS Reborn runs the user's TS-10 OS ROM (v3.10) on the emulated machine of Plan 3
 
 It is built in two formats from the same code: a Standalone program (`TS Reborn.exe`) and a VST3 instrument (`TS Reborn.vst3`). Windows x64 (MSVC) and Linux x64 (GCC).
 
-The design is `docs/design/2026-11-13-ts-emulator-design.md`, the decisions are `A100` to `A120` in `docs/decisions.md` (`# App`), and the verification report is `docs/verification-plan5.md`.
+The design is `docs/design/2026-11-13-ts-emulator-design.md`, the decisions are `A100` to `A126` in `docs/decisions.md` (`# App`), and the verification report is `docs/verification-plan6.md`.
 
 ## Building
 
@@ -27,6 +27,14 @@ cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSRebor
 - `ENS_ROM_DIR` (default: the repository's `roms` folder) is used only by the checks in `TSReborn_AppTests`. The app has no compiled-in ROM path.
 - Outputs, Windows: `build-app\app\TSReborn_artefacts\Release\Standalone\TS Reborn.exe` and `...\VST3\TS Reborn.vst3`. Linux: `build-linux-app/app/TSReborn_artefacts/Release/Standalone/TS Reborn` and `.../VST3/TS Reborn.vst3`. The build does not install the VST3. Copy the `TS Reborn.vst3` folder to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`).
 - Checks: `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` (Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`). They run without a window. They cover the ROM folder and the memory file, the engine's two buses, the host parameters, the state and the memory rules, the disk drive (open, save, write protect, through temp files), and the editor painted offscreen, and they load the built VST3 through JUCE's VST3 host. Without the ROMs the firmware parts skip.
+
+**The release folder** (Plan 6, A126). `powershell -ExecutionPolicy Bypass -File tools\dist.ps1` (Linux, in WSL: `tools/dist.sh`) builds the Standalone and the VST3 in Release in `build-dist` (`build-dist-linux`), with the C++ runtime linked in, and writes `dist\TS Reborn-1.0.0` (`dist/TS Reborn-1.0.0-linux`):
+
+- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the six files above, so the Standalone starts on them.
+- `TS Reborn.vst3`, the VST3 package, with the same six files in `Contents\Resources\roms`. Copy the whole package to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`): it finds those ROMs there (A125) without any setup.
+- `README.md`, `LICENSE`, and this guide as `APP-GUIDE.md`.
+
+The scripts check the six ROMs (presence and size) before building anything, and replace an older folder of the same version. `-RomFolder` / `--rom-folder` takes them from another folder; `-JuceSource` / `--juce-source` uses a JUCE checkout instead of downloading it. The folder needs nothing installed to run.
 
 **JUCE licence.** JUCE is dual-licensed: AGPLv3, or a commercial JUCE licence. A build of this app links JUCE, so giving the app to anyone else is under the AGPLv3's terms unless you hold a commercial JUCE licence. Building and using it yourself needs neither.
 
@@ -124,5 +132,5 @@ Environment variables read when the app starts. Neither is needed for normal use
 - **The TS-12** is out of scope for this project; this is the TS-10 only.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.
-- **Levels and the filters** have not been checked by ear (`docs/verification-plan3.md`, "User to run").
-- **Label readability** at the minimum window size and the small print the photo has (jack labels, "Bypass", "Replace w/FX") are not drawn. The full list of what a person still has to check is in `docs/verification-plan4.md`.
+- **The small print the photo has** (jack labels, "Bypass", "Replace w/FX") is not drawn.
+- The person-only checks of Plans 4 and 5 were done by the user on 2026-11-15; what is left for a person is in `docs/verification-plan6.md`.

@@ -215,7 +215,7 @@ All *my call*, on the KS-32 model unless the user says otherwise:
 5. **Floppy drive.** The uPD72069 and a disk in the drive, disk images, the drive on the panel
    (`docs/design/2026-11-14-ts-floppy-design.md`). Done when the OS loads an instrument from a user's
    image and saves to a blank one.
-6. **Release folder** (`tools/dist.ps1`, `tools/dist.sh`), as KS-32 Plan 8.
+6. **Release folder** (`tools/dist.ps1`, `tools/dist.sh`), as KS-32 Plan 8. Done in Plan 6 (2026-11-15, design `2026-11-15-ts-release-design.md`): version 1.0.0, the six ROMs beside the program and inside the VST3 package (A125, A126).
 
 Later stages: SCSI. The TS-12 is out of scope (section 2).
 

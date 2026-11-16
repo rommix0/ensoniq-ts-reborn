@@ -141,8 +141,7 @@ machine state), not the code. A first run during the Linux build gave x1.93 (con
 
 ## User to run
 
-Nothing below has been checked by a person. The drive has run only through console programs and the headless
-checks.
+Checked by the user on 2026-11-15 (the user's report at the start of Plan 6: "The checks have already been done"). The list is kept as it was written.
 
 **With a real window (Standalone, then a VST3 in a host):**
 - Load an instrument from `AD-001.img`: open it from the drive menu, press Storage twice on
