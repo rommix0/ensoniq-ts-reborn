@@ -787,8 +787,14 @@ juce::String PanelEditor::slotText() const { return proc_.drive().slotText(); }
 void PanelEditor::driveMenu(juce::Component* target) { proc_.drive().showMenu(target); }
 
 // DECISION A119: a file dropped anywhere on the panel goes in the drive (asking first, A120).
+// DECISION A128: an .iso or .cue (any case) goes in the CD drive instead.
 void PanelEditor::filesDropped(const juce::StringArray& files, int, int) {
-    if (files.size() == 1) proc_.drive().openAsked(juce::File(files[0]));
+    if (files.size() != 1) return;
+    const juce::File f(files[0]);
+    if (f.hasFileExtension("iso;cue"))
+        proc_.cdDrive().insertAsked(f);
+    else
+        proc_.drive().openAsked(f);
 }
 
 void PanelEditor::toggleHexCodes() {

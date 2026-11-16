@@ -29,13 +29,25 @@ public:
     const uint8_t* sector(int cyl, int head, int id) const;
     // Ensoniq block order: n = (cyl * 2 + head) * sectorsPerTrack + id. Ignores the formatted flag.
     uint8_t* block(int n);
+    const uint8_t* block(int n) const { return const_cast<Disk*>(this)->block(n); }
 
     void noteWrite() { ++writes_; }
     uint32_t writes() const { return writes_; }  // writes and formats, never reset
     bool writeProtected() const { return protect_; }
     void setWriteProtected(bool p) { protect_ = p; }
 
-    // Contents and writes(); false, nothing copied, when the densities differ. The write-protect flag is not
+    // Blocks the OS has read (T-FDC Read Data, one per sector); the marks are sized with the disk so noteRead
+    // never allocates. reads() counts blocks first marked; only clearReads resets it.
+    void noteRead(int block) {
+        if (block < 0 || size_t(block) >= read_.size() || read_[size_t(block)]) return;
+        read_[size_t(block)] = 1;
+        ++reads_;
+    }
+    bool wasRead(int block) const { return block >= 0 && size_t(block) < read_.size() && read_[size_t(block)] != 0; }
+    uint32_t reads() const { return reads_; }
+    void clearReads();
+
+    // Contents, writes() and the read marks; false, nothing copied, when the densities differ. The write-protect flag is not
     // copied: it belongs to the drive (A119), which sets it on each disk it puts in.
     bool copyInto(Disk& dst) const;
 
@@ -47,7 +59,9 @@ private:
     Density density_;
     std::vector<uint8_t> data_;
     std::vector<uint8_t> formatted_;  // per track (cyl * 2 + head)
+    std::vector<uint8_t> read_;  // per block
     uint32_t writes_ = 0;
+    uint32_t reads_ = 0;
     bool protect_ = false;
 };
 

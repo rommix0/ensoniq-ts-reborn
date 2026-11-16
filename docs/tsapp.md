@@ -76,7 +76,7 @@ The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`
 
 ## The VST3: the state in the project
 
-The VST3 saves its state with the host's project, so a saved project brings each TS Reborn back as it was (A117). What is saved: the six parameters below, the sound to select again, and the instance's whole 512 KB RAM (about 700 KB in the project). It is the running RAM once the machine has booted. Before the boot ends, it is the RAM the machine started from, so a project saved in the first seconds does not lose its memory.
+The VST3 saves its state with the host's project, so a saved project brings each TS Reborn back as it was (A117). What is saved: the six parameters below, the sound to select again, the instance's whole 512 KB RAM (about 700 KB in the project) and the disk and CD blocks its sampled sounds were loaded from (see "What a project keeps" below). It is the running RAM once the machine has booted. Before the boot ends, it is the RAM the machine started from, so a project saved in the first seconds does not lose its memory.
 
 When a project loads, the instance restarts from the project's RAM. Once the boot has ended, the app selects the saved sound and sets the analogs. A new instance, one not loaded from a project, starts from the shared memory file.
 
@@ -84,7 +84,8 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 |---|---|---|
 | Start | from the memory file | from the project's RAM if the project has one, else from the memory file |
 | Saves to the memory file on close and every 60 s | yes (A116) | **no** |
-| "AUTO-LOAD ALL SAMPLED-SOUNDS" at power-on (memory that remembers a loaded sampled sound) | asked, as on the TS | answered *NO* by the app during the boot (A124); the question after loading a SAMPLE-BANKS file is still asked |
+| "AUTO-LOAD ALL SAMPLED-SOUNDS" at power-on (memory that remembers a loaded sampled sound) | asked, as on the TS | answered by the app during the boot: *YES* when the project holds the disks and CDs the sounds came from (A129, A130), else *NO* (A124); the question after loading a SAMPLE-BANKS file is still asked |
+| Disk and CD blocks the OS read | not kept (A121) | kept in the project (A129, "What a project keeps") |
 | Sound and the controls | not brought back (A121): the controls start at their defaults, and the sound is the one the memory boots on | from the project |
 | **Erase memory...** | zeros to the file, then a cold boot (Sound goes to 0) | this instance only; the file is left alone |
 | **Copy to shared memory...** | not shown | asks first, then writes this instance's RAM to the shared file (once booted) |
@@ -92,6 +93,19 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 **The six parameters** (A111): Volume, Data Entry, Pitch Wheel, Mod Wheel and CV Pedal (0 to 1, the position of the control as drawn) and Sound (a whole number, 0 to 127). A drag on a slider or wheel is one host gesture, so the host records automation. The pitch wheel springs back to centre. The Sound parameter follows the sound picked on the panel or by MIDI. With a Sound lane in read mode, the lane overrides panel picks, as automation does in any host.
 
 **Data Entry never reaches raw 0** (A110). The slider's bottom is raw 1, because at raw 0 the OS rewrites the selected value and shows SYSTEM ERROR 144. A host lane at 0 is mapped the same way.
+
+**What a project keeps** (A129). A VST3 instance also keeps, in its state, what the OS read from floppies and CDs
+since the instance started or its project was last loaded: for each disk or CD volume, its kind (DD or HD floppy,
+CD), its name as the OS asks for it, and the blocks read, with their bytes as first read. So a sampled sound loaded
+from disk or CD comes back with the project even where the image files are not: when the project loads, the app
+answers the power-on AUTO-LOAD question *YES*, puts stand-in media built from those blocks in the drives, and
+answers each "INSERT DISK WITH NAME ..." prompt with the right one (A130, A131). This takes as long as the first
+load did, up to about half a minute for a large CD sound; the display shows the OS loading. A disk or CD that is in
+a drive when the project loads goes back in once that is done. A project saved meanwhile keeps the media it was
+loaded with. Afterwards the project keeps only what this load read, so blocks of sounds no longer in memory, or of
+files only browsed, drop out. If a sound could not be brought back (a prompt skipped, a read error), the project
+keeps everything it was loaded with, so saving it again loses nothing (A129). There is no size limit: the project grows by about 1.35 times the bytes read (a
+546-block CD sound, read as 143 CD sectors, adds about 400 KB). The Standalone keeps none of this (A121).
 
 **Which sounds come back** (A105). The app replays the last selection it saw (bank select and program change) once the boot has ended. The firmware always powers on to U0-0, so the display shows U0-0 for the boot and then changes. The rest of the memory (edited sounds, sequences, the system settings) is kept.
 
@@ -108,6 +122,11 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
   - **Write Protected** (off at start) applies to the disk in the drive and to each disk put in: the OS then cannot write, as with the tab on a real disk.
   - Open, New, Eject, a dropped file and closing the Standalone ask first (Save, Don't Save, Cancel) when the disk has unsaved writes. The VST3 cannot ask when a project closes or the plugin is removed: unsaved writes are lost, and "(modified)" is the warning.
   - The drive starts empty: the disk is not remembered across a restart of the app, and the VST3's project state does not carry it. A ROM-folder change or Erase keeps the disk in the drive.
+- **The CD-ROM drive** (A127, A128). The emulated TS has the SP-4 SCSI board with a CD-ROM drive at SCSI ID 4 (the TS's own ID is 3). The panel has no CD drive, as the real TS-10 has only the rear connector: the disk drive's menu ends with the submenu **CD-ROM (SCSI ID 4)**, showing the CD's file name (greyed), **Insert CD Image...** and **Eject CD**. An `.iso` or `.cue` dropped on the panel goes in the CD drive.
+  - Images: `.iso` (2048-byte sectors) and `.cue` with one `TRACK 01 MODE1/2352` from `INDEX 01 00:00:00` and its `.bin`. When the `.cue` names a path that does not exist (rippers write their own, such as `E:\...\DLM-CDR13.BIN`), the file of that name beside the `.cue` is used, in any case. Other layouts are refused with a message naming what is supported. The image is only read.
+  - Sectors are read from the file as the OS asks for them, on a thread of the app's, so the image stays where it is and is never loaded whole. If the file goes away while in the drive (moved, deleted, a USB drive pulled out) the next read fails and the OS shows "DISK DRIVE NOT RESPONDING"; the TS keeps running.
+  - To use it: Storage, then SCSI (Soft4), DEVICE-ID=4: STATUS shows the volume name once mounted (about 1.5 s after the page opens), and *LOAD* lists its directories (Musician's Manual Section 13, "SCSI Option").
+  - Insert and eject need the audio running, as the floppy's. The CD stays in across a ROM-folder change or Erase, starts empty when the app starts, and is not in the VST3's project state.
 - **Size.** The window opens at 1546 x 552 and resizes from 1030 x 368 up, keeping the panel's shape (A112).
 
 ## Firmware behaviours to know
@@ -128,7 +147,7 @@ Environment variables read when the app starts. Neither is needed for normal use
 
 ## Open items
 
-- **SCSI** is absent. Disk images in `.hfe` and `.efe` formats are not read (`docs/verification-plan5.md`).
+- **SCSI** has a CD-ROM drive at ID 4 only; no SCSI hard disk. Disk images in `.hfe` and `.efe` formats are not read (`docs/verification-plan5.md`).
 - **The TS-12** is out of scope for this project; this is the TS-10 only.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.

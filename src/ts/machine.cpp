@@ -16,6 +16,7 @@ constexpr uint32_t kIo2Base = 0x300000, kIo2Window = 0x100000;      // A19 = OTT
 constexpr uint32_t kHostBase = 0x400000, kHostWindow = 0x800000;    // DECISION T4: OTTO banks 3, then 2
 constexpr uint8_t kMuxSelect[kAnalogCount] = {0, 2, 3, 4, 5, 6, 7};  // Hardware facts: U69 Y0, Y2-Y7 (Y1 n.c.)
 constexpr uint8_t kEmptyDrivePins = 0x3F;  // DECISION T10: no index pulse; IP1 (DSKCHG) and IP2 (DENS) high
+constexpr int kCdId = 4;  // Musician's Manual, Section 13: "CD ROM drives ... should always be set to SCSI ID #4"
 // DECISION T23: a 300 rpm drive: the index hole passes every 200 ms and holds IP0 low for 2 ms.
 constexpr uint64_t kIndexPeriod = kCpuHz / 5, kIndexLow = kCpuHz / 500;
 }  // namespace
@@ -32,9 +33,11 @@ Machine::Region Machine::decode(uint32_t a) {
     return Region::None;
 }
 
-std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, bool sqx70) {
+std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, bool sqx70, bool scsi) {
     std::unique_ptr<Machine> m(new Machine());
     m->sqx70_ = sqx70;
+    m->scsi_ = scsi;
+    if (scsi) m->wd_.attach(kCdId, &m->cd_);  // DECISION T25: one CD-ROM drive at ID 4 (the TS is ID 3)
     if (!buildOsImage(roms, m->os_, err) || !m->waves_.load(roms, err)) return nullptr;
     // DECISION T1: 500 kHz on IP3/IP4 (channel A, MIDI); 1 MHz on IP5 (TxCB) and IP6 (RxCB). The board's
     // 2681 takes RxCB from IP6, the core (a 68681) from IP2: the 1 MHz clock goes on the core's IP2
@@ -54,6 +57,7 @@ void Machine::powerOn() {
     board_.esp().reset();
     duart_.reset();
     fdc_.reset();
+    wd_.reset();  // the SP-4's WD33C93 on the power-on reset; the CD drive has its own supply and keeps its disc
     panel_.reset();
     carry_ = 0;
     duartAcc_ = 0;
@@ -177,6 +181,8 @@ void Machine::trace(uint32_t addr, uint16_t value, uint8_t size, bool write, Dev
 // DECISION T7: DUART OP6 is ESPHALT, active high (the pin is high while OPR bit 6 is 0); OP2..OP0 select
 // the analog mux input on the OTTO POT pin: the mux switches at once, the OTTO conversion (OT16) samples it
 // when it ends.
+// DECISION T26: the WD33C93's INTRQ reaches no level (the OS sends levels 2 and 4-7 to its fatal path, c00d62); the
+// OS polls the Auxiliary Status register instead.
 void Machine::updateLines() {
     int level = 0;
     if (ottoLevel_ && board_.otto().irqAsserted()) level = std::max(level, ottoLevel_);
@@ -209,8 +215,10 @@ uint8_t Machine::ioRead(Region r, uint32_t a) {
     case Region::Otto: return odd ? board_.otto().read(static_cast<uint8_t>((a >> 1) & 0x3F)) : 0;
     case Region::Esp: return odd ? board_.esp().hostRead(static_cast<uint8_t>((a >> 1) & 0xFF)) : 0;
     case Region::Fdc: return odd ? fdc_.read((a & 2) != 0) : 0;  // FDC A0 = CPU A1
+    case Region::Scsi:  // DECISION T25: the WD33C93's A0 = CPU A1, odd bytes, as the FDC; T12 without the board
+        return scsi_ && odd ? wd_.read((a & 2) != 0) : 0;
     case Region::Iexp: return static_cast<uint8_t>(0xFF & ~iexpDown_);  // DECISION T9: upper bits high
-    default: return 0;  // DECISION T12: SCSI (no board) and unmapped space read 0
+    default: return 0;  // DECISION T12: unmapped space reads 0
     }
 }
 
@@ -221,6 +229,9 @@ void Machine::ioWrite(Region r, uint32_t a, uint8_t v) {
     case Region::Otto: board_.otto().write(static_cast<uint8_t>((a >> 1) & 0x3F), v); break;
     case Region::Esp: board_.esp().hostWrite(static_cast<uint8_t>((a >> 1) & 0xFF), v); break;
     case Region::Fdc: fdc_.write((a & 2) != 0, v); break;
+    case Region::Scsi:
+        if (scsi_) wd_.write((a & 2) != 0, v);
+        break;
     default: break;
     }
 }

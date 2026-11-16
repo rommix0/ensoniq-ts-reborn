@@ -85,7 +85,7 @@ window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an a
 | Real-time suite | `build\ens_rt_tests.exe`, `build-msvc\Release\ens_rt_tests.exe` | Counts allocations in `Machine::runFrame` and `Engine::render` after the boot; must be 0. Also on Linux. |
 | App checks | `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` | Headless: ROM folder, memory file, buses, parameters, state, the editor painted offscreen, the built VST3 through JUCE's host. About 55 s with the ROMs. Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`. Sets `TSR_SETTINGS_DIR` to a temp folder. |
 | 68000 suite | `ctest --test-dir build -R m68k_suite` | Needs Tom Harte's tests (`testdata/`, ignored; see `docs/m68k.md`). `-DENS_M68K_TESTS_DIR=` can point at the KS-32 repo's local copy. |
-| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image; written back only after a run of at least the boot time), `--sqx70`, `--disk <image>` and `--save-disk <file>` (a disk image in the drive; the disk written out at the end): see the comment at the top of `tools/tsemu/main.cpp`. |
+| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image; written back only after a run of at least the boot time), `--sqx70`, `--disk <image>` and `--save-disk <file>` (a disk image in the drive; the disk written out at the end), `--cd <image>` (fits the SP-4 SCSI board and puts a `.iso` or `.cue` CD image in the CD-ROM drive at ID 4, read between frames; also for `render`): see the comment at the top of `tools/tsemu/main.cpp`. |
 | TS render | `build\tsemu.exe render tests/data/player_smoke.mid out.wav` | Boots, plays the MIDI file, writes Main as a WAV and prints `pcm hash <16 hex>`. |
 | Speed | `build-msvc\Release\tsemu.exe bench` | Realtime factor of a 20 s chord load after the boot; must stay at x2 or more on MSVC. |
 
@@ -104,7 +104,10 @@ Firmware tests read the ROMs from `ENS_ROM_DIR` (default `roms/`) and print "ski
 without them. The disk tests read the user's disk images from `ENS_DISK_DIR` (a CMake cache variable, a
 compile-time path; empty by default): `-DENS_DISK_DIR="<folder with AD-001.img, ED-001.GKH, the blank
 Giebler files>"`. With it empty, `image_user_files` and the floppy tests that need those images print
-"skip: disk images not found". The images are the user's own and are never copied into the repo.
+"skip: disk images not found". The CD tests (`cd_file_reads_user_cds`, `ts_cd_*`) read the user's CD images from the
+same folder. The app checks need it too to run their floppy and CD project checks: configure `build-app` and
+`build-linux-app` with `-DENS_DISK_DIR=...` (it becomes `TSR_DISK_DIR` there). The images are the user's own,
+only ever read, and never copied into the repo.
 
 Tests use the tiny registry in `tests/check.h` (`TEST(name) { CHECK(...); CHECK_EQ(a, b); }`). A new
 test file is one line in `ENS_TEST_SOURCES` in `tests/CMakeLists.txt`. For bugs, write the failing test

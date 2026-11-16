@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
 #include <vector>
 
 #include "smf.h"
@@ -48,8 +49,10 @@ struct Rendered {
 };
 
 // From the machine's current state (normally just booted): renders until the last event plus tailMs,
-// sending each event to MIDI in at the start of its frame (frame 0 = the first frame rendered).
-inline Rendered renderMidi(ens::ts::Machine& m, const std::vector<MidiEvent>& events, uint32_t tailMs) {
+// sending each event to MIDI in at the start of its frame (frame 0 = the first frame rendered). afterFrame, when
+// set, runs after every frame (tsemu --cd serves the CD's sectors there).
+inline Rendered renderMidi(ens::ts::Machine& m, const std::vector<MidiEvent>& events, uint32_t tailMs,
+                           const std::function<void()>& afterFrame = {}) {
     const uint64_t frames = (events.empty() ? 0 : events.back().frame) + msFrames(tailMs);
     Rendered r;
     r.main.reserve(static_cast<size_t>(frames) * 2);
@@ -60,6 +63,7 @@ inline Rendered renderMidi(ens::ts::Machine& m, const std::vector<MidiEvent>& ev
         for (; next < events.size() && events[next].frame <= f; ++next)
             sendMidi(m, events[next].status, events[next].d1, events[next].d2);
         m.runFrame(a);
+        if (afterFrame) afterFrame();
         for (uint8_t b = 0; m.popMidiOut(b);) ++r.midiOut;
         r.main.insert(r.main.end(), {a.mainL, a.mainR});
         r.aux.insert(r.aux.end(), {a.auxL, a.auxR});

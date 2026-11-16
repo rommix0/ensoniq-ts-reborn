@@ -1,7 +1,7 @@
 // tsemu: runs the emulated TS-10 (OS v3.10 on the 68000 with the DUART and the OTTO/ESP board).
 //   tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] [--last <n>]
 //              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]... [--ram <file>] [--sqx70]
-//              [--disk <image>] [--save-disk <file>]
+//              [--disk <image>] [--save-disk <file>] [--cd <image>]
 // --trace takes a comma list of otto,esp,duart,fdc,iexp,scsi,unmapped,iack; matching bus events are
 // printed as "<cycle> <DEV> <R|W><size> <addr> <value>". --last <n> prints the last n instruction
 // addresses disassembled, to see where a run stops (the disassembler is a debugging aid).
@@ -25,8 +25,10 @@
 // format the file's extension gives (.gkh GKH, .ede/.eda/.edt Giebler, anything else raw; the --disk file's
 // header is kept when the format is the same); it is refused when it names the --disk file, and when the drive
 // is empty.
+// --cd <image> fits the SP-4 SCSI board (T25) and puts a CD image (.iso, or .cue with one MODE1/2352 track) in the
+// CD-ROM drive at SCSI ID 4 from power-on; its sectors are read from the file between frames (T29). Only read.
 //   tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] [--analog <name>=<raw>]...
-//                [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>]
+//                [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>] [--cd <image>]
 // render boots for kBootMs (not written), sends each MIDI file event to MIDI in at its frame and renders
 // until the last event plus --tail (default 2000 ms); it writes Main as a 16-bit stereo WAV at kWavRate
 // (--aux writes Aux the same way) and prints one summary line and "pcm hash <16 hex>", the FNV-1a 64 of
@@ -49,6 +51,7 @@
 #include <string>
 #include <vector>
 
+#include "cd_file.h"
 #include "files.h"
 #include "m68k/m68k_dis.h"
 #include "smf.h"
@@ -80,6 +83,20 @@ struct Options {
     std::string ram;                                                  // --ram: the battery RAM image file
     bool sqx70 = false;                                               // --sqx70: SEQEXP fitted
     std::string disk, saveDisk;                                       // --disk, --save-disk
+    std::string cd;                                                   // --cd: a CD image at SCSI ID 4
+};
+
+// --cd: the image answering the machine's sector port, called after every frame (T29).
+struct ServedCd {
+    CdFile file;
+    uint8_t buf[SectorPort::kBytes] = {};
+    static constexpr uint32_t kMedium = 1;
+    void serve(Machine& m) {
+        SectorPort* p = m.cdPort();
+        uint32_t medium = 0, lba = 0;
+        if (!p || !p->pending(medium, lba)) return;
+        p->reply(medium, lba, buf, medium == kMedium && file.read(lba, buf));
+    }
 };
 
 constexpr struct {
@@ -215,8 +232,8 @@ std::pair<Analog, uint16_t> parseAnalog(const std::string& v) {
     fail("bad value '" + v + "' for --analog (PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF=<raw>)");
 }
 
-// kept: the --disk file's format and header, for --save-disk.
-std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = nullptr) {
+// kept: the --disk file's format and header, for --save-disk; cd: the --cd image, opened and inserted.
+std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = nullptr, ServedCd* cd = nullptr) {
     RomSet roms;
     roms.osHigh = load(o.roms + "/os", "ts10_310h.bin");
     roms.osLow = load(o.roms + "/os", "ts10_310l.bin");
@@ -225,7 +242,7 @@ std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = null
     roms.u45 = load(o.roms + "/waves", "901402_u45.bin");
     roms.u46 = load(o.roms + "/waves", "901302_u46.bin");
     std::string err;
-    auto m = Machine::create(roms, err, o.sqx70);
+    auto m = Machine::create(roms, err, o.sqx70, !o.cd.empty());
     if (!m) fail(err);
     for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
     if (!o.ram.empty()) {
@@ -242,6 +259,10 @@ std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = null
         if (!readFile(o.disk, file, err) || !decodeImage(file, img, err)) fail(err + " '" + o.disk + "'");
         m->insertDisk(std::move(img.disk));
         if (kept) *kept = std::move(img);
+    }
+    if (cd && !o.cd.empty()) {
+        if (!cd->file.open(o.cd, err)) fail(err + " '" + o.cd + "'");
+        m->insertCd(ServedCd::kMedium, cd->file.sectors());
     }
     return m;
 }
@@ -273,7 +294,8 @@ int boot(const Options& o) {
     if (!parseTrace(o.trace, traced))
         fail("bad value '" + o.trace + "' for --trace (otto,esp,duart,fdc,iexp,scsi,unmapped,iack)");
     DecodedImage kept;
-    auto m = makeMachine(o, &kept);
+    ServedCd cd;
+    auto m = makeMachine(o, &kept, &cd);
 
     std::set<uint32_t> unmapped;
     std::map<int, uint8_t> duartLast;  // register -> last value written
@@ -314,6 +336,7 @@ int boot(const Options& o) {
              events.erase(events.begin()))
             m->button(events.begin()->second.first, events.begin()->second.second);
         m->runFrame(audio);
+        cd.serve(*m);
         ++frames;
         for (uint8_t b = 0; m->popMidiOut(b);) tx[kMidiChannel].push_back(b);
         const PanelState& p = m->panel();
@@ -393,9 +416,15 @@ int render(const Options& o) {
     std::string err;
     if (!readFile(o.positional[0], file, err) || !parseSmf(file, midi, err)) fail(err + " '" + o.positional[0] + "'");
     DecodedImage kept;
-    auto m = makeMachine(o, &kept);
-    runMs(*m, kBootMs);
-    const Rendered r = renderMidi(*m, midi, o.tailMs);
+    ServedCd cd;
+    auto m = makeMachine(o, &kept, &cd);
+    const auto serve = [&cd, &m] { cd.serve(*m); };
+    Audio boot;  // runMs with the CD served
+    for (const uint64_t end = m->cycles() + static_cast<uint64_t>(kBootMs) * kCpuHz / 1000; m->cycles() < end;) {
+        m->runFrame(boot);
+        serve();
+    }
+    const Rendered r = renderMidi(*m, midi, o.tailMs, serve);
     writeWav(o.positional[1], r.main);
     if (!o.aux.empty()) writeWav(o.aux, r.aux);
     saveRam(*m, o.ram, kBootMs);  // render booted for kBootMs first
@@ -452,10 +481,10 @@ int main(int argc, char** argv) {
         if (cmd != "boot" && cmd != "render" && cmd != "bench")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
                  "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...\n"
-                 "             [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>]\n"
+                 "             [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
                  "  tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] "
                  "[--analog <name>=<raw>]... [--ram <file>] [--sqx70]\n"
-                 "               [--disk <image>] [--save-disk <file>]\n"
+                 "               [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
                  "  tsemu bench [--roms <dir>] [--seconds <n>]");
         Options o;
         for (int i = 2; i < argc; ++i) {
@@ -484,6 +513,7 @@ int main(int argc, char** argv) {
             else if (a == "--ram") o.ram = v;
             else if (a == "--disk") o.disk = v;
             else if (a == "--save-disk") o.saveDisk = v;
+            else if (a == "--cd") o.cd = v;
             else fail("unknown option " + a);
         }
         std::error_code ec;

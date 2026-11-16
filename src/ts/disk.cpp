@@ -7,7 +7,8 @@ namespace ens::ts {
 Disk::Disk(Density d)
     : density_(d),
       data_(size_t(kCylinders) * kHeads * size_t(d == Density::High ? 20 : 10) * kSectorBytes, 0),
-      formatted_(size_t(kCylinders) * kHeads, 0) {}
+      formatted_(size_t(kCylinders) * kHeads, 0),
+      read_(data_.size() / kSectorBytes, 0) {}
 
 std::unique_ptr<Disk> Disk::blank(Density d) { return std::unique_ptr<Disk>(new Disk(d)); }
 
@@ -44,10 +45,17 @@ uint8_t* Disk::block(int n) {
     return data_.data() + size_t(n) * kSectorBytes;
 }
 
+void Disk::clearReads() {
+    std::fill(read_.begin(), read_.end(), uint8_t(0));
+    reads_ = 0;
+}
+
 bool Disk::copyInto(Disk& dst) const {
     if (dst.density_ != density_) return false;
     std::copy(data_.begin(), data_.end(), dst.data_.begin());
     std::copy(formatted_.begin(), formatted_.end(), dst.formatted_.begin());
+    std::copy(read_.begin(), read_.end(), dst.read_.begin());
+    dst.reads_ = reads_;
     dst.writes_ = writes_;  // DECISION A119: the app's "modified" baseline is the copy's count
     return true;
 }

@@ -10,10 +10,22 @@ namespace {
 // DECISION A104: booted once the engine has run kBootMs of emulated time since power-on, counted in
 // whole frames of 512 CPU clocks (A100) as the tests' msFrames counts them.
 constexpr uint64_t kBootFrames = static_cast<uint64_t>(ts::kBootMs) * ts::kCpuHz / 512'000;
+// A soft button held for an answer (A124, A131): 100 ms of frames.
+constexpr uint64_t kHold = 100ull * ts::kCpuHz / 512'000;
+// DECISION A131: the restore also ends after 10 s with no floppy block read, no CD sector asked and no display change
+// (a page the engine does not answer; with the error page left unanswered it ends 10 s after it, A131). The longest
+// such quiet seen in a good restore is 3.9 s (the CD mount's WORKING..., A131).
+constexpr uint64_t kRestoreIdle = 10'000ull * ts::kCpuHz / 512'000;
+// DECISION A131: a prompt still showing 2 s after the engine's answer was released gets *SKIP* (the OS takes a
+// button within a frame; an answered prompt is gone or redrawn within 0.4 s).
+constexpr uint64_t kPromptAgain = 2'000ull * ts::kCpuHz / 512'000;
+// DECISION A131: and at 120 s of emulated time since power-on in any case, so the boot (A104) is never held for good.
+// The longest restore seen is a 3927-block CD sound, 23.6 s (A130).
+constexpr uint64_t kRestoreCap = 120'000ull * ts::kCpuHz / 512'000;
 }  // namespace
 
-std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err) {
-    auto m = ts::Machine::create(roms, err);
+std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err, bool scsi) {
+    auto m = ts::Machine::create(roms, err, false, scsi);
     if (!m) return nullptr;
     return std::unique_ptr<Engine>(new Engine(std::move(m)));
 }
@@ -160,7 +172,8 @@ void Engine::sendSelect(const uint8_t* b, int n) {
 
 void Engine::blockStart() {
     bool bootEnd = false;
-    if (!booted_ && frames_ >= kBootFrames) {
+    // DECISION A130: with stand-ins the boot ends when the restore does (restoreStep), not before.
+    if (!booted_ && frames_ >= kBootFrames && !restoring_.load(std::memory_order_relaxed)) {
         booted_ = bootEnd = true;
         current_ = 0;  // DECISION A105: OS v3.10 boots, cold or warm, to U0-0 (program 0, bank 0/0)
         dirty_ = true;
@@ -199,7 +212,6 @@ void Engine::setAnswerAutoLoad(bool on) {
 // (A104), so the same question after a SAMPLE-BANKS or 60-SEQ/SONGS load is left to the player.
 void Engine::answerAutoLoad() {
     static constexpr char kAsk[] = "AUTO-LOAD ALL SAMPLED-SOUNDS";
-    static constexpr uint64_t kHold = 100ull * ts::kCpuHz / 512'000;
     if (autoLoad_ == AutoLoad::Watch) {
         if (booted_) {
             autoLoad_ = AutoLoad::Done;
@@ -209,13 +221,142 @@ void Engine::answerAutoLoad() {
         if (std::memcmp(p.text[0], kAsk, sizeof kAsk - 1) != 0 || std::memcmp(&p.text[1][35], "*NO *", 5) != 0 ||
             m_->panelRoom() < 2)
             return;
-        m_->button(ts::Button::Soft6, true);
+        // DECISION A130: *YES* (Soft3, under it at row 0 columns 35-39) when restoring from stand-ins, else *NO *.
+        autoLoadButton_ = restoring_.load(std::memory_order_relaxed) ? ts::Button::Soft3 : ts::Button::Soft6;
+        m_->button(autoLoadButton_, true);
         autoLoadAt_ = frames_;
         autoLoad_ = AutoLoad::Held;
     } else if (autoLoad_ == AutoLoad::Held && frames_ - autoLoadAt_ >= kHold && m_->panelRoom() >= 2) {
-        m_->button(ts::Button::Soft6, false);
+        m_->button(autoLoadButton_, false);
         autoLoad_ = AutoLoad::Done;
     }
+}
+
+void Engine::setRestore(StandIns s) {
+    const size_t nf = s.floppies.size(), nc = s.cdMedia.size();
+    if ((nf == 0 && nc == 0) || m_->disk() || s.floppyLabels.size() != nf || s.cdSizes.size() != nc ||
+        s.cdLabels.size() != nc)
+        return;
+    restore_ = std::move(s);
+    floppyIn_ = -1;
+    if (nf > 0 && restore_.floppies[0]) putFloppy(0);
+    if (nc > 0) m_->insertCd(restore_.cdMedia[0], restore_.cdSizes[0]);
+    promptArmed_ = true;
+    promptHeld_ = false;
+    lastOkFloppy_ = lastOkCd_ = -1;
+    activeAt_ = 0;
+    restoreClean_ = true;
+    autoLoad_ = AutoLoad::Watch;
+    restoring_.store(true, std::memory_order_release);
+}
+
+std::vector<std::unique_ptr<ts::Disk>> Engine::takeStandIns() {
+    if (restoring_.load(std::memory_order_acquire)) return {};
+    return std::move(restore_.floppies);
+}
+
+void Engine::putFloppy(int i) {
+    if (i == floppyIn_) return;
+    std::unique_ptr<ts::Disk> out = m_->insertDisk(std::move(restore_.floppies[size_t(i)]));
+    if (floppyIn_ >= 0) restore_.floppies[size_t(floppyIn_)] = std::move(out);  // back to its slot, never freed here
+    floppyIn_ = i;
+}
+
+void Engine::endRestore() {
+    if (floppyIn_ >= 0) restore_.floppies[size_t(floppyIn_)] = m_->insertDisk(nullptr);
+    floppyIn_ = -1;
+    if (!restore_.cdMedia.empty()) m_->insertCd(0, 0);
+    restoring_.store(false, std::memory_order_release);
+}
+
+// DECISION A131: OS v3.10 asks for each remembered disk or volume it does not find in its drive (A130, found by
+// running):
+//   row 0 "INSERT DISK WITH NAME " + the 7-byte label (columns 22-28) ... "* OK *" (Soft3, columns 34-39)
+//   row 1 "INTO DISK DRIVE" or "INTO SCSI DEVICE 4"                ... "*SKIP*" (Soft6, columns 34-39)
+// The engine puts in the stand-in of that kind with that label and presses *OK*, or presses *SKIP* when it has none,
+// when the prompt is the one it just answered *OK* (the OS did not take that stand-in), or when its answer has not
+// moved the prompt for kPromptAgain. A page that says PRESS ANY BUTTON TO CONTINUE (DISK DRIVE NOT RESPONDING after a
+// sector a stand-in lacks) gets Up, after which the OS asks for the volume again (as UNKNOWN) and gets *SKIP*. The
+// restore ends once the boot time (A104) has passed and row 0 is the play screen the OS shows after the auto-load as
+// after any boot (U0-0, A105), or after kRestoreIdle with no floppy read, CD ask or display change, or at kRestoreCap.
+// It is clean (Snapshot::restoreClean, A129) only on the play screen with no *SKIP* and no error page answered.
+// Audio thread, at the block start: it only moves the stand-ins, never allocates or frees one.
+void Engine::restoreStep() {
+    const auto& p = m_->panel();
+    const ts::Disk* d = m_->disk();
+    const uint32_t reads = d ? d->reads() : 0, asks = m_->cdPort() ? m_->cdPort()->asks() : 0;
+    if (d != actDisk_ || reads != actReads_ || asks != actAsks_ || std::memcmp(p.text, actText_, sizeof actText_) != 0) {
+        actDisk_ = d;
+        actReads_ = reads;
+        actAsks_ = asks;
+        std::memcpy(actText_, p.text, sizeof actText_);
+        activeAt_ = frames_;
+    }
+    if (promptHeld_) {
+        if (frames_ - promptAt_ >= kHold && m_->panelRoom() >= 2) {
+            m_->button(promptButton_, false);
+            promptHeld_ = false;
+            releasedAt_ = frames_;
+        }
+        return;
+    }
+    if (frames_ >= kRestoreCap) {
+        restoreClean_ = false;
+        endRestore();
+        return;
+    }
+    const bool prompt = std::memcmp(p.text[0], "INSERT DISK WITH NAME ", 22) == 0 &&
+                        std::memcmp(&p.text[0][34], "* OK *", 6) == 0 && std::memcmp(&p.text[1][34], "*SKIP*", 6) == 0;
+    // An error page that waits for a button (DISK DRIVE NOT RESPONDING after a sector a stand-in lacks): Up, as a
+    // player would, so the OS goes on with the auto-load while the stand-ins are still in.
+    const bool error = std::string_view(p.text[1], sizeof p.text[1]).find("PRESS ANY BUTTON TO CONTINUE") !=
+                       std::string_view::npos;
+    if (!prompt && !error) {
+        promptArmed_ = true;
+        const bool play = std::memcmp(p.text[0], "U0-0 ", 5) == 0;
+        if (frames_ >= kBootFrames && autoLoad_ != AutoLoad::Held && (play || frames_ - activeAt_ >= kRestoreIdle)) {
+            restoreClean_ = restoreClean_ && play;
+            endRestore();
+        }
+        return;
+    }
+    if (m_->panelRoom() < 2) return;
+    bool found = false;
+    if (prompt && promptArmed_) {
+        int a = 22, b = 29;
+        while (a < b && p.text[0][a] == ' ') ++a;
+        while (b > a && p.text[0][b - 1] == ' ') --b;
+        const std::string_view name(&p.text[0][a], size_t(b - a));
+        int floppy = -1, cd = -1;
+        if (std::memcmp(p.text[1], "INTO DISK DRIVE ", 16) == 0) {
+            for (size_t i = 0; i < restore_.floppyLabels.size() && floppy < 0; ++i)
+                if (restore_.floppyLabels[i] == name && (restore_.floppies[i] || floppyIn_ == int(i))) floppy = int(i);
+        } else if (std::memcmp(p.text[1], "INTO SCSI DEVICE 4 ", 19) == 0) {
+            for (size_t i = 0; i < restore_.cdLabels.size() && cd < 0; ++i)
+                if (restore_.cdLabels[i] == name) cd = int(i);
+        }
+        // The same prompt again right after *OK* for it: the OS did not accept that stand-in.
+        if (floppy >= 0 && floppy != lastOkFloppy_) {
+            putFloppy(floppy);
+            found = true;
+        } else if (cd >= 0 && cd != lastOkCd_) {
+            if (m_->cd() && m_->cd()->medium() != restore_.cdMedia[size_t(cd)])
+                m_->insertCd(restore_.cdMedia[size_t(cd)], restore_.cdSizes[size_t(cd)]);
+            found = true;
+        }
+        lastOkFloppy_ = found ? floppy : -1;
+        lastOkCd_ = found ? cd : -1;
+    } else if (!promptArmed_) {
+        if (frames_ - releasedAt_ < kPromptAgain) return;  // answered; waiting for the OS to take the button
+        if (prompt) lastOkFloppy_ = lastOkCd_ = -1;  // the answer did not move the prompt: *SKIP*; a page: Up again
+    }
+    promptButton_ = !prompt ? ts::Button::Up : found ? ts::Button::Soft3 : ts::Button::Soft6;
+    // DECISION A129: a *SKIP* or an error page leaves a sound unloaded; the app then keeps the restored media.
+    if (promptButton_ != ts::Button::Soft3) restoreClean_ = false;
+    m_->button(promptButton_, true);
+    promptAt_ = frames_;
+    promptHeld_ = true;
+    promptArmed_ = false;
 }
 
 ts::Machine& Engine::machine() { return *m_; }
@@ -281,6 +422,26 @@ std::unique_ptr<ts::Disk> Engine::releaseDisk() {
     return m_->insertDisk(nullptr);
 }
 
+ts::SectorPort* Engine::cdPort() { return m_->cdPort(); }
+
+bool Engine::insertCd(uint32_t medium, uint32_t sectors) {
+    if (cdWanted_.load(std::memory_order_acquire)) return false;
+    cdIn_.store(uint64_t{medium} << 32 | sectors, std::memory_order_relaxed);
+    cdWanted_.store(true, std::memory_order_release);
+    return true;
+}
+
+std::pair<uint32_t, uint32_t> Engine::releaseCd() {
+    if (cdWanted_.load(std::memory_order_acquire)) {
+        cdWanted_.store(false, std::memory_order_relaxed);
+        const uint64_t v = cdIn_.load(std::memory_order_relaxed);
+        return {uint32_t(v >> 32), uint32_t(v)};
+    }
+    const ts::CdTarget* cd = m_->cd();
+    return cd && cd->hasDisc() ? std::pair<uint32_t, uint32_t>{cd->medium(), cd->sectors()}
+                               : std::pair<uint32_t, uint32_t>{0, 0};
+}
+
 // DECISION A101: a byte at offset o enters before machine frame floor(o * kFrameHz / outRate) of the
 // block; the store holds 1024 bytes a block, and the rest are dropped and counted.
 // DECISION A108: every byte goes to MIDI IN unchanged, as the jack would carry it; the OS reads pressure itself.
@@ -341,8 +502,11 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         holding_ = false;
     }
     if (autoLoad_ == AutoLoad::Watch || autoLoad_ == AutoLoad::Held) answerAutoLoad();
+    const bool restoring = restoring_.load(std::memory_order_relaxed);
+    if (restoring) restoreStep();  // also when the OS never asks (no sampled sound remembered)
     // DECISION A118: a swap waits while the last removed disk is untaken, so none is lost or freed here.
-    if (swapWanted_.load(std::memory_order_acquire) && !removedFull_.load(std::memory_order_acquire)) {
+    // DECISION A131: while restoring, the slots below wait (the stand-ins own the drives).
+    if (!restoring && swapWanted_.load(std::memory_order_acquire) && !removedFull_.load(std::memory_order_acquire)) {
         std::unique_ptr<ts::Disk> old = m_->insertDisk(std::unique_ptr<ts::Disk>(swapIn_.exchange(nullptr)));
         if (old) {  // an empty drive parks nothing, so it never blocks the next swap
             removed_.store(old.release(), std::memory_order_relaxed);
@@ -351,10 +515,15 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         ++diskSwaps_;
         swapWanted_.store(false, std::memory_order_release);
     }
+    if (!restoring && cdWanted_.load(std::memory_order_acquire)) {  // A128: the CD slot, at the block start
+        const uint64_t v = cdIn_.load(std::memory_order_relaxed);
+        m_->insertCd(uint32_t(v >> 32), uint32_t(v));
+        cdWanted_.store(false, std::memory_order_release);
+    }
     // DECISION A119: after the swap, so it reaches a disk inserted in this block too.
-    if (const int p = protect_.exchange(-1, std::memory_order_relaxed); p >= 0 && m_->disk())
+    if (const int p = restoring ? -1 : protect_.exchange(-1, std::memory_order_relaxed); p >= 0 && m_->disk())
         m_->disk()->setWriteProtected(p != 0);
-    if (copyState_.load(std::memory_order_acquire) == 1) {
+    if (!restoring && copyState_.load(std::memory_order_acquire) == 1) {
         const ts::Disk* cur = m_->disk();
         copyOk_.store(cur && cur->copyInto(*scratch_.load(std::memory_order_relaxed)), std::memory_order_relaxed);
         copySwaps_.store(diskSwaps_, std::memory_order_relaxed);  // after the swap above: this disk's count
@@ -379,7 +548,9 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
     if (snapMu_.try_lock()) {
         snap_.panel = m_->panel();
         snap_.seqLed = m_->seqLed();
-        snap_.booted = frames_ >= kBootFrames;
+        snap_.restoring = restoring_.load(std::memory_order_relaxed);
+        snap_.restoreClean = restoreClean_;
+        snap_.booted = frames_ >= kBootFrames && !snap_.restoring;
         snap_.frames = frames_;
         snap_.midiDropped = storeDropped_ + m_->duart().rxDropped(ts::kMidiChannel);
         snap_.midiOutBytes = midiOut_;
@@ -392,6 +563,8 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         snap_.diskIn = m_->disk() != nullptr;
         snap_.diskWrites = m_->disk() ? m_->disk()->writes() : 0;
         snap_.diskSwaps = diskSwaps_;
+        snap_.diskReads = m_->disk() ? m_->disk()->reads() : 0;
+        snap_.cdMedium = m_->cd() ? m_->cd()->medium() : 0;
         snapMu_.unlock();
     }
     // The acquire on ramReady_ pairs with takeRam's release, so its reads of ram_ end before this

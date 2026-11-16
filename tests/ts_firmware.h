@@ -26,17 +26,17 @@ inline bool readTsRoms(ens::ts::RomSet& r) {
            read(dir + "/waves/901402_u45.bin", r.u45) && read(dir + "/waves/901302_u46.bin", r.u46);
 }
 
-// A fresh machine on the ROMs from ENS_ROM_DIR (a stock TS-10, or with the SQX-70 fitted: T13);
-// nullptr when a file is missing (prints the skip). Files that exist but are rejected fail the running
+// A fresh machine on the ROMs from ENS_ROM_DIR (a stock TS-10, or with the SQX-70 fitted: T13, or the SP-4 SCSI
+// board: T25); nullptr when a file is missing (prints the skip). Files that exist but are rejected fail the running
 // test, so a bad ROM set never passes as a skip.
-inline std::unique_ptr<ens::ts::Machine> loadTs(bool sqx70 = false) {
+inline std::unique_ptr<ens::ts::Machine> loadTs(bool sqx70 = false, bool scsi = false) {
     ens::ts::RomSet r;
     if (!readTsRoms(r)) {
         std::printf("  skip: ROMs not found\n");
         return nullptr;
     }
     std::string err;
-    auto m = ens::ts::Machine::create(r, err, sqx70);
+    auto m = ens::ts::Machine::create(r, err, sqx70, scsi);
     if (!m) {
         std::printf("  FAIL: ROMs present but rejected: %s\n", err.c_str());
         ++ens_test::failures();
@@ -85,3 +85,18 @@ inline bool shows(const ens::ts::PanelState& p, const char* text) {
     using ens::ts::rowText;
     return rowText(p, 0).find(text) != std::string::npos || rowText(p, 1).find(text) != std::string::npos;
 }
+
+// A voice started from sample RAM: a CR write (pages 0x00-0x3F, register 0) with BS1:BS0 = 3, the bank the OS
+// gives BankSet S8 (T4). Follows the page register (15) and CR's byte 2 (bits 15-8); byte 3 completes the write.
+struct SampleVoices {
+    int count = 0;
+    unsigned page = 0, bs = 0;
+    void operator()(const ens::ts::BusEvent& e) {
+        if (e.dev != ens::ts::Device::Otto || !e.write) return;
+        const unsigned ha = (e.addr >> 1) & 0x3F, reg = ha >> 2, byte = ha & 3;
+        if (reg == 15 && byte == 3) page = e.value & 0x7F;
+        if (reg != 0 || page >= 0x40) return;
+        if (byte == 2) bs = (e.value >> 6) & 3;
+        if (byte == 3 && bs == 3) ++count;
+    }
+};

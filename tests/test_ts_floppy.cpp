@@ -9,82 +9,17 @@
 
 #include "app/engine.h"
 #include "check.h"
-#include "files.h"
 #include "ts/disk_image.h"
+#include "ts_disks.h"
 #include "ts_firmware.h"
 
 using namespace ens::ts;
+using namespace ts_disks;
 
 namespace {
 
-const char* const kEd001 =
-    "/EPS & EPS-16/Factory Sounds/Ensoniq EPS16 Factory Floppy Archive (15 disks, fixed) [IMG & GKH]/"
-    "Ensoniq EPS16 Factory Floppy Archive (15 disks) [IMG & GKH]/GKH/ED-001.GKH";
 const char* const kAd001 =
     "/ASR-10/Factory Sounds/Ensoniq ASR10 - Essential Sound Disks (Factory Library) [IMG, GKH, & EDA]/AD-001.img";
-
-// The image under ENS_DISK_DIR; nullptr with a skip line when it is missing.
-std::unique_ptr<Disk> loadDisk(const char* rel) {
-    std::vector<uint8_t> file;
-    std::string err;
-    const std::string dir = ENS_DISK_DIR;
-    if (dir.empty() || !readFile(dir + rel, file, err)) {
-        std::printf("  skip: disk images not found\n");
-        return nullptr;
-    }
-    DecodedImage img;
-    CHECK(decodeImage(file, img, err));
-    return std::move(img.disk);
-}
-
-// The name of the first sampled sound (file type 3) in the directory: 26-byte entries from block 3, the type
-// at byte 1, the name at bytes 2-13 (Giebler, "Ensoniq Floppy Diskette Format"). Trailing spaces cut.
-std::string firstSoundName(Disk& d) {
-    std::vector<uint8_t> dir(d.block(3), d.block(3) + Disk::kSectorBytes);
-    dir.insert(dir.end(), d.block(4), d.block(4) + Disk::kSectorBytes);
-    for (size_t e = 0; e + 26 <= dir.size(); e += 26)
-        if (dir[e + 1] == 3) {
-            std::string name(dir.begin() + e + 2, dir.begin() + e + 14);
-            return name.substr(0, name.find_last_not_of(' ') + 1);
-        }
-    return "";
-}
-
-// A TS booted with the disk in from power-on (as the hunt did); nullptr without ROMs or the disk.
-std::unique_ptr<Machine> bootWith(std::unique_ptr<Disk> d) {
-    if (!d) return nullptr;
-    auto m = loadTs();
-    if (!m) return nullptr;
-    CHECK(m->insertDisk(std::move(d)) == nullptr);
-    runMs(*m, kBootMs);
-    return m;
-}
-
-// Storage twice: the Disk Load page, which reads the disk's directory (Musician's Manual, Section 13).
-void openDiskLoad(Machine& m) {
-    tap(m, Button::Storage);
-    m.button(Button::Storage, true);
-    runMs(m, 60);
-    m.button(Button::Storage, false);
-}
-
-struct Seen {
-    bool text = false, notReady = false, notResponding = false;
-};
-
-// Runs ms, or until `text` shows (when stopAtText); what the display showed on any frame.
-Seen watch(Machine& m, uint32_t ms, const std::string& text, bool stopAtText = true) {
-    Seen s;
-    const uint64_t end = m.cycles() + static_cast<uint64_t>(ms) * kCpuHz / 1000;
-    Audio a;
-    while (m.cycles() < end && !(stopAtText && s.text)) {
-        m.runFrame(a);
-        s.text = s.text || shows(m.panel(), text.c_str());
-        s.notReady = s.notReady || shows(m.panel(), "NOT READY");
-        s.notResponding = s.notResponding || shows(m.panel(), "NOT RESPONDING");
-    }
-    return s;
-}
 
 }  // namespace
 
@@ -174,43 +109,6 @@ TEST(ts_empty_drive_still_reports_no_disk) {
 }
 
 namespace {
-
-// A voice started from sample RAM: a CR write (pages 0x00-0x3F, register 0) with BS1:BS0 = 3, the bank the OS
-// gives BankSet S8 (T4). Follows the page register (15) and CR's byte 2 (bits 15-8); byte 3 completes the write.
-struct SampleVoices {
-    int count = 0;
-    unsigned page = 0, bs = 0;
-    void operator()(const BusEvent& e) {
-        if (e.dev != Device::Otto || !e.write) return;
-        const unsigned ha = (e.addr >> 1) & 0x3F, reg = ha >> 2, byte = ha & 3;
-        if (reg == 15 && byte == 3) page = e.value & 0x7F;
-        if (reg != 0 || page >= 0x40) return;
-        if (byte == 2) bs = (e.value >> 6) & 3;
-        if (byte == 3 && bs == 3) ++count;
-    }
-};
-
-// A machine booted with the disk that has loaded the disk's first sampled sound into S8-0 (Musician's Manual,
-// Section 14, "Loading a Sampled Sound"); null without the ROMs or the image.
-std::unique_ptr<Machine> withFirstSound(const char* rel, std::string& name) {
-    auto disk = loadDisk(rel);
-    if (!disk) return nullptr;
-    name = firstSoundName(*disk);
-    auto m = bootWith(std::move(disk));
-    if (!m) return nullptr;
-    openDiskLoad(*m);
-    CHECK(watch(*m, 3000, "FILE=" + name).text);
-    tap(*m, Button::Soft3);  // *YES*: USE BANK BUTTONS TO SELECT LOCATION, BANKSET=8
-    CHECK(shows(m->panel(), "BANKSET=8"));
-    m->button(Button::Bank0, true);
-    runMs(*m, 60);
-    m->button(Button::Bank0, false);
-    CHECK(watch(*m, 2000, "LOADING " + name).text);
-    const Seen done = watch(*m, 30000, "LOAD FILE=");  // back on the Load page when the sound is in
-    CHECK(done.text);
-    CHECK(!done.notReady && !done.notResponding);
-    return m;
-}
 
 // Loads the disk's first sampled sound into S8-0, selects it and plays C-E-G for 400 ms (Section 14,
 // "Selecting and Playing a Sampled Sound").

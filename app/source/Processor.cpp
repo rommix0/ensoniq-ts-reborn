@@ -47,6 +47,87 @@ constexpr AnalogParam kAnalogParams[] = {{"volume", "Volume", Analog::Volume},
                                          {"cvPedal", "CV Pedal", Analog::CvPedal}};
 static_assert(std::size(kAnalogParams) == 5, "TsProcessor::analogRaw_ has five slots");
 
+// DECISION A129: <Media> in a Project state: one <Medium kind="floppy-dd|floppy-hd|cd" label="..." size="N"> per
+// medium the OS read from (size in blocks: 1600 or 3200 for a floppy, the sectors of a CD), with one
+// <Run first="b" count="k"> per stretch of consecutive blocks, the bytes in base64 (512 a floppy block, 2048 a CD
+// sector). The label's bytes are kept as Latin-1 characters, so any byte the OS shows comes back as it was.
+using ens::app::SavedMedium;
+
+const char* kindName(SavedMedium::Kind k) {
+    return k == SavedMedium::Kind::FloppyDD ? "floppy-dd" : k == SavedMedium::Kind::FloppyHD ? "floppy-hd" : "cd";
+}
+
+size_t blockBytes(SavedMedium::Kind k) {
+    return k == SavedMedium::Kind::Cd ? size_t(2048) : size_t(ens::ts::Disk::kSectorBytes);
+}
+
+std::unique_ptr<juce::XmlElement> mediaXml(const std::vector<SavedMedium>& media) {
+    auto x = std::make_unique<juce::XmlElement>("Media");
+    for (const auto& m : media) {
+        auto* e = x->createNewChildElement("Medium");
+        e->setAttribute("kind", kindName(m.kind));
+        juce::String label;
+        for (const char c : m.label) label += static_cast<juce::juce_wchar>(static_cast<uint8_t>(c));
+        e->setAttribute("label", label);
+        e->setAttribute("size", juce::String(m.size));
+        for (auto it = m.blocks.begin(); it != m.blocks.end();) {
+            const uint32_t first = it->first;
+            uint32_t count = 0;
+            juce::MemoryBlock run;
+            for (; it != m.blocks.end() && it->first == first + count; ++it, ++count)
+                run.append(it->second.data(), it->second.size());
+            auto* r = e->createNewChildElement("Run");
+            r->setAttribute("first", juce::String(first));
+            r->setAttribute("count", juce::String(count));
+            r->addTextElement(juce::Base64::toBase64(run.getData(), run.getSize()));
+        }
+    }
+    return x;
+}
+
+// DECISION A129 (Review Focus 5): a medium that is not whole is dropped and the rest restore: an unknown kind, a floppy
+// size other than 1600 (DD) or 3200 (HD), no CD sectors, a label character past 0xFF, a run outside the medium, bad
+// base64 or a run whose bytes are not count blocks, or no blocks at all.
+bool parseMedium(const juce::XmlElement& e, SavedMedium& m) {
+    const auto kind = e.getStringAttribute("kind");
+    const juce::int64 size = e.getStringAttribute("size").getLargeIntValue();
+    if (kind == "floppy-dd" && size == 1600)
+        m.kind = SavedMedium::Kind::FloppyDD;
+    else if (kind == "floppy-hd" && size == 3200)
+        m.kind = SavedMedium::Kind::FloppyHD;
+    else if (kind == "cd" && size > 0 && size <= 0xFFFFFFFF)
+        m.kind = SavedMedium::Kind::Cd;
+    else
+        return false;
+    m.size = static_cast<uint32_t>(size);
+    for (const auto c : e.getStringAttribute("label")) {
+        if (c > 0xFF) return false;
+        m.label += static_cast<char>(c);
+    }
+    const size_t bytes = blockBytes(m.kind);
+    for (const auto* r : e.getChildWithTagNameIterator("Run")) {
+        const juce::int64 first = r->getStringAttribute("first").getLargeIntValue();
+        const juce::int64 count = r->getStringAttribute("count").getLargeIntValue();
+        if (first < 0 || first >= size || count <= 0 || count > size - first) return false;
+        juce::MemoryOutputStream data;
+        if (!juce::Base64::convertFromBase64(data, r->getAllSubText()) ||
+            data.getDataSize() != static_cast<size_t>(count) * bytes)
+            return false;
+        const auto* p = static_cast<const uint8_t*>(data.getData());
+        for (juce::int64 i = 0; i < count; ++i, p += bytes)
+            m.blocks.emplace(static_cast<uint32_t>(first + i), std::vector<uint8_t>(p, p + bytes));
+    }
+    return !m.blocks.empty();
+}
+
+std::vector<SavedMedium> parseMedia(const juce::XmlElement* x) {
+    std::vector<SavedMedium> media;
+    if (x != nullptr)
+        for (const auto* e : x->getChildWithTagNameIterator("Medium"))
+            if (SavedMedium m; parseMedium(*e, m)) media.push_back(std::move(m));
+    return media;
+}
+
 }  // namespace
 
 // DECISION A111: the five analogs and the sound are host parameters (automatable): floats 0..1 whose
@@ -141,6 +222,7 @@ void TsProcessor::eraseMemory() {
             memoryError_ = {};
         }
         startSelect_.clear();
+        restoreWanted_ = false;  // DECISION A129: a cold machine restores no project's sounds
         if (mode_ == MemoryMode::Project || engine_) {  // File mode with no machine: the file alone
             startImage_.assign(static_cast<size_t>(kMemoryBytes), 0);
             haveStart_ = true;
@@ -164,22 +246,28 @@ bool TsProcessor::saved(bool ok) {
     return ok;
 }
 
-bool TsProcessor::restart(Ram ram) {
+bool TsProcessor::restart(Ram ram, bool fromState) {
     suspendProcessing(true);  // from here the audio thread is out of processBlock, and stays out
     const auto snap = engine_ ? engine_->snapshot() : ens::app::Snapshot{};
+    // Before tick saw it; not for a state load, which has already replaced restored_ and cleared the record with the
+    // new project's (A129): finishing would merge the new media into the old restore's and skip the new restore.
+    if (!fromState && restoreRan_ && snap.frames > 0 && !snap.restoring) finishRestore(snap.restoreClean);
     std::vector<uint8_t> img;
     // DECISION A117: Start replays the start image's select; Keep and File keep the select a state would
     // save (the running one once booted, else the start one), so a new memory file keeps the sound.
     auto sel = ram == Ram::Start ? startSelect_ : select(snap);
+    bool fromStart = false;
     if (ram == Ram::Keep && snap.booted) {
         img = engine_->machine().ramImage();  // audio stopped: the machine is ours to read
     } else if (ram != Ram::File && haveStart_) {
         img = startImage_;  // DECISION A116, A117: never a half-booted image, nor the file over a project's
+        fromStart = true;
     } else {
         img = loadMemoryFile(settings_.memoryFile(), memoryError_);  // wrong size: reported, cold boot
     }
     std::string e;
-    auto fresh = ens::app::Engine::create(roms_, e);
+    // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4.
+    auto fresh = ens::app::Engine::create(roms_, e, true);
     // DECISION A124: the VST3 answers the power-on auto-load question; the Standalone asks, as the TS does.
     if (fresh) fresh->setAnswerAutoLoad(mode_ == MemoryMode::Project);
     if (fresh && !img.empty() && !fresh->loadRam(img, e)) fresh.reset();
@@ -187,10 +275,52 @@ bool TsProcessor::restart(Ram ram) {
     if (ok) {
         fresh->setSelect(sel.data(), static_cast<int>(sel.size()));
         if (rate_ > 0) fresh->prepare(rate_, block_);
+        std::unique_ptr<ens::ts::Disk> disk;
+        std::pair<uint32_t, uint32_t> cd{0, 0};
+        if (engine_) {
+            disk = engine_->releaseDisk();
+            cd = engine_->releaseCd();
+        }
+        // DECISION A129: a stand-in of a restore that has not ended is not the user's: it goes with its engine.
+        if (std::find(standInDisks_.begin(), standInDisks_.end(), disk.get()) != standInDisks_.end()) disk.reset();
+        if (std::find(standInCds_.begin(), standInCds_.end(), cd.first) != standInCds_.end()) cd = {0, 0};
+        unserve();
+        standInCds_.clear();
+        standInDisks_.clear();
+        restoreRan_ = false;
+        // DECISION A129: a project's media go with the RAM they came with; any other start drops them.
+        if (!fromStart || !restoreWanted_) {
+            restored_.clear();
+            restoreWanted_ = false;
+        } else {
+            // Floppies through standInFloppy, CDs served by the CD drive from restored_ under fresh ids (A131).
+            ens::app::Engine::StandIns s;
+            for (const auto& m : restored_) {
+                if (m.kind == SavedMedium::Kind::Cd) {
+                    const uint32_t id = cd_.newMedium();
+                    cd_.serveFrom(&m, id);
+                    standInCds_.push_back(id);
+                    s.cdMedia.push_back(id);
+                    s.cdSizes.push_back(m.size);
+                    s.cdLabels.push_back(m.label);
+                } else {
+                    s.floppies.push_back(ens::app::standInFloppy(m));
+                    standInDisks_.push_back(s.floppies.back().get());
+                    s.floppyLabels.push_back(m.label);
+                }
+            }
+            fresh->setRestore(std::move(s));  // after loadRam, the drive empty, before the audio resumes
+            restoreRan_ = true;
+        }
+        // DECISION A129: the record starts again at a project's restore, so the user's disk counts only new reads.
+        if (disk && fromState) disk->clearReads();
         // DECISION A119: the disk in the drive goes into the new machine (the OS sees a disk change).
-        if (engine_)
-            if (auto disk = engine_->releaseDisk()) fresh->insertDisk(std::move(disk));
+        // DECISION A129: with a restore it waits in the slot and goes in once the restore ends (A131).
+        if (disk) fresh->insertDisk(std::move(disk));
+        // DECISION A128: so does the CD, under the same medium id (the same image); A129 as the disk.
+        if (cd.second != 0) fresh->insertCd(cd.first, cd.second);
         engine_.swap(fresh);  // fresh now holds the old engine, freed below after the resume
+        cd_.setEngine(engine_.get());  // before the old engine (and its port) is freed
         startImage_ = std::move(img);
         startSelect_ = std::move(sel);
         haveStart_ = true;
@@ -207,11 +337,54 @@ bool TsProcessor::restart(Ram ram) {
     return ok;
 }
 
+// DECISION A129: the floppy stand-ins come back with the blocks the auto-load read marked, and the record (cleared at
+// the restore) keeps them; the CD's sectors reached it as they were served. A restore that did not end clean (a
+// *SKIP*, an error page, the idle or cap end) left a sound unloaded that the RAM still names: the restored media stay
+// in the record under what was read, so the next save does not lose them. restored_ is dropped once the drive no
+// longer serves from it. The caller holds stateMu_; the restore of the current engine has ended.
+void TsProcessor::finishRestore(bool clean) {
+    auto back = engine_->takeStandIns();
+    {
+        const std::lock_guard<std::mutex> lock(mediaMu_);
+        if (!clean) record_.merge(restored_);
+        for (const auto& d : back)
+            if (d) record_.captureFloppy(*d);
+    }
+    unserve();
+    standInCds_.clear();
+    standInDisks_.clear();
+    restored_.clear();
+    restoreWanted_ = false;
+    restoreRan_ = false;
+}
+
+void TsProcessor::unserve() {
+    for (const uint32_t id : standInCds_) cd_.serveFrom(nullptr, id);
+}
+
+void TsProcessor::capture(const ens::ts::Disk& d) {
+    if (mode_ != MemoryMode::Project) return;  // DECISION A121: the Standalone records nothing
+    const std::lock_guard<std::mutex> lock(mediaMu_);
+    record_.captureFloppy(d);
+}
+
 // DECISION A116: every 60 s, once booted, the audio thread copies the RAM (requestRam) and the next
 // tick that finds the copy (takeRam) saves it; 1800 ticks of the 30 Hz timer make the 60 s.
 void TsProcessor::tick() {
     if (!engine_) return;
-    drive_.poll();  // A119: a removed disk freed, a save's copy written
+    drive_.poll();  // A119: a removed disk freed, a save's copy written; A129: floppies captured
+    {
+        const std::lock_guard<std::mutex> lock(mediaMu_);
+        cd_.poll();  // A128: the sectors served to the record
+    }
+    // DECISION A129: once the restore has ended (a block has run and restoring is false), the stand-ins. The snapshot
+    // is taken under stateMu_: one taken before it could be the old engine's, while a host's setStateInformation on
+    // another thread starts a new restore that the snapshot would then finish early.
+    if (restoreRan_) {
+        const std::lock_guard<std::mutex> lock(stateMu_);
+        const auto s = engine_->snapshot();
+        if (restoreRan_ && s.frames > 0 && !s.restoring) finishRestore(s.restoreClean);
+    }
     // DECISION A111 (as KS-32 A18): follow a program change tracked from the panel or MIDI (programSeq
     // moved), never the engine's own sends. followed_ is stored first, then `sound` is written, so a
     // processBlock that sees the new `sound` also finds the marker (and adopts the value instead of
@@ -349,9 +522,14 @@ void TsProcessor::getStateInformation(juce::MemoryBlock& dest) {
     if (!sel.empty())
         xml.setAttribute("select", juce::String::toHexString(sel.data(), static_cast<int>(sel.size()), 0));
     if (auto tree = params_.copyState().createXml()) xml.addChildElement(tree.release());
-    if (mode_ == MemoryMode::Project)
+    if (mode_ == MemoryMode::Project) {
         if (const auto img = ram(); !img.empty())
             xml.createNewChildElement("RAM")->addTextElement(juce::Base64::toBase64(img.data(), img.size()));
+        // DECISION A129 (Review Focus 3): while a restore is due or running, the media it restores, unchanged.
+        const std::lock_guard<std::mutex> mediaLock(mediaMu_);
+        const auto& media = restoreWanted_ ? restored_ : record_.media();
+        if (!media.empty()) xml.addChildElement(mediaXml(media).release());
+    }
     copyXmlToBinary(xml, dest);
 }
 
@@ -397,12 +575,22 @@ void TsProcessor::setStateInformation(const void* data, int size) {
             img.assign(p, p + out.getDataSize());
         }
     }
+    // DECISION A129: the media go with the RAM; a medium that is not whole is dropped (Review Focus 5).
+    auto media = img.empty() ? std::vector<SavedMedium>() : parseMedia(xml->getChildByName("Media"));
     const std::lock_guard<std::mutex> lock(stateMu_);
     if (!img.empty()) {
         startImage_ = std::move(img);
         startSelect_ = std::move(sel);
         haveStart_ = true;
-        if (engine_) restart(Ram::Start);  // with no ROMs, setRomFolder starts from it
+        // DECISION A129: the record starts again from what the restore's auto-load reads.
+        unserve();  // before restored_ changes; restart tells the old stand-ins from the user's media
+        restored_ = std::move(media);
+        restoreWanted_ = !restored_.empty();
+        {
+            const std::lock_guard<std::mutex> m(mediaMu_);
+            record_.clear();
+        }
+        if (engine_) restart(Ram::Start, true);  // with no ROMs, setRomFolder starts from it
     } else if (!sel.empty()) {
         // A state with no RAM arriving before the first block: its select is the one the next boot
         // replays, and with no ROMs it waits for setRomFolder's restart. Once booted the running

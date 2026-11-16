@@ -2,7 +2,9 @@
 // size (never ROM content), the memory file's load and save, the processor's memory-file guards and its
 // parameters (A111). On the real ROMs: the sound follow (A111), the plugin state and memory per format
 // (A117), the two output buses (A109), the panel editor clicked and painted offscreen (A113-A115), the disk
-// drive on temp files (A119), and the built TS Reborn.vst3 loaded, played and its editor opened through JUCE's
+// drive on temp files (A119), the CD drive (A127, A128; CDR-13 under TSR_DISK_DIR, else synthetic images), the media a
+// Project state keeps (A129; ED-001 and CDR-13 under TSR_DISK_DIR, else synthetic <Media>), and the
+// built TS Reborn.vst3 loaded, played and its editor opened through JUCE's
 // own VST3 host, as a DAW would.
 // No check puts a window on the desktop. Every check sets TSR_SETTINGS_DIR to a temp folder.
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -17,6 +19,7 @@
 #include <thread>
 
 #include "../source/AppSettings.h"
+#include "../source/CdDrive.h"
 #include "../source/DiskDrive.h"
 #include "../source/MemoryFile.h"
 #include "../source/PanelEditor.h"
@@ -1223,6 +1226,631 @@ void diskDrive(const juce::File& dir) {
     ed.reset();
 }
 
+// The CD drive (A127, A128). CDR-13's .cue under TSR_DISK_DIR (the user's images, read only); an empty File and
+// a skip line without it.
+juce::File cdr13() {
+    const juce::String dir = TSR_DISK_DIR;
+    if (dir.isNotEmpty()) {
+        const auto f = juce::File(dir).getChildFile(
+            "CD-ROMs/Ensoniq.CDR-13.InVision.Percussion.ENSONiQ-DELiRiUM/dlm-cdr13.cue");
+        if (f.existsAsFile()) return f;
+    }
+    std::printf("  skip: disk images not found\n");
+    return {};
+}
+
+// As run(), but after each block it gives the reader thread up to a second to answer the sector the block asked
+// for, then ticks: the machine sees the CD at about the pace it would in real time, whatever the speed here.
+void runCd(TsProcessor& p, int ms) {
+    juce::AudioBuffer<float> buf(4, 480);
+    juce::MidiBuffer none;
+    for (int i = 0; i < ms / 10; ++i) {
+        buf.clear();
+        p.processBlock(buf, none);
+        uint32_t medium = 0, lba = 0;
+        auto* port = p.engine()->cdPort();
+        for (int t = 0; port != nullptr && t < 1000 && port->pending(medium, lba); ++t) juce::Thread::sleep(1);
+        p.tick();
+    }
+}
+
+void pressCd(TsProcessor& p, ens::ts::Button b) {  // held 100 ms, then 300 ms for the display
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), true, 0});
+    runCd(p, 100);
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), false, 0});
+    runCd(p, 300);
+}
+
+bool shows(TsProcessor& p, const char* text) {
+    const auto& panel = p.engine()->snapshot().panel;
+    return ens::ts::rowText(panel, 0).find(text) != std::string::npos ||
+           ens::ts::rowText(panel, 1).find(text) != std::string::npos;
+}
+
+void printRows(TsProcessor& p) {
+    const auto& panel = p.engine()->snapshot().panel;
+    std::printf("  |%s|\n  |%s|\n", ens::ts::rowText(panel, 0).c_str(), ens::ts::rowText(panel, 1).c_str());
+}
+
+// The SCSI STATUS page at DEVICE-ID 4, as ts_cd_status_shows_volume opens it (tests/ts_disks.h): Storage, Soft4,
+// Up four times, then 1.5 s for the OS's poll to mount the volume.
+void openScsiStatus(TsProcessor& p) {
+    pressCd(p, ens::ts::Button::Storage);
+    pressCd(p, ens::ts::Button::Soft4);
+    for (int i = 0; i < 4; ++i) pressCd(p, ens::ts::Button::Up);
+    runCd(p, 1500);
+}
+
+// cd_drive (A127, A128): insert CDR-13's .cue, the refusals, a restart that keeps the CD, eject, and new medium ids.
+void cdDrive(const juce::File& dir) {
+    const auto cue = cdr13();
+    if (cue == juce::File() || !realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, 100);
+    auto& cd = p.cdDrive();
+    CHECK(cd.name().isEmpty() && p.engine()->snapshot().cdMedium == 0);
+
+    juce::String err;
+    CHECK(cd.insert(cue, err));
+    runCd(p, 10);
+    const uint32_t medium = p.engine()->snapshot().cdMedium;
+    CHECK(cd.name() == "dlm-cdr13.cue" && medium != 0);
+
+    // An .iso that is not whole 2048-byte sectors, and a .cue of another layout: refused, the CD in stays.
+    const auto iso = dir.getChildFile("short.iso");
+    write(iso, 1000);
+    CHECK(!cd.insert(iso, err) && err.contains("2048"));
+    const auto mode2 = dir.getChildFile("mode2.cue");
+    CHECK(mode2.replaceWithText("FILE \"x.bin\" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n"));
+    CHECK(!cd.insert(mode2, err) && err.contains("MODE1/2352"));
+    CHECK(!cd.insert(dir.getChildFile("x.wav"), err) && err.isNotEmpty());
+    runCd(p, 10);
+    CHECK(cd.name() == "dlm-cdr13.cue" && p.engine()->snapshot().cdMedium == medium);
+
+    // A restart (the same ROM folder) keeps the CD in, under the same medium id.
+    const auto* engine = p.engine();
+    CHECK(p.setRomFolder(juce::File(TSR_ROM_DIR), err) && p.engine() != engine);
+    runCd(p, 10);
+    CHECK(cd.name() == "dlm-cdr13.cue" && p.engine()->snapshot().cdMedium == medium);
+
+    CHECK(cd.eject());
+    runCd(p, 10);
+    CHECK(cd.name().isEmpty() && p.engine()->snapshot().cdMedium == 0);
+
+    // The same file again is a new medium: ids are never reused.
+    CHECK(cd.insert(cue, err));
+    runCd(p, 10);
+    CHECK(p.engine()->snapshot().cdMedium > medium);
+
+    // No audio running: refused at once, saying so.
+    TsProcessor q;
+    if (q.engine()) CHECK(!q.cdDrive().insert(cue, err) && err.contains("no audio"));
+}
+
+// cd_drive_loads: CDR-13 in the drive from power-on; the SCSI STATUS page shows its volume, read through the reader
+// thread. In Project mode the sectors served are in the record (A131).
+void cdDriveLoads(const juce::File& dir) {
+    const auto cue = cdr13();
+    if (cue == juce::File() || !realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    juce::String err;
+    CHECK(p.cdDrive().insert(cue, err));
+    runCd(p, kBoot);
+    openScsiStatus(p);
+    printRows(p);
+    CHECK(shows(p, "DEVICE-ID=4") && shows(p, "STATUS=CDR-013"));
+    bool recorded = false;
+    for (const auto& m : p.record().media())
+        recorded |= m.kind == ens::app::SavedMedium::Kind::Cd && m.label == "CDR-013" && m.blocks.count(0) != 0;
+    CHECK(recorded);
+    if (!recorded) return;
+
+    // serveFrom (a stand-in, Task 9): asks for its medium id are answered from the recorded sectors only. Asked here
+    // between blocks, as the CD target would (the test thread is the audio thread), with no read in progress.
+    const auto& saved = p.record().media().back();
+    const uint32_t id = p.cdDrive().newMedium();
+    p.cdDrive().serveFrom(&saved, id);
+    auto* port = p.engine()->cdPort();
+    const auto answer = [&](uint32_t lba, bool& ok) {
+        port->ask(id, lba);
+        for (int t = 0; t < 1000; ++t) {
+            if (port->answered(id, lba, ok)) return true;
+            juce::Thread::sleep(1);
+        }
+        return false;
+    };
+    bool ok = false;
+    CHECK(answer(0, ok) && ok && std::memcmp(port->data(), saved.blocks.at(0).data(), 2048) == 0);
+    CHECK(saved.blocks.count(5) == 0 && answer(5, ok) && !ok);  // a sector not recorded fails
+    p.cdDrive().serveFrom(nullptr, id);
+    CHECK(answer(0, ok) && !ok);  // no longer served
+}
+
+// cd_drive_missing_file (Review Focus 1): a small synthetic .iso, mounted, then deleted before *LOAD* reads it: the
+// reader answers failure, the machine keeps running and the display shows the OS's error, not the Load page. In
+// File mode (the Standalone) nothing is recorded (A121).
+void cdDriveMissingFile(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    // 64 zero sectors with an Ensoniq Device ID block (512-byte block 1, in sector 0): 0xFF at 30, the label at
+    // 31-37, "ID" at 38-39 (A131).
+    std::vector<char> img(64 * 2048);
+    char* id = img.data() + 512;
+    id[30] = static_cast<char>(0xFF);
+    std::memcpy(id + 31, "TEST-CD", 7);
+    id[38] = 'I';
+    id[39] = 'D';
+    const auto iso = dir.getChildFile("test.iso");
+    CHECK(dir.createDirectory() && iso.replaceWithData(img.data(), img.size()));
+    TsProcessor p(MemoryMode::File);
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    juce::String err;
+    CHECK(p.cdDrive().insert(iso, err));
+    runCd(p, kBoot);
+    openScsiStatus(p);
+    printRows(p);
+    CHECK(shows(p, "DEVICE-ID=4") && shows(p, "STATUS=TEST-CD"));
+    CHECK(iso.deleteFile());
+    const auto frames = p.engine()->snapshot().frames;
+    pressCd(p, ens::ts::Button::Soft4);  // *LOAD*
+    runCd(p, 3000);
+    printRows(p);
+    CHECK(p.engine()->snapshot().frames > frames + 90000);  // 3.4 s of 29 762 frames a second, nearly all
+    CHECK(!shows(p, "TYPE=") && !shows(p, "LOAD FILE="));
+    // As observed: "DISK DRIVE NOT RESPONDING / PRESS ANY BUTTON TO CONTINUE..."; a button takes the OS on.
+    CHECK(shows(p, "NOT RESPONDING"));
+    pressCd(p, ens::ts::Button::Up);
+    printRows(p);
+    CHECK(!shows(p, "NOT RESPONDING") && shows(p, "STATUS=INVALID"));
+    CHECK(p.record().media().empty());
+}
+
+// drop_goes_to_cd: a .cue dropped on the panel goes in the CD drive (here a synthetic one whose FILE names another
+// folder in capitals: found beside the .cue without case, A127), an .img in the floppy drive.
+void dropGoesToCd(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, 10);
+    const auto cue = dir.getChildFile("data.cue");
+    CHECK(cue.replaceWithText("FILE \"E:\\RIPS\\DATA.BIN\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n"));
+    write(dir.getChildFile("data.bin"), 4 * 2352);
+    const auto img = dir.getChildFile("d.img");
+    write(img, 819200);
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    auto* drop = dynamic_cast<juce::FileDragAndDropTarget*>(ed.get());
+    CHECK(drop != nullptr);
+    if (drop == nullptr) return;
+    drop->filesDropped(juce::StringArray(cue.getFullPathName()), 0, 0);
+    run(p, 10);
+    CHECK(p.cdDrive().name() == "data.cue" && p.engine()->snapshot().cdMedium != 0 && !p.engine()->snapshot().diskIn);
+    drop->filesDropped(juce::StringArray(img.getFullPathName()), 0, 0);
+    run(p, 10);
+    CHECK(p.drive().slotText() == "d.img" && p.engine()->snapshot().diskIn && p.cdDrive().name() == "data.cue");
+    ed.reset();
+}
+
+// ---- Project states keep the sampled sounds (A129) ----
+
+// ED-001 under TSR_DISK_DIR (tests/ts_disks.h's kEd001); an empty File and a skip line without it.
+juce::File ed001() {
+    const juce::String dir = TSR_DISK_DIR;
+    if (dir.isNotEmpty()) {
+        const auto f = juce::File(dir).getChildFile(
+            "EPS & EPS-16/Factory Sounds/Ensoniq EPS16 Factory Floppy Archive (15 disks, fixed) [IMG & GKH]/"
+            "Ensoniq EPS16 Factory Floppy Archive (15 disks) [IMG & GKH]/GKH/ED-001.GKH");
+        if (f.existsAsFile()) return f;
+    }
+    std::printf("  skip: disk images not found\n");
+    return {};
+}
+
+bool until(TsProcessor& p, const char* text, int ms) {
+    for (int t = 0; t < ms && !shows(p, text); t += 10) runCd(p, 10);
+    return shows(p, text);
+}
+
+void hold(TsProcessor& p, ens::ts::Button b) {  // a bank button under BANKSET=8: 60 ms, as tests/ts_disks.h
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), true, 0});
+    runCd(p, 60);
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), false, 0});
+}
+
+// The disk's Load page (Storage twice, as openDiskLoad in tests/ts_disks.h) on its first sound `name`, then *YES* and
+// `bank` load it into S8. True once back on the Load page.
+bool loadFromFloppy(TsProcessor& p, const char* name, ens::ts::Button bank) {
+    using ens::ts::Button;
+    pressCd(p, Button::Storage);
+    pressCd(p, Button::Storage);
+    const auto file = juce::String("FILE=") + name;
+    if (!until(p, file.toRawUTF8(), 3000)) return false;
+    printRows(p);
+    pressCd(p, Button::Soft3);
+    if (!shows(p, "BANKSET=8")) return false;
+    hold(p, bank);
+    const auto loading = juce::String("LOADING ") + name;
+    if (!until(p, loading.toRawUTF8(), 2000)) return false;
+    const bool done = until(p, "LOAD FILE=", 30000);
+    printRows(p);
+    return done;
+}
+
+// From the SCSI STATUS page with the volume mounted (loadFromCd in tests/test_app_media.cpp): *LOAD*, then down `path`
+// (Soft1, Up to the entry, *YES*), and `bank` loads the sound into S8.
+bool loadFromCd(TsProcessor& p, const std::vector<const char*>& path, ens::ts::Button bank) {
+    using ens::ts::Button;
+    pressCd(p, Button::Soft4);
+    if (!until(p, "TYPE=", 5000)) return false;
+    for (const char* name : path) {
+        auto field = juce::String("FILE=") + name;
+        field = field.paddedRight(' ', 17);  // names are 12 characters, space padded
+        runCd(p, 500);
+        pressCd(p, Button::Soft1);
+        for (int i = 0; i < 40 && !shows(p, field.toRawUTF8()); ++i) pressCd(p, Button::Up);
+        if (!shows(p, field.toRawUTF8())) return false;
+        pressCd(p, Button::Soft3);
+    }
+    if (!shows(p, "BANKSET=8")) return false;
+    hold(p, bank);
+    const auto loading = juce::String("LOADING ") + path.back();
+    if (!until(p, loading.toRawUTF8(), 2000)) return false;
+    const bool done = until(p, "LOAD FILE=", 60000);
+    printRows(p);
+    return done;
+}
+
+// Runs until the restore (A131) and the boot are over, at most 130 s: the ms it took, -1 when it did not end.
+int runRestore(TsProcessor& p) {
+    bool was = false;
+    for (int ms = 0; ms < 130000; ms += 10) {
+        runCd(p, 10);
+        const auto s = p.engine()->snapshot();
+        was = was || s.restoring;
+        if (s.frames > 0 && !s.restoring && s.booted) {
+            std::printf("  restore %s, over at %d ms\n", was ? "ran" : "did not run", ms + 10);
+            printRows(p);
+            return ms + 10;
+        }
+    }
+    return -1;
+}
+
+// Sounds, BankSet S8 (BankSet held, Bank 8), then `bank` for S8-1 to S8-9 (openS8 in tests/test_app_media.cpp).
+void openS8(TsProcessor& p, ens::ts::Button bank) {
+    using ens::ts::Button;
+    pressCd(p, Button::Sounds);
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(Button::BankSet), true, 0});
+    runCd(p, 100);
+    pressCd(p, Button::Bank8);
+    p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(Button::BankSet), false, 0});
+    runCd(p, 300);
+    if (bank != Button::Bank0) pressCd(p, bank);
+    printRows(p);
+}
+
+// The sound on the open S8 page (Soft5, as playS8), then C-E-G for 400 ms: the peak of Main.
+float playChord(TsProcessor& p) {
+    pressCd(p, ens::ts::Button::Soft5);
+    juce::AudioBuffer<float> buf(4, 480);
+    juce::MidiBuffer midi;
+    for (int k : {60, 64, 67}) midi.addEvent(juce::MidiMessage::noteOn(1, k, (juce::uint8)127), 0);
+    float peak = 0;
+    for (int i = 0; i < 40; ++i) {
+        buf.clear();
+        p.processBlock(buf, midi);
+        midi.clear();
+        peak = std::max({peak, buf.getMagnitude(0, 0, 480), buf.getMagnitude(1, 0, 480)});
+    }
+    for (int k : {60, 64, 67}) midi.addEvent(juce::MidiMessage::noteOff(1, k), 0);
+    run(p, 300, midi);
+    std::printf("  C-E-G peak %.4f\n", peak);
+    return peak;
+}
+
+// A state's <Media>: per medium "kind label blocks", and the total of blocks.
+struct MediaSeen {
+    juce::StringArray media;
+    int blocks = 0;
+    const juce::XmlElement* xml = nullptr;  // inside the state passed: keep that alive while this is used
+};
+MediaSeen mediaOf(const juce::XmlElement* state) {
+    MediaSeen m;
+    m.xml = state ? state->getChildByName("Media") : nullptr;
+    if (m.xml == nullptr) return m;
+    for (const auto* e : m.xml->getChildWithTagNameIterator("Medium")) {
+        int n = 0;
+        for (const auto* r : e->getChildWithTagNameIterator("Run")) n += r->getIntAttribute("count");
+        m.media.add(e->getStringAttribute("kind") + " " + e->getStringAttribute("label") + " " + juce::String(n));
+        m.blocks += n;
+    }
+    std::printf("  media: %s (%d blocks)\n", m.media.joinIntoString(", ").toRawUTF8(), m.blocks);
+    return m;
+}
+
+// The VST3's state before the restore: the sound loaded and the media it came from, in a new processor.
+void restoreFrom(TsProcessor& b, const juce::MemoryBlock& s) {
+    b.prepareToPlay(48000, 480);
+    b.setStateInformation(s.getData(), static_cast<int>(s.getSize()));
+}
+
+// project_state_restores_sounds (A129): ED-001's FLUTE 1 into S8-0 and CDR-13's BONGOS 1 into S8-1 by posted presses;
+// the state is saved and both images ejected; a new processor given the state, with no image anywhere, has both
+// sounds back on their bank pages and plays C-E-G from S8-0. A state taken during that restore holds the saved media
+// unchanged (Review Focus 3), and one taken after it holds what the auto-load read: both media again. Returns the
+// first state (empty without the images).
+juce::MemoryBlock mediaStateRoundTrip(const juce::File& dir) {
+    using ens::ts::Button;
+    const auto ed = ed001();
+    const auto cue = cdr13();
+    if (ed == juce::File() || cue == juce::File() || !realRoms(dir)) return {};
+    juce::MemoryBlock s;
+    {
+        TsProcessor a;
+        if (!a.engine()) return {};
+        a.prepareToPlay(48000, 480);
+        juce::String err;
+        CHECK(a.drive().open(ed, err));
+        runCd(a, kBoot);
+        CHECK(loadFromFloppy(a, "FLUTE 1", Button::Bank0));
+        CHECK(a.cdDrive().insert(cue, err));
+        openScsiStatus(a);
+        CHECK(shows(a, "CDR-013"));
+        CHECK(loadFromCd(a, {"PERCUSSION", "DRUMS", "BONGOS 1"}, Button::Bank1));
+        runCd(a, 200);
+        s = stateOf(a);
+        CHECK(a.drive().eject() && a.cdDrive().eject());
+        runCd(a, 100);
+    }
+    const auto xml = xmlOf(s);
+    const auto saved = mediaOf(xml.get());
+    CHECK(saved.media.size() == 2 && saved.media[0].startsWith("floppy-dd ED-001 ") &&
+          saved.media[1].startsWith("cd CDR-013 "));
+    std::printf("  state: %d bytes\n", static_cast<int>(s.getSize()));
+
+    TsProcessor b;
+    if (!b.engine()) return {};
+    restoreFrom(b, s);
+    runCd(b, 2000);
+    CHECK(b.engine()->snapshot().restoring);
+    const auto during = xmlOf(stateOf(b));
+    const auto mid = mediaOf(during.get());
+    CHECK(mid.xml != nullptr && saved.xml != nullptr && mid.xml->isEquivalentTo(saved.xml, false));
+    CHECK(runRestore(b) > 0);
+    CHECK(b.drive().slotText().isEmpty() && !b.engine()->snapshot().diskIn && b.engine()->snapshot().cdMedium == 0);
+    openS8(b, Button::Bank0);  // first: BankSet and Bank8 keep the bank number, and Bank0 is not pressed
+    CHECK(shows(b, "FLUTE 1"));
+    CHECK(playChord(b) > 0.01f);
+    openS8(b, Button::Bank1);
+    CHECK(shows(b, "BONGOS 1"));
+    runCd(b, 200);
+    const auto after = mediaOf(xmlOf(stateOf(b)).get());
+    CHECK(after.media.size() == 2 && after.media.joinIntoString(",").contains("ED-001") &&
+          after.media.joinIntoString(",").contains("CDR-013"));
+    return s;
+}
+
+// project_state_keeps_unrestored_media (A129): the round trip's state with one CD sector of BONGOS 1 taken out (the
+// middle of the CD's longest run, its sample data): the restore loads FLUTE 1, the OS stops BONGOS 1 at the gap
+// (DISK DRIVE NOT RESPONDING, Up, the UNKNOWN prompt, *SKIP*), so the restore does not end clean. The state saved
+// after it still holds every restored block: ED-001's and CDR-013's but the one taken out, not only the sectors the
+// auto-load read before the gap.
+void mediaStateKeepsUnrestored(const juce::File& dir, const juce::MemoryBlock& full) {
+    if (full.isEmpty() || !realRoms(dir)) return;
+    auto x = xmlOf(full);
+    juce::XmlElement* run = nullptr;
+    int cdBlocks = 0;
+    for (auto* m : x->getChildByName("Media")->getChildWithTagNameIterator("Medium"))
+        if (m->getStringAttribute("kind") == "cd")
+            for (auto* r : m->getChildWithTagNameIterator("Run")) {
+                cdBlocks += r->getIntAttribute("count");
+                if (run == nullptr || r->getIntAttribute("count") > run->getIntAttribute("count")) run = r;
+            }
+    CHECK(run != nullptr && run->getIntAttribute("count") >= 3);
+    if (run == nullptr || run->getIntAttribute("count") < 3) return;
+    juce::MemoryOutputStream bytes;
+    CHECK(juce::Base64::convertFromBase64(bytes, run->getAllSubText()));
+    const int first = run->getIntAttribute("first"), count = run->getIntAttribute("count"), mid = count / 2;
+    const auto* b = static_cast<const char*>(bytes.getData());
+    auto* medium = x->getChildByName("Media")->getChildByAttribute("kind", "cd");
+    medium->removeChildElement(run, true);
+    for (const auto& [from, n] : {std::pair<int, int>{0, mid}, std::pair<int, int>{mid + 1, count - mid - 1}}) {
+        auto* r = medium->createNewChildElement("Run");
+        r->setAttribute("first", first + from);
+        r->setAttribute("count", n);
+        r->addTextElement(juce::Base64::toBase64(b + from * 2048, static_cast<size_t>(n) * 2048));
+    }
+    std::printf("  CD sector %d taken out of %d\n", first + mid, cdBlocks);
+    juce::MemoryBlock s;
+    juce::AudioProcessor::copyXmlToBinary(*x, s);
+    TsProcessor p;
+    if (!p.engine()) return;
+    restoreFrom(p, s);
+    CHECK(runRestore(p) > 0);
+    CHECK(!p.engine()->snapshot().restoreClean);
+    runCd(p, 200);
+    const auto after = mediaOf(xmlOf(stateOf(p)).get());
+    CHECK(after.media.contains("floppy-dd ED-001 314"));
+    CHECK(after.media.contains("cd CDR-013 " + juce::String(cdBlocks - 1)));
+}
+
+// project_state_after_a_restore_untouched (A129): a restore ends and, before a tick has seen the end, the host gives
+// the processor a project again (the timer runs on the message thread; a host may load a state from another). The
+// new project's restore must still run: restart must not finish the old restore over the new project's media.
+void mediaStateTwiceWithoutTick(const juce::File& dir, const juce::MemoryBlock& full) {
+    if (full.isEmpty() || !realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    restoreFrom(p, full);
+    juce::AudioBuffer<float> buf(4, 480);
+    juce::MidiBuffer none;
+    bool ended = false;
+    for (int i = 0; i < 13000 && !ended; ++i) {  // as runCd, without tick(), at most 130 s
+        buf.clear();
+        p.processBlock(buf, none);
+        uint32_t medium = 0, lba = 0;
+        auto* port = p.engine()->cdPort();
+        for (int t = 0; port != nullptr && t < 1000 && port->pending(medium, lba); ++t) juce::Thread::sleep(1);
+        const auto s = p.engine()->snapshot();
+        ended = s.frames > 0 && !s.restoring && s.booted;
+    }
+    CHECK(ended);
+    p.setStateInformation(full.getData(), static_cast<int>(full.getSize()));
+    runCd(p, 2000);
+    CHECK(p.engine()->snapshot().restoring);
+    CHECK(runRestore(p) > 0);
+    openS8(p, ens::ts::Button::Bank0);
+    CHECK(shows(p, "FLUTE 1"));
+}
+
+// project_state_trims_on_reopen (A129): after FLUTE 1 is loaded from ED-001, CDR-13 is browsed (mounted on the SCSI
+// STATUS page, its Load page opened and stepped through the root), loading nothing from it; ED-001 holds no other
+// sampled sound to browse past (its Load page steps from FLUTE 1 to *NO-FILES*). So the first state holds blocks no
+// sound needs; the state saved after a restore from it holds only what the auto-load read: ED-001's, fewer.
+void mediaStateTrimsOnReopen(const juce::File& dir) {
+    using ens::ts::Button;
+    const auto ed = ed001();
+    const auto cue = cdr13();
+    if (ed == juce::File() || cue == juce::File() || !realRoms(dir)) return;
+    juce::MemoryBlock s;
+    {
+        TsProcessor a;
+        if (!a.engine()) return;
+        a.prepareToPlay(48000, 480);
+        juce::String err;
+        CHECK(a.drive().open(ed, err) && a.cdDrive().insert(cue, err));
+        runCd(a, kBoot);
+        CHECK(loadFromFloppy(a, "FLUTE 1", Button::Bank0));
+        openScsiStatus(a);
+        CHECK(shows(a, "CDR-013"));
+        pressCd(a, Button::Soft4);  // *LOAD*
+        CHECK(until(a, "TYPE=", 5000));
+        pressCd(a, Button::Soft1);
+        for (int i = 0; i < 4; ++i) pressCd(a, Button::Up);
+        printRows(a);
+        runCd(a, 200);
+        s = stateOf(a);
+    }
+    const auto first = mediaOf(xmlOf(s).get());
+    CHECK(first.media.size() == 2);
+    TsProcessor b;
+    if (!b.engine()) return;
+    restoreFrom(b, s);
+    CHECK(runRestore(b) > 0);
+    runCd(b, 200);
+    const auto second = mediaOf(xmlOf(stateOf(b)).get());
+    CHECK(second.media.contains("floppy-dd ED-001 314") && second.blocks > 0 && first.blocks > second.blocks);
+}
+
+// A <TSState> built here: version 1, the parameters of a processor with Volume 0.3, a cold RAM (zeros) and `media`.
+juce::MemoryBlock syntheticState(std::unique_ptr<juce::XmlElement> media) {
+    TsProcessor q(MemoryMode::File);  // its state has the parameters and nothing else
+    q.params().getParameter("volume")->setValueNotifyingHost(0.3f);
+    auto x = xmlOf(stateOf(q));
+    x->setAttribute("version", 1);
+    const std::vector<uint8_t> ram(static_cast<size_t>(kMemoryBytes), 0);
+    x->createNewChildElement("RAM")->addTextElement(juce::Base64::toBase64(ram.data(), ram.size()));
+    if (media) x->addChildElement(media.release());
+    juce::MemoryBlock m;
+    juce::AudioProcessor::copyXmlToBinary(*x, m);
+    return m;
+}
+
+// A <Medium> in `media`, and a <Run> of `count` blocks of `bytes` each from `first` (a pattern, or `base64` as given).
+juce::XmlElement* addMedium(juce::XmlElement& media, const char* kind, const char* label, int size) {
+    auto* m = media.createNewChildElement("Medium");
+    m->setAttribute("kind", kind);
+    m->setAttribute("label", label);
+    m->setAttribute("size", size);
+    return m;
+}
+void addRun(juce::XmlElement& medium, int first, int count, int bytes, const char* base64 = nullptr) {
+    auto* r = medium.createNewChildElement("Run");
+    r->setAttribute("first", first);
+    r->setAttribute("count", count);
+    std::vector<uint8_t> data(static_cast<size_t>(count * bytes));
+    for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<uint8_t>(i * 7 + static_cast<size_t>(first));
+    r->addTextElement(base64 != nullptr ? juce::String(base64) : juce::Base64::toBase64(data.data(), data.size()));
+}
+
+// project_state_saved_during_restore (Review Focus 3): a state taken while the restore runs holds the restored <Media>
+// as it came, not what the record holds so far. Synthetic media on a cold RAM (no images needed): the restore lasts
+// the boot (engine_restore_without_question_ends_at_boot).
+void mediaStateDuringRestore(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    auto media = std::make_unique<juce::XmlElement>("Media");
+    auto* f = addMedium(*media, "floppy-dd", "SYNTH", 1600);
+    addRun(*f, 0, 3, 512);
+    addRun(*f, 10, 1, 512);
+    auto* c = addMedium(*media, "cd", "SYN-CD", 100);
+    addRun(*c, 0, 2, 2048);
+    const juce::XmlElement want(*media);
+    const auto s = syntheticState(std::move(media));
+    TsProcessor p;
+    if (!p.engine()) return;
+    restoreFrom(p, s);
+    for (int i = 0; i < 2; ++i) {  // at 1 s and 3 s
+        runCd(p, 1000 + 1000 * i);
+        CHECK(p.engine()->snapshot().restoring);
+        const auto st = xmlOf(stateOf(p));
+        const auto got = mediaOf(st.get());
+        CHECK(got.xml != nullptr && got.xml->isEquivalentTo(&want, false));
+    }
+    CHECK(runRestore(p) > 0);
+}
+
+// project_state_drops_bad_media (Review Focus 5): bad base64, a block past `size` and kind "zip" each drop that medium;
+// the good one, the RAM and the parameters restore.
+void mediaStateBadBlobs(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    auto media = std::make_unique<juce::XmlElement>("Media");
+    addRun(*addMedium(*media, "floppy-dd", "BAD64", 1600), 0, 2, 512, "!!not base64!!");
+    addRun(*addMedium(*media, "floppy-dd", "PAST", 1600), 1599, 2, 512);
+    addRun(*addMedium(*media, "zip", "ZIP", 1600), 0, 2, 512);
+    addRun(*addMedium(*media, "cd", "CD-PAST", 10), 0, 11, 2048);
+    addRun(*addMedium(*media, "floppy-hd", "GOOD", 3200), 0, 4, 512);
+    const auto s = syntheticState(std::move(media));
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, 100);
+    const auto* engine = p.engine();
+    p.setStateInformation(s.getData(), static_cast<int>(s.getSize()));
+    CHECK(p.engine() != engine);  // the RAM restarted the machine
+    runCd(p, 200);
+    CHECK(feq(*p.params().getRawParameterValue("volume"), 0.3f));
+    const auto st = stateOf(p);
+    const auto ram = ramOf(st);
+    CHECK(ram.size() == static_cast<size_t>(kMemoryBytes) && std::all_of(ram.begin(), ram.end(), [](uint8_t b) {
+              return b == 0;
+          }));
+    const auto got = mediaOf(xmlOf(st).get());
+    CHECK(got.media.size() == 1 && got.media[0] == "floppy-hd GOOD 4");
+    CHECK(p.engine()->snapshot().restoring);
+    CHECK(runRestore(p) > 0);
+}
+
+// standalone_has_no_media (A121): a File processor that loaded FLUTE 1 records nothing and its state has no <Media>.
+void standaloneHasNoMedia(const juce::File& dir) {
+    const auto ed = ed001();
+    if (ed == juce::File() || !realRoms(dir)) return;
+    TsProcessor p(MemoryMode::File);
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    juce::String err;
+    CHECK(p.drive().open(ed, err));
+    runCd(p, kBoot);
+    CHECK(loadFromFloppy(p, "FLUTE 1", ens::ts::Button::Bank0));
+    runCd(p, 200);
+    CHECK(p.record().media().empty());
+    const auto xml = xmlOf(stateOf(p));
+    CHECK(xml != nullptr && xml->getChildByName("Media") == nullptr);
+}
+
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
 // naming the ROM folder, so neither the user's settings nor their memory file is touched. Aux is off,
 // as the Standalone plays it (A109). With `ownRoms` (the release VST3, A125, A126) the settings folder names
@@ -1317,6 +1945,17 @@ int main() {
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
+    cdDrive(dir.getChildFile("cd"));
+    cdDriveLoads(dir.getChildFile("cd-loads"));
+    cdDriveMissingFile(dir.getChildFile("cd-missing"));
+    dropGoesToCd(dir.getChildFile("drop"));
+    mediaStateDuringRestore(dir.getChildFile("media-during"));
+    mediaStateBadBlobs(dir.getChildFile("media-bad"));
+    standaloneHasNoMedia(dir.getChildFile("media-standalone"));
+    const auto media = mediaStateRoundTrip(dir.getChildFile("media-round-trip"));
+    mediaStateKeepsUnrestored(dir.getChildFile("media-keep"), media);
+    mediaStateTwiceWithoutTick(dir.getChildFile("media-twice"), media);
+    mediaStateTrimsOnReopen(dir.getChildFile("media-trim"));
     vst3(dir.getChildFile("vst3"), juce::File(TSR_VST3_PATH), false);
     // TSR_RELEASE_VST3=<a release folder's TS Reborn.vst3>: that package, on its own ROMs (A125, A126).
     const auto release = juce::SystemStats::getEnvironmentVariable("TSR_RELEASE_VST3", {});
