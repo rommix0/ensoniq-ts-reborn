@@ -19,14 +19,16 @@ so the app checks get `TSR_DISK_DIR`).
   `TSR_RELEASE_VST3` run below was not repeated in the fix wave (the packaging did not change).
 - Then the restart race the fix wave's re-review found (a project loaded before a tick saw the previous restore end
   skipped its own restore): `project_state_after_a_restore_untouched` failed before the one-line fix in `restart`
-  and passes after; MSVC app checks `app_tests: all passed`. That last change is app-only and was not rebuilt on
-  Linux.
+  and passes after; MSVC app checks `app_tests: all passed`. After the merge, `build-linux-app` rebuilt on main:
+  `app_tests: all passed` on Linux too.
 - Real-time suite: 0 allocations on all three. `rt_engine_cd_load_does_not_allocate`: 0 allocations, 6 sectors
   served. `rt_engine_restore_does_not_allocate`: 0 allocations over 158036 frames.
 - No `skip:` line was printed by `ens_tests` on any toolchain: the image tests (floppy and CD) ran everywhere.
 - `TSR_RELEASE_VST3` (`dist\TS Reborn-1.0.0\TS Reborn.vst3`, built by `tools\dist.ps1`, version unchanged):
-  `app_tests: all passed`, VST3 note peak 0.1383 / 0.1320, on its own ROMs. Not repeated on Linux (`dist.sh`
-  was not run in this task; Plan 6 checked it and nothing in the packaging changed).
+  `app_tests: all passed`, VST3 note peak 0.1383 / 0.1320, on its own ROMs.
+- Linux, after the merge: `tools/dist.sh` wrote `dist/TS Reborn-1.0.0-linux` (`TS Reborn` 14 441 752 bytes,
+  `TS Reborn.so` 15 576 568 bytes). All 12 ROM copies have the SHA-256 of their source in `roms/`; `ldd` lists
+  no `libstdc++`. `TSR_RELEASE_VST3` on that package: `app_tests: all passed`, VST3 note peak 0.1383 / 0.1320.
 
 ## Hashes (unchanged, identical on all three)
 
