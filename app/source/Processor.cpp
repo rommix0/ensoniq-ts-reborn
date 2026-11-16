@@ -71,17 +71,13 @@ TsProcessor::TsProcessor(MemoryMode mode)
     for (size_t i = 0; i < std::size(kAnalogParams); ++i)
         analogRaw_[i] = params_.getRawParameterValue(kAnalogParams[i].id);
     sound_ = params_.getRawParameterValue("sound");
-    // No compiled-in default. With no folder chosen, a "roms" folder beside the app (the dist's
-    // layout) is taken and stored, so the plugin finds it too; with neither, the first start opens
-    // with no ROMs.
-    auto dir = settings_.romFolder();
-    if (dir == juce::File()) {
-        const auto beside =
-            juce::File::getSpecialLocation(juce::File::currentApplicationFile).getSiblingFile("roms");
-        if (beside.isDirectory()) dir = beside;
-    }
-    if (dir != juce::File())
-        setRomFolder(dir, romError_);
+    // No compiled-in default. DECISION A125: the stored folder, "roms" beside the program (the release
+    // folder's layout, stored so the other format finds it), or the VST3 package's own ROMs (not stored);
+    // with none, the first start opens with no ROMs.
+    const auto choice =
+        findRomFolder(settings_.romFolder(), juce::File::getSpecialLocation(juce::File::currentExecutableFile));
+    if (choice.dir != juce::File())
+        setRomFolder(choice.dir, romError_, choice.store);
     else
         romError_ = "No ROM folder:\nopen Settings";
     startTimerHz(30);  // DECISION A111: one 30 Hz timer; the 60 s save counts 1800 ticks (A116)
@@ -97,10 +93,10 @@ TsProcessor::~TsProcessor() {
 
 // Refused, with the reason in err, when the memory file is inside the new folder: it would load the
 // OS ROM as RAM and the 60 s save would overwrite it (setMemoryFile guards the other order).
-bool TsProcessor::setRomFolder(const juce::File& dir, juce::String& err) {
+bool TsProcessor::setRomFolder(const juce::File& dir, juce::String& err, bool store) {
     err = memoryInRomFolder(settings_.memoryFile(), dir);
     if (err.isNotEmpty()) return false;
-    settings_.setRomFolder(dir);
+    if (store) settings_.setRomFolder(dir);  // DECISION A125: a VST3 package's own ROMs are not stored
     ens::ts::RomSet roms;
     const auto problem = romProblem(checkRomFolder(dir, &roms));
     if (problem.isNotEmpty()) {

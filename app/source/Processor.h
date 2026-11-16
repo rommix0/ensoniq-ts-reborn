@@ -45,8 +45,9 @@ public:
     uint32_t engineGeneration() const { return engineGen_.load(); }
 
     // Message thread. Each suspends processing around the engine swap itself.
-    // Stores dir and, when all six ROMs are good, re-creates the machine keeping its memory.
-    bool setRomFolder(const juce::File& dir, juce::String& err);
+    // Stores dir (unless `store` is false: a VST3 package's own ROMs, A125) and, when all six ROMs are
+    // good, re-creates the machine keeping its memory.
+    bool setRomFolder(const juce::File& dir, juce::String& err, bool store = true);
     // Stores file and, when it holds an image, restarts the machine from it. A file in the ROM
     // folder, one that cannot be written or one of the wrong size is refused (err) and the setting stays.
     bool setMemoryFile(const juce::File& file, juce::String& err);

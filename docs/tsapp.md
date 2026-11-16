@@ -38,7 +38,13 @@ The app needs six files in one folder, laid out as the repository's `roms` folde
 | `os/ts10_310h.bin` (256 KB), `os/ts10_310l.bin` (512 KB; 256 KB is accepted) | OS v3.10 |
 | `waves/901401_u41.bin`, `waves/901402_u45.bin` (2 MB each), `waves/901301_u43.bin`, `waves/901302_u46.bin` (1 MB each) | The wave ROMs |
 
-If no folder has been chosen and a folder named `roms` sits beside the app, the app takes it and stores it in the settings, so the VST3 finds it too.
+At start the app takes the first of these that holds the six files (A125):
+
+1. The folder stored in the settings (chosen in Settings, or stored by 2).
+2. A folder named `roms` beside the program. It is stored in the settings, so the other format finds it too.
+3. In the VST3 only: the ROMs inside its own package, `TS Reborn.vst3/Contents/Resources/roms` (the release folder puts them there). They are used but not stored, since the package can be moved or removed.
+
+So a stored folder that has been moved or deleted no longer stops the app when a `roms` folder sits beside it. A folder chosen in Settings still wins.
 
 Otherwise the first start shows a message in place of the display. Click the gear at the top right of the panel, then **Choose folder...** in ROMS. The list marks each file found, missing or the wrong size. When all six are good the machine starts. The firmware boots in real time, as the instrument does (next section). If a file is missing or the wrong size, the display area names it (for example `ROM missing:` / `os/ts10_310h.bin`). With the ROMs good but no audio device open, it reads `No audio device`. Choosing another good folder later restarts the machine and keeps its memory.
 

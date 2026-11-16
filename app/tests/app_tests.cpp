@@ -759,6 +759,43 @@ void romsBesideApp(const juce::File& dir) {
     beside.deleteRecursively();
 }
 
+// rom_folder_order (A125): the stored folder if it holds the six ROMs, else "roms" beside the program
+// (stored), else Contents/Resources/roms when the program sits in a VST3 package (not stored), else the
+// stored folder as it is (its problem is shown), not stored.
+void romFolderOrder(const juce::File& dir) {
+    const auto is = [](const RomFolderChoice& c, const juce::File& want, bool store) {
+        return c.dir == want && c.store == store;
+    };
+    // stored good
+    const auto a = dir.getChildFile("a"), b = dir.getChildFile("b/roms");
+    dummyRoms(a);
+    dummyRoms(b);
+    CHECK(is(findRomFolder(a, dir.getChildFile("b/TS Reborn.exe")), a, false));
+    // stored missing: the folder beside the program, stored
+    const auto app = dir.getChildFile("app");
+    dummyRoms(app.getChildFile("roms"));
+    CHECK(is(findRomFolder(dir.getChildFile("gone"), app.getChildFile("TS Reborn.exe")), app.getChildFile("roms"),
+             true));
+    // package: Contents/Resources/roms, not stored
+    const auto contents = dir.getChildFile("pkg/TS Reborn.vst3/Contents");
+    contents.getChildFile("x86_64-win").createDirectory();
+    dummyRoms(contents.getChildFile("Resources/roms"));
+    const auto plugin = contents.getChildFile("x86_64-win/TS Reborn.vst3");
+    CHECK(is(findRomFolder({}, plugin), contents.getChildFile("Resources/roms"), false));
+    // not a package: a ../Resources/roms is never taken
+    const auto plain = dir.getChildFile("plain");
+    plain.getChildFile("bin").createDirectory();
+    dummyRoms(plain.getChildFile("Resources/roms"));
+    CHECK(is(findRomFolder({}, plain.getChildFile("bin/TS Reborn.exe")), juce::File(), false));
+    // only a bad stored folder: kept, so its problem is reported
+    const auto bad = dir.getChildFile("bad");
+    write(bad.getChildFile("os/ts10_310h.bin"), 0x40000);
+    CHECK(is(findRomFolder(bad, plain.getChildFile("bin/TS Reborn.exe")), bad, false));
+    // beside beats the package
+    dummyRoms(contents.getChildFile("x86_64-win/roms"));
+    CHECK(is(findRomFolder({}, plugin), contents.getChildFile("x86_64-win/roms"), true));
+}
+
 // processor_aux_bus_off_mixes_into_main (A109): two processors get the same blocks. After the boot the
 // running OS routes track 1 to the Aux outputs (Track Effects, Effects Bus Routing stepped with Up from
 // VOICE to -AUX-), then both get 90 3C 7F. The one with Aux disabled plays on Main exactly the other's
@@ -1251,6 +1288,7 @@ int main() {
     dataEntryRestored(dir.getChildFile("data-entry"), r2);
     zeroAndBypassedBlocks(dir.getChildFile("zero"));
     romsBesideApp(dir.getChildFile("beside"));
+    romFolderOrder(dir.getChildFile("order"));
     auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
