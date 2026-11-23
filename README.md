@@ -2,7 +2,7 @@
 
 # Ensoniq TS Reborn
 
-This emulator was creating by Anthony C. Bartman (@rommix0) with the assistance of Claude Opus 5.5. If you find any issues, please leave an issue or do a pull request.
+This emulator was created by Anthony C. Bartman (@rommix0) with the assistance of Claude Opus 5.5. If you find any issues, please leave an issue or do a pull request.
 
 An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. The TS-12 is out of scope. It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
