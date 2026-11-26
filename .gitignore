@@ -1,5 +1,6 @@
 build*/
 dist/
+extracted-waves/
 misc/
 testdata/
 .worktrees/
@@ -13,3 +14,22 @@ roms/misc/
 roms/os/*
 !roms/os/ts10_310h.bin
 !roms/os/ts10_310l.bin
+
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+__MACOSX/

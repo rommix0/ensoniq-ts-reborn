@@ -19,7 +19,16 @@ juce_add_plugin(TSReborn
   FORMATS Standalone VST3
   IS_SYNTH TRUE
   NEEDS_MIDI_INPUT TRUE
-  NEEDS_MIDI_OUTPUT FALSE)
+  NEEDS_MIDI_OUTPUT FALSE
+  ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.png")
+
+# DECISION A132: juceaide makes an icns from the 1024 image so the plist names it. On macOS,
+# replace that icns with the drawn iconset, whose small sizes are not a resample of the big one.
+if(APPLE)
+  execute_process(COMMAND iconutil -c icns "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.iconset"
+      -o "${CMAKE_CURRENT_BINARY_DIR}/TSReborn_artefacts/JuceLibraryCode/AppIcon.icns"
+    COMMAND_ERROR_IS_FATAL ANY)
+endif()
 
 # The panel's logos (A122): TsArt::ts10_logo_svg, TsArt::ensoniq_logo_svg.
 juce_add_binary_data(TSReborn_Art HEADER_NAME TsArt.h NAMESPACE TsArt

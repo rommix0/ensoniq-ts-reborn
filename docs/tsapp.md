@@ -2,7 +2,7 @@
 
 TS Reborn runs the user's TS-10 OS ROM (v3.10) on the emulated machine of Plan 3 (`docs/ts-hardware-interface.md`) and draws the instrument's front panel around it: the 2 x 40 display, the LEDs, every button, the Volume and Data Entry sliders, the two wheels, the two patch buttons and the 61 keys. The firmware drives the display and the LEDs and reads the controls, so every screen is the firmware's own. The app plays from a MIDI keyboard and from the on-screen keys.
 
-It is built in two formats from the same code: a Standalone program (`TS Reborn.exe`) and a VST3 instrument (`TS Reborn.vst3`). Windows x64 (MSVC) and Linux x64 (GCC).
+It is built in two formats from the same code: a Standalone program (`TS Reborn.exe` on Windows, `TS Reborn.app` on macOS) and a VST3 instrument (`TS Reborn.vst3`). Windows x64 (MSVC), Linux x64 (GCC) and macOS arm64/x64 (Apple clang).
 
 The design is `docs/design/2026-11-13-ts-emulator-design.md`, the decisions are `A100` to `A126` in `docs/decisions.md` (`# App`), and the verification report is `docs/verification-plan6.md`.
 
@@ -22,10 +22,17 @@ cmake -S . -B build-linux-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_AP
 cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
 ```
 
+On macOS (Apple clang; Xcode's command-line tools supply the compiler, Unix Makefiles need no Ninja):
+
+```bash
+cmake -S . -B build-mac-app -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_APP=ON
+cmake --build build-mac-app --target TSReborn_Standalone
+```
+
 - The first configure fetches JUCE 8.0.16-security (git, about 150 MB) into `build-app/_deps`, so git and a network connection are needed once per build folder. To use a JUCE checkout you already have, add `-DFETCHCONTENT_SOURCE_DIR_JUCE=<path to juce-src>`; nothing is fetched then.
 - A build folder configured with a JUCE checkout that has since been deleted stops at configure ("Manually specified source directory is missing"). Configure it again with `-U FETCHCONTENT_SOURCE_DIR_JUCE` after deleting its `_deps/juce-build`, `_deps/juce-subbuild` and `vst3_helpers` folders (build outputs only); CMake then fetches JUCE itself.
 - `ENS_ROM_DIR` (default: the repository's `roms` folder) is used only by the checks in `TSReborn_AppTests`. The app has no compiled-in ROM path.
-- Outputs, Windows: `build-app\app\TSReborn_artefacts\Release\Standalone\TS Reborn.exe` and `...\VST3\TS Reborn.vst3`. Linux: `build-linux-app/app/TSReborn_artefacts/Release/Standalone/TS Reborn` and `.../VST3/TS Reborn.vst3`. The build does not install the VST3. Copy the `TS Reborn.vst3` folder to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`).
+- Outputs, Windows: `build-app\app\TSReborn_artefacts\Release\Standalone\TS Reborn.exe` and `...\VST3\TS Reborn.vst3`. Linux: `build-linux-app/app/TSReborn_artefacts/Release/Standalone/TS Reborn` and `.../VST3/TS Reborn.vst3`. macOS: `build-mac-app/app/TSReborn_artefacts/Release/Standalone/TS Reborn.app`. The Mac Standalone's icon is `app/resources/AppIcon.iconset` (A132). The build does not install the VST3. Copy the `TS Reborn.vst3` folder to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`).
 - Checks: `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` (Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`). They run without a window. They cover the ROM folder and the memory file, the engine's two buses, the host parameters, the state and the memory rules, the disk drive (open, save, write protect, through temp files), and the editor painted offscreen, and they load the built VST3 through JUCE's VST3 host. Without the ROMs the firmware parts skip.
 
 **The release folder** (Plan 6, A126). `powershell -ExecutionPolicy Bypass -File tools\dist.ps1` (Linux, in WSL: `tools/dist.sh`) builds the Standalone and the VST3 in Release in `build-dist` (`build-dist-linux`), with the C++ runtime linked in, and writes `dist\TS Reborn-1.0.0` (`dist/TS Reborn-1.0.0-linux`):
@@ -59,12 +66,12 @@ Otherwise the first start shows a message in place of the display. Click the gea
 
 ## Where the settings and the memory live
 
-The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`.
+The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`. On macOS it is `~/Library/Application Support/TS Reborn`.
 
 - **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder and the memory file. Each change is saved at once. The Standalone and the VST3 share it.
 - **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, the machine starts cold, and the first save (on close or after 60 s, once booted) replaces it with the running memory. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page.
 - **Erase memory...** asks first, then writes 512 KB of zeros to the memory file and restarts the machine from it. If the file cannot be written, nothing is erased and the settings page says so.
-- **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. JUCE also writes the wrapper's plugin state there (the sound and the controls); the Standalone ignores it, and the Options menu's "Load a saved state..." too (A121). `TSR_SETTINGS_DIR` does not move it.
+- **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`, macOS `~/Library/Application Support/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. JUCE also writes the wrapper's plugin state there (the sound and the controls); the Standalone ignores it, and the Options menu's "Load a saved state..." too (A121). `TSR_SETTINGS_DIR` does not move it.
 - **The VST3 does not write the shared memory file by itself.** A VST3 instance keeps its memory in the host's project (below) and never saves to the file on close or on a timer, so many instances cannot overwrite each other. A new instance starts from the file. **Copy to shared memory...** is the one way a VST3 writes it.
 
 ## Audio and MIDI
