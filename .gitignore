@@ -1,5 +1,6 @@
 build*/
 dist/
+extracted-waves/
 misc/
 testdata/
 .worktrees/
