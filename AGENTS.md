@@ -8,8 +8,8 @@ project is; this file is how to work on it.
 An emulator of the Ensoniq TS-10 (the TS-12 is out of scope) that runs the instrument's own OS v3.10 from the
 ROMs in `roms/`. Plain C++17 chip cores (68000, ES5506 OTTO from Plan 2, ES5510 ESP, 68681 DUART)
 make up a TS machine (`src/ts`, from Plan 3), a real-time engine drives it, and a JUCE 8 app wraps
-that engine as a Standalone and VST3 named "TS Reborn" (`app/`, from Plan 4) for Windows x64 (MSVC)
-and Linux x64 (GCC). The 68000, ESP and DUART cores were copied from KS-32 Reborn at commit
+that engine as a Standalone and VST3 named "TS Reborn" (`app/`, from Plan 4) for Windows x64 (MSVC),
+Linux x64 (GCC) and macOS arm64/x64 (Apple clang). The 68000, ESP and DUART cores were copied from KS-32 Reborn at commit
 `c17c35c`; the design is `docs/design/2026-11-13-ts-emulator-design.md`.
 
 ## Rules that are not negotiable
@@ -63,6 +63,12 @@ cmake --build build-app --config Release --target TSReborn_Standalone TSReborn_V
 # App on Linux GCC x64; -DFETCHCONTENT_SOURCE_DIR_JUCE=<juce-src> uses a JUCE checkout instead of fetching
 cmake -S . -B build-linux-app -G Ninja -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_APP=ON
 cmake --build build-linux-app --target TSReborn_Standalone TSReborn_VST3 TSReborn_AppTests
+```
+
+```bash
+# App on macOS (Apple clang, arm64 or x64). Unix Makefiles: Ninja is not required.
+cmake -S . -B build-mac-app -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DENS_BUILD_APP=ON
+cmake --build build-mac-app --target TSReborn_Standalone
 ```
 
 ```powershell
