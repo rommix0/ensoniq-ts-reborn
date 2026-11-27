@@ -105,8 +105,8 @@ void SettingsPage::refresh() {
                       : proc_.romFolderStored() ? dir.getFullPathName()
                                                 : dir.getFullPathName() + " (inside the VST3 package)",
                       juce::dontSendNotification);
-    roms_ = checkRomFolder(dir, ens::ts::Model::Ts10, nullptr);
-    memField_.setText(proc_.settings().memoryFile(ens::ts::Model::Ts10).getFullPathName(), juce::dontSendNotification);
+    roms_ = checkRomFolder(dir, proc_.model(), nullptr);
+    memField_.setText(proc_.settings().memoryFile(proc_.model()).getFullPathName(), juce::dontSendNotification);
     memNote_ = proc_.memoryError();
 }
 
@@ -251,7 +251,8 @@ void SettingsPage::chooseRomFolder() {
 }
 
 void SettingsPage::chooseMemoryFile() {
-    chooser_ = std::make_unique<juce::FileChooser>("Choose the memory file", proc_.settings().memoryFile(ens::ts::Model::Ts10), "*.bin");
+    chooser_ = std::make_unique<juce::FileChooser>("Choose the memory file",
+                                                   proc_.settings().memoryFile(proc_.model()), "*.bin");
     chooser_->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
                           [this](const juce::FileChooser& fc) {
                               const auto file = fc.getResult();

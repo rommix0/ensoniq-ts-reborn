@@ -303,14 +303,34 @@ std::unique_ptr<juce::XmlElement> xmlOf(const juce::MemoryBlock& s) {
     return juce::AudioProcessor::getXmlFromBinary(s.getData(), static_cast<int>(s.getSize()));
 }
 
-std::vector<uint8_t> ramOf(const juce::MemoryBlock& s) {
-    const auto xml = xmlOf(s);
-    const auto* ram = xml ? xml->getChildByName("RAM") : nullptr;
+std::vector<uint8_t> ramBytes(const juce::XmlElement* ram) {
     if (!ram) return {};
     juce::MemoryOutputStream out;
     if (!juce::Base64::convertFromBase64(out, ram->getAllSubText())) return {};
     const auto* b = static_cast<const uint8_t*>(out.getData());
     return {b, b + out.getDataSize()};
+}
+
+std::vector<uint8_t> ramOf(const juce::MemoryBlock& s) {  // the first <RAM>: the running model's (A137)
+    const auto xml = xmlOf(s);
+    return ramBytes(xml ? xml->getChildByName("RAM") : nullptr);
+}
+
+// The <RAM> of a model, "ts10" or "ts12" (A137; one with no model is the TS-10's); empty when there is none.
+std::vector<uint8_t> ramOf(const juce::MemoryBlock& s, const char* model) {
+    const auto xml = xmlOf(s);
+    if (xml)
+        for (const auto* r : xml->getChildWithTagNameIterator("RAM"))
+            if (r->getStringAttribute("model", "ts10") == model) return ramBytes(r);
+    return {};
+}
+
+int ramCount(const juce::MemoryBlock& s) {
+    const auto xml = xmlOf(s);
+    int n = 0;
+    if (xml)
+        for (const auto* r : xml->getChildWithTagNameIterator("RAM")) n += r != nullptr;
+    return n;
 }
 
 juce::String selectOf(const juce::MemoryBlock& s) {
@@ -420,6 +440,206 @@ void stateBadBlobs(const juce::File& dir) {
         CHECK(p.engine() == engine);
         run(p, 100);
     }
+}
+
+// The model in the processor (A137). Project mode unless named; real ROMs except model_follows_settings.
+using ens::ts::Model;
+
+// model_follows_settings: a new instance starts as the model last chosen (dummy ROMs, never run).
+void modelFollowsSettings(const juce::File& dir) {
+    const auto roms = dir.getChildFile("roms");
+    dummyRoms(roms, Model::Ts12);
+    setSettingsDir(dir);
+    AppSettings().setRomFolder(roms);
+    AppSettings().setModel(Model::Ts12);
+    TsProcessor p;
+    CHECK(p.model() == Model::Ts12 && p.engine() != nullptr && p.engine()->model() == Model::Ts12);
+}
+
+// model_switch_round_trip: a TS-10 with TUNE=+02 switched to the TS-12 and back starts from the RAM it left, byte
+// for byte, and boots with TUNE=+02. model_state_saved_mid_boot_has_both: a state taken at once after the switch
+// names the TS-12 and holds both RAMs, the TS-12's from its shared file. Returns the state taken once the TS-12 has
+// booted (empty when skipped).
+juce::MemoryBlock modelSwitchRoundTrip(const juce::File& dir) {
+    if (!realRoms(dir)) return {};
+    using ens::ts::Button;
+    CHECK(eraseMemoryFile(AppSettings().memoryFile(Model::Ts12)));
+    TsProcessor p;
+    if (!p.engine()) return {};
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    press(p, Button::System);
+    press(p, Button::Up);
+    press(p, Button::Up);
+    CHECK(rowStarts(p, 0, "SYSTEM  TUNE=+02"));
+    const std::vector<uint8_t> before = p.engine()->machine().ramImage();
+    p.setModel(Model::Ts12);
+    CHECK(p.model() == Model::Ts12 && p.engine() != nullptr && p.engine()->model() == Model::Ts12);
+    CHECK(AppSettings().model() == Model::Ts12);
+    if (!p.engine()) return {};
+    const auto mid = stateOf(p);
+    const auto x = xmlOf(mid);
+    CHECK(x != nullptr && x->getStringAttribute("model") == "ts12" && ramCount(mid) == 2);
+    CHECK(ramOf(mid, "ts10") == before);
+    CHECK(ramOf(mid, "ts12") == std::vector<uint8_t>(static_cast<size_t>(kMemoryBytes), 0));
+    run(p, kBoot);
+    CHECK(p.engine()->snapshot().booted);
+    std::printf("  ts-12 booted: [%s]\n", ens::ts::rowText(p.engine()->snapshot().panel, 0).c_str());
+    const auto s12 = stateOf(p);
+    CHECK(ramOf(s12, "ts10") == before && ramOf(s12, "ts12").size() == static_cast<size_t>(kMemoryBytes));
+    p.setModel(Model::Ts10);
+    CHECK(p.model() == Model::Ts10 && p.engine() != nullptr && p.engine()->model() == Model::Ts10);
+    if (!p.engine()) return s12;
+    const auto back = stateOf(p);
+    CHECK(ramOf(back) == before && ramOf(back, "ts12") == ramOf(s12, "ts12"));
+    run(p, kBoot);
+    press(p, Button::System);
+    CHECK(rowStarts(p, 0, "SYSTEM  TUNE=+02"));
+    return s12;
+}
+
+// model_switch_during_boot_keeps_start_image: a switch 500 ms into a restored boot, and back, starts from the
+// restored RAM, never a half-booted one.
+void modelSwitchDuringBoot(const juce::File& dir, const juce::MemoryBlock& a) {
+    if (a.isEmpty() || !realRoms(dir)) return;
+    TsProcessor p;
+    p.prepareToPlay(48000, 480);
+    p.setStateInformation(a.getData(), static_cast<int>(a.getSize()));
+    run(p, 500);
+    p.setModel(Model::Ts12);
+    run(p, 100);
+    p.setModel(Model::Ts10);
+    const auto s = stateOf(p);
+    CHECK(ramOf(s, "ts10") == ramOf(a) && selectOf(s) == selectOf(a));
+}
+
+// model_state_switches_instance: a TS-12 state switches a TS-10 instance, keeps both RAMs, boots the TS-12, and
+// leaves the setting alone.
+void modelStateSwitchesInstance(const juce::File& dir, const juce::MemoryBlock& s12) {
+    if (s12.isEmpty() || !realRoms(dir)) return;
+    TsProcessor p;
+    CHECK(p.model() == Model::Ts10);
+    p.prepareToPlay(48000, 480);
+    p.setStateInformation(s12.getData(), static_cast<int>(s12.getSize()));
+    CHECK(p.model() == Model::Ts12 && p.engine() != nullptr && p.engine()->model() == Model::Ts12);
+    CHECK(AppSettings().model() == Model::Ts10);
+    const auto s = stateOf(p);
+    CHECK(ramOf(s) == ramOf(s12, "ts12") && ramOf(s, "ts10") == ramOf(s12, "ts10"));
+    if (!p.engine()) return;
+    run(p, kRestored);
+    CHECK(p.engine()->snapshot().booted);
+}
+
+// model_old_state_is_ts10: a state from before A137 (no model attributes) switches a TS-12 instance to the TS-10.
+void modelOldStateIsTs10(const juce::File& dir, const juce::MemoryBlock& a) {
+    if (a.isEmpty() || !realRoms(dir)) return;
+    auto x = xmlOf(a);
+    if (!x) return;
+    x->removeAttribute("model");
+    for (auto* r : x->getChildWithTagNameIterator("RAM")) r->removeAttribute("model");
+    juce::MemoryBlock old;
+    juce::AudioProcessor::copyXmlToBinary(*x, old);
+    AppSettings().setModel(Model::Ts12);
+    TsProcessor p;
+    CHECK(p.model() == Model::Ts12);
+    p.setStateInformation(old.getData(), static_cast<int>(old.getSize()));
+    CHECK(p.model() == Model::Ts10 && p.engine() != nullptr && p.engine()->model() == Model::Ts10);
+    const auto s = stateOf(p);
+    CHECK(ramOf(s, "ts10") == ramOf(a) && ramCount(s) == 1 && AppSettings().model() == Model::Ts12);
+}
+
+// model_state_waits_for_roms: a TS-12 state into an instance whose folder has the six TS-10-era files (dummies):
+// the switch happens, the machine stops naming the TS-12 OS; with all eight it boots the TS-12 from the state.
+void modelStateWaitsForRoms(const juce::File& dir, const juce::MemoryBlock& s12) {
+    if (s12.isEmpty() || !haveRoms()) return;
+    const auto six = dir.getChildFile("six");
+    dummyRoms(six);
+    setSettingsDir(dir);
+    AppSettings().setRomFolder(six);
+    TsProcessor p;
+    CHECK(p.model() == Model::Ts10 && p.engine() != nullptr);
+    p.prepareToPlay(48000, 480);
+    p.setStateInformation(s12.getData(), static_cast<int>(s12.getSize()));
+    std::printf("  ts-12 state, six ROMs: [%s]\n", p.romError().replace("\n", " / ").toRawUTF8());
+    CHECK(p.model() == Model::Ts12 && p.engine() == nullptr && p.romError().contains("ts12_310h.bin"));
+    auto s = stateOf(p);
+    CHECK(ramOf(s) == ramOf(s12, "ts12") && ramOf(s, "ts10") == ramOf(s12, "ts10"));
+    juce::String err;
+    CHECK(p.setRomFolder(juce::File(TSR_ROM_DIR), err) && p.engine() != nullptr);
+    if (!p.engine()) return;
+    CHECK(p.engine()->model() == Model::Ts12 && p.romError().isEmpty());
+    s = stateOf(p);
+    CHECK(ramOf(s) == ramOf(s12, "ts12") && ramOf(s, "ts10") == ramOf(s12, "ts10"));
+    run(p, kRestored);
+    CHECK(p.engine()->snapshot().booted);
+}
+
+// model_switch_keeps_disk: the disk in the drive goes into the other model's machine; while that model's ROMs are
+// missing it waits, and goes in once they are found.
+void modelSwitchKeepsDisk(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    const juce::File real(TSR_ROM_DIR);
+    const auto six = dir.getChildFile("six");  // the six TS-10-era files, copied
+    for (const auto& s : checkRomFolder(real, Model::Ts10, nullptr)) {
+        six.getChildFile(s.file).getParentDirectory().createDirectory();
+        CHECK(real.getChildFile(s.file).copyFileTo(six.getChildFile(s.file)));
+    }
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    const auto step = [&] {
+        run(p, 20);
+        p.tick();
+    };
+    step();
+    juce::String err;
+    const auto img = dir.getChildFile("disk.img");
+    write(img, 819200);
+    CHECK(p.drive().open(img, err));
+    step();
+    CHECK(p.engine()->snapshot().diskIn);
+    p.setModel(Model::Ts12);
+    step();
+    CHECK(p.engine() != nullptr && p.engine()->model() == Model::Ts12 && p.engine()->snapshot().diskIn);
+    CHECK(!p.setRomFolder(six, err) && p.engine() != nullptr);  // the TS-12 runs on
+    p.setModel(Model::Ts10);
+    step();
+    CHECK(p.engine() != nullptr && p.engine()->model() == Model::Ts10 && p.engine()->snapshot().diskIn);
+    p.setModel(Model::Ts12);
+    CHECK(p.engine() == nullptr && p.romError().contains("ts12_310h.bin"));
+    step();
+    CHECK(p.setRomFolder(real, err) && p.engine() != nullptr);
+    if (!p.engine()) return;
+    step();
+    CHECK(p.engine()->model() == Model::Ts12 && p.engine()->snapshot().diskIn && p.drive().slotText() == "disk.img");
+}
+
+// model_file_mode_memory_per_model: the Standalone saves the TS-10's memory file when it leaves it and the TS-12's
+// on close; the TS-12 run leaves the TS-10's file alone.
+void modelFileModeMemoryPerModel(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    const auto f10 = AppSettings().memoryFile(Model::Ts10), f12 = AppSettings().memoryFile(Model::Ts12);
+    CHECK(eraseMemoryFile(f10) && eraseMemoryFile(f12));
+    const auto zeros = fileBytes(f12);
+    juce::MemoryBlock at10, last12;
+    {
+        TsProcessor p(MemoryMode::File);
+        if (!p.engine()) return;
+        p.prepareToPlay(48000, 480);
+        run(p, kBoot);
+        CHECK(p.engine()->snapshot().booted);
+        const auto& ram10 = p.engine()->machine().ramImage();
+        const juce::MemoryBlock r10(ram10.data(), ram10.size());
+        p.setModel(Model::Ts12);
+        at10 = fileBytes(f10);
+        CHECK(at10 == r10 && fileBytes(f12) == zeros && AppSettings().model() == Model::Ts12);
+        if (!p.engine()) return;
+        run(p, kBoot);
+        CHECK(p.engine()->model() == Model::Ts12 && p.engine()->snapshot().booted);
+        const auto& ram12 = p.engine()->machine().ramImage();
+        last12 = juce::MemoryBlock(ram12.data(), ram12.size());
+    }
+    CHECK(fileBytes(f12) == last12 && last12 != zeros && fileBytes(f10) == at10);
 }
 
 // project_mode_leaves_shared_file (A117): no 60 s save, no close save, Erase spares the file; only
@@ -2157,6 +2377,14 @@ int main() {
     stateDuringBoot(dir.getChildFile("boot"), a);
     stateWithoutRoms(dir.getChildFile("noroms"), a);
     stateBadBlobs(dir.getChildFile("bad"));
+    modelFollowsSettings(dir.getChildFile("model-follows"));
+    const auto s12 = modelSwitchRoundTrip(dir.getChildFile("model-round-trip"));
+    modelSwitchDuringBoot(dir.getChildFile("model-during-boot"), a);
+    modelStateSwitchesInstance(dir.getChildFile("model-state-switches"), s12);
+    modelOldStateIsTs10(dir.getChildFile("model-old-state"), a);
+    modelStateWaitsForRoms(dir.getChildFile("model-waits"), s12);
+    modelSwitchKeepsDisk(dir.getChildFile("model-disk"));
+    modelFileModeMemoryPerModel(dir.getChildFile("model-file-mode"));
     projectLeavesSharedFile(dir.getChildFile("shared"));
     stateThreads(dir.getChildFile("threads"));
     standaloneNoRam(dir.getChildFile("standalone"));

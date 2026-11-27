@@ -2,6 +2,7 @@
 // The plugin's AudioProcessor: owns the settings and the engine and plays it, Main and Aux out, MIDI in.
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -66,6 +67,12 @@ public:
     // whether it is the stored one; a VST3 package's own ROMs are used, not stored.
     juce::File romFolder() const { return romFolder_; }
     bool romFolderStored() const { return romStored_; }
+    // DECISION A137: the model this instance runs: the setting's at construction, then setModel's or a state's.
+    ens::ts::Model model() const { return model_.load(); }
+    // The settings page's switch: stores the choice and restarts on the other model's OS once the memory left is
+    // saved (File: its memory file; Project: kept for the state). With that model's ROMs missing the machine stops and
+    // romError names them; its start image waits for setRomFolder. A state's model switches without storing.
+    void setModel(ens::ts::Model m);
     // Stores file and, when it holds an image, restarts the machine from it. A file in the ROM
     // folder, one that cannot be written or one of the wrong size is refused (err) and the setting stays.
     bool setMemoryFile(const juce::File& file, juce::String& err);
@@ -101,8 +108,8 @@ public:
     const juce::String getProgramName(int) override { return {}; }
     void changeProgramName(int, const juce::String&) override {}
 
-    // DECISION A117: <TSState version="1" select="..."> with the parameters and, in Project mode, <RAM> and <Media>
-    // (A129).
+    // DECISION A117: <TSState version="1" model="ts10|ts12" select="..."> with the parameters and, in Project mode,
+    // <RAM model="..."> for each model (A137) and <Media> (A129).
     void getStateInformation(juce::MemoryBlock& dest) override;
     void setStateInformation(const void* data, int size) override;
 
@@ -114,6 +121,9 @@ private:
     bool restart(Ram ram, bool fromState = false);
     void finishRestore(bool clean);  // A129: the restore has ended: the stand-ins into the record, restored_ dropped
     void unserve();        // A129: the CD drive stops serving the stand-in CDs (before restored_ changes)
+    // A137: to model m (the caller holds stateMu_). start: its start image and the restart; a state sets its own.
+    void switchModel(ens::ts::Model m, bool start);
+    void park();  // A137: the user's disk and CD out of the engine into parkedDisk_ / parkedCd_ (audio suspended)
     std::vector<uint8_t> ram();  // the RAM a state or a copy saves (A117); empty when there is none
     std::vector<uint8_t> select(const ens::app::Snapshot& snap) const;  // the select a state saves
     int soundNow() const;  // `sound` 0-127; NaN reads as 0
@@ -124,10 +134,14 @@ private:
 
     const MemoryMode mode_;
     AppSettings settings_;
+    std::atomic<ens::ts::Model> model_;  // DECISION A137: written under stateMu_, read by any thread
     // DECISION A117: the image the machine last started from and the selection to replay with it; set by
     // each restart, or by a state that arrives with no ROMs (used once they are good).
     std::vector<uint8_t> startImage_, startSelect_;
     bool haveStart_ = false;
+    // DECISION A137: Project mode, the RAM and select each model left (index Model), for the state and a switch back;
+    // the running model's slot is unused.
+    std::array<std::vector<uint8_t>, 2> modelRam_, modelSelect_;
     // DECISION A117: guards the engine swap (restart), ram() and the start fields against a host saving
     // from another thread. processBlock never takes it.
     std::mutex stateMu_;
@@ -182,6 +196,10 @@ private:
     std::atomic<bool> restoreRan_{false};  // the engine was given stand-ins and tick has not seen the end yet
     std::vector<uint32_t> standInCds_;     // their CD medium ids and floppies, to tell them from the user's media
     std::vector<const ens::ts::Disk*> standInDisks_;
+    // DECISION A137: the user's disk and CD while no machine runs (a model whose ROMs are missing); the next restart
+    // puts them in.
+    std::unique_ptr<ens::ts::Disk> parkedDisk_;
+    std::pair<uint32_t, uint32_t> parkedCd_{0, 0};
     CdDrive cd_{*this};  // after engine_, record_ and restored_: its reader stops before any of them goes
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TsProcessor)
