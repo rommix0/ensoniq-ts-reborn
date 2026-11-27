@@ -77,6 +77,7 @@ private:
     void finish(bool ok, const juce::String& err);
     void saveThen(std::function<void()> then);
     void chooseOpen();
+    void chooseSysex();  // DECISION A136
     void chooseSaveAs(std::function<void()> then);
     static void showError(const juce::String& err);
 

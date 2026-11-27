@@ -2038,6 +2038,61 @@ void hfeDrive(const juce::File& dir) {
     CHECK(ens::ts::decodeImage(v, im, e) && im.disk && im.disk->cylinders() == 255 && im.disk->block(7835)[0] == 0x5A);
 }
 
+// DECISION A136: a .syx file goes into MIDI in at the wire's pace, ahead of nothing the host sends; the OS answers
+// what it understands (here an Identity Request after 2000 bytes of another maker's sysex, with SYS-EX=ON). A file
+// that is not sysex is refused.
+void sysexFile(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    using ens::ts::Button;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    for (int i = 0; i < 3; ++i) press(p, Button::MidiControl);
+    press(p, Button::Soft1);
+    press(p, Button::Up);
+    CHECK(ens::ts::rowText(p.engine()->snapshot().panel, 0).find("SYS-EX=ON") != std::string::npos);
+
+    juce::String err;
+    const auto bad = dir.getChildFile("not.syx");
+    write(bad, 100);  // zeros: no F0
+    CHECK(!p.sendSysex(bad, err) && err.isNotEmpty());
+    CHECK(p.sysexProgress() < 0);
+
+    std::vector<uint8_t> bytes(2000, 0x11);
+    bytes.front() = 0xF0;
+    bytes[1] = 0x7D;  // non-commercial id: the OS ignores it
+    bytes.back() = 0xF7;
+    const uint8_t ask[] = {0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7};
+    bytes.insert(bytes.end(), ask, ask + 6);
+    const auto file = dir.getChildFile("ask.syx");
+    CHECK(file.replaceWithData(bytes.data(), bytes.size()));
+    CHECK(p.sendSysex(file, err));
+    CHECK(!p.sendSysex(file, err) && err.isNotEmpty());  // one at a time
+    juce::AudioBuffer<float> buf(4, 480);
+    bool reply = false;
+    float halfway = -1;
+    for (int b = 0; b < 200 && !reply; ++b) {  // 2 s: 2006 bytes take 0.64 s on the wire
+        juce::MidiBuffer m;
+        buf.clear();
+        p.processBlock(buf, m);
+        if (b == 20) halfway = p.sysexProgress();
+        for (const auto e : m) {
+            const auto* d = e.data;
+            reply |= e.numBytes >= 6 && d[0] == 0xF0 && d[1] == 0x7E && d[3] == 0x06 && d[4] == 0x02;
+        }
+    }
+    p.tick();
+    std::printf("  sysex file: progress at 200 ms %.2f, reply %d\n", halfway, reply);
+    CHECK(reply && halfway > 0 && halfway < 1);
+    CHECK(p.sysexProgress() < 0);  // done and freed by tick
+    CHECK(p.sendSysex(file, err));  // and another may start; stopped at once
+    p.stopSysex();
+    run(p, 20);
+    p.tick();
+    CHECK(p.sysexProgress() < 0);
+}
+
 int main() {
     juce::ScopedJuceInitialiser_GUI gui;  // the VST3 host and editor need the message manager
     const auto dir =
@@ -2070,6 +2125,7 @@ int main() {
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
     hfeDrive(dir.getChildFile("hfe"));
+    sysexFile(dir.getChildFile("syx"));
     cdDrive(dir.getChildFile("cd"));
     cdDriveLoads(dir.getChildFile("cd-loads"));
     cdDriveMissingFile(dir.getChildFile("cd-missing"));

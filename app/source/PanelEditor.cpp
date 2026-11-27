@@ -788,13 +788,17 @@ juce::String PanelEditor::slotText() const { return proc_.drive().slotText(); }
 void PanelEditor::driveMenu(juce::Component* target) { proc_.drive().showMenu(target); }
 
 // DECISION A119: a file dropped anywhere on the panel goes in the drive (asking first, A120).
-// DECISION A128: an .iso or .cue (any case) goes in the CD drive instead.
+// DECISION A128: an .iso or .cue (any case) goes in the CD drive instead; DECISION A136: a .syx into MIDI in.
 void PanelEditor::filesDropped(const juce::StringArray& files, int, int) {
     if (files.size() != 1) return;
     const juce::File f(files[0]);
-    if (f.hasFileExtension("iso;cue"))
+    if (f.hasFileExtension("iso;cue")) {
         proc_.cdDrive().insertAsked(f);
-    else
+    } else if (f.hasFileExtension("syx")) {  // DECISION A136: a SysEx file goes into MIDI in
+        juce::String err;
+        if (!proc_.sendSysex(f, err))
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "SysEx", err);
+    } else
         proc_.drive().openAsked(f);
 }
 

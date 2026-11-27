@@ -50,6 +50,11 @@ public:
     // DECISION A129: a floppy's newly read blocks into the record (Project mode only), from a copy of the disk in the
     // drive or a disk leaving it (DiskDrive::poll). Message thread.
     void capture(const ens::ts::Disk& d);
+    // DECISION A136: a .syx file sent into MIDI in at the wire's pace (3 KB a second), message thread. False with err
+    // for a file that does not start with F0, one over 16 MB, while a send is running, or with no audio running.
+    bool sendSysex(const juce::File& f, juce::String& err);
+    float sysexProgress() const;  // 0..1 while a file is sent, -1 when none
+    void stopSysex();             // ends the send after the bytes already on their way (an F7 closes a cut message)
     // Counts the engines made by restart, so the drive knows its counts belong to a replaced one (A119).
     uint32_t engineGeneration() const { return engineGen_.load(); }
 
@@ -148,6 +153,15 @@ private:
     DcBlock dc_[4];  // Main L R, Aux L R
     float dcR_ = 0;
     static void addMidiOut(void* self, const uint8_t* data, int size);
+    // DECISION A136: the file crosses threads in single-slot atomics, as the disks do (A118): the message thread
+    // allocates into sysexIn_, the audio thread feeds it and parks it in sysexDone_, and tick() frees it.
+    void feedSysex(int frames);  // audio thread, at a block's start
+    std::atomic<std::vector<uint8_t>*> sysexIn_{nullptr}, sysexDone_{nullptr};
+    std::vector<uint8_t>* sysex_ = nullptr;  // audio thread: the file being fed
+    size_t sysexPos_ = 0;                    // audio thread
+    int sysexGap_ = 0;                       // audio thread: frames of pause left after a message
+    std::atomic<size_t> sysexSent_{0}, sysexSize_{0};
+    std::atomic<bool> sysexBusy_{false}, sysexStop_{false};
     int ticks_ = 0;            // timer ticks (30 Hz) since the last save request
     bool ramPending_ = false;  // a requestRam is waiting for takeRam
     std::vector<uint8_t> ramBuf_;
