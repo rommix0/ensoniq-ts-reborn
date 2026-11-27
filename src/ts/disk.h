@@ -1,5 +1,6 @@
 #pragma once
 // A 3.5" floppy as the TS sees it: 80 cylinders, 2 heads, 512-byte sectors, 10 (DD) or 20 (HD) per track.
+// DECISION T30: or more cylinders, up to 255, as an HxC floppy emulator serves (a "super disk").
 // Allocates only in blank()/formatted(); everything else is allocation-free.
 #include <cstddef>
 #include <cstdint>
@@ -12,12 +13,14 @@ enum class Density : uint8_t { Double, High };
 
 class Disk {
 public:
-    static constexpr int kCylinders = 80, kHeads = 2, kSectorBytes = 512;
+    static constexpr int kCylinders = 80, kMaxCylinders = 255, kHeads = 2, kSectorBytes = 512;
 
-    static std::unique_ptr<Disk> blank(Density d);      // every track unformatted
-    static std::unique_ptr<Disk> formatted(Density d);  // every track formatted, zero-filled
+    // cylinders 1..kMaxCylinders (clamped).
+    static std::unique_ptr<Disk> blank(Density d, int cylinders = kCylinders);      // every track unformatted
+    static std::unique_ptr<Disk> formatted(Density d, int cylinders = kCylinders);  // every track formatted, zeros
 
     Density density() const { return density_; }
+    int cylinders() const { return cylinders_; }
     int sectorsPerTrack() const { return density_ == Density::High ? 20 : 10; }
     size_t bytes() const { return data_.size(); }
 
@@ -47,16 +50,17 @@ public:
     uint32_t reads() const { return reads_; }
     void clearReads();
 
-    // Contents, writes() and the read marks; false, nothing copied, when the densities differ. The write-protect flag is
-    // not copied: it belongs to the drive (A119), which sets it on each disk it puts in.
+    // Contents, writes() and the read marks; false, nothing copied, when the densities or cylinders differ. The
+    // write-protect flag is not copied: it belongs to the drive (A119), which sets it on each disk it puts in.
     bool copyInto(Disk& dst) const;
 
 private:
-    explicit Disk(Density d);
+    Disk(Density d, int cylinders);
     size_t trackOffset(int cyl, int head) const {
         return size_t(cyl * kHeads + head) * size_t(sectorsPerTrack()) * kSectorBytes;
     }
     Density density_;
+    int cylinders_;
     std::vector<uint8_t> data_;
     std::vector<uint8_t> formatted_;  // per track (cyl * 2 + head)
     std::vector<uint8_t> read_;  // per block

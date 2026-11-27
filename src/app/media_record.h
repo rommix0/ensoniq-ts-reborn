@@ -17,7 +17,7 @@ struct SavedMedium {
     enum class Kind : uint8_t { FloppyDD, FloppyHD, Cd };
     Kind kind = Kind::FloppyDD;
     std::string label;   // the name the OS shows for it (from the ID block); "" when unnamed
-    uint32_t size = 0;   // floppy: 1600 or 3200 blocks; CD: sectors
+    uint32_t size = 0;   // floppy: 1600 or 3200 blocks (more on an HFE super disk, T30); CD: sectors
     std::map<uint32_t, std::vector<uint8_t>> blocks;  // floppy: 512-byte blocks; CD: 2048-byte sectors
 };
 

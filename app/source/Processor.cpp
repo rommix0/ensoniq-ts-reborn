@@ -86,14 +86,19 @@ std::unique_ptr<juce::XmlElement> mediaXml(const std::vector<SavedMedium>& media
 }
 
 // DECISION A129 (Review Focus 5): a medium that is not whole is dropped and the rest restore: an unknown kind, a floppy
-// size other than 1600 (DD) or 3200 (HD), no CD sectors, a label character past 0xFF, a run outside the medium, bad
-// base64 or a run whose bytes are not count blocks, or no blocks at all.
+// size other than 1600 (DD) or 3200 (HD) or a super disk's (T30: whole cylinders, 80 to 255), no CD sectors, a
+// label character past 0xFF, a run outside the medium, bad base64 or a run whose bytes are not count blocks, or no
+// blocks at all.
 bool parseMedium(const juce::XmlElement& e, SavedMedium& m) {
     const auto kind = e.getStringAttribute("kind");
     const juce::int64 size = e.getStringAttribute("size").getLargeIntValue();
-    if (kind == "floppy-dd" && size == 1600)
+    const auto cylinders = [size](int perCylinder) {
+        return size % perCylinder == 0 && size / perCylinder >= ens::ts::Disk::kCylinders &&
+               size / perCylinder <= ens::ts::Disk::kMaxCylinders;
+    };
+    if (kind == "floppy-dd" && cylinders(20))
         m.kind = SavedMedium::Kind::FloppyDD;
-    else if (kind == "floppy-hd" && size == 3200)
+    else if (kind == "floppy-hd" && cylinders(40))
         m.kind = SavedMedium::Kind::FloppyHD;
     else if (kind == "cd" && size > 0 && size <= 0xFFFFFFFF)
         m.kind = SavedMedium::Kind::Cd;

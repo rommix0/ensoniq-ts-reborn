@@ -317,3 +317,28 @@ TEST(fdc_read_marks_blocks) {
     d.result7(r);
     CHECK_EQ(w->reads(), 0u);
 }
+
+// DECISION T22, T30: a disk of more than 80 cylinders (an HxC "super disk", 255 x 2 x 20): Seek goes to the
+// disk's last cylinder and Read Data reads there.
+TEST(fdc_reads_past_cylinder_80) {
+    auto disk = Disk::formatted(Density::High, 255);
+    disk->sector(195, 1, 7)[0] = 0xC3;
+    Drv d;
+    d.f.setDisk(disk.get());
+    d.f.setHighRate(true);
+    d.cmd({0x0F, 0x00, 195});
+    d.cmd({0x08});
+    CHECK_EQ(d.f.read(true), 0x20);
+    CHECK_EQ(d.f.read(true), 195);
+    d.cmd({0x46, 0x04, 195, 1, 7, 2, 7, 0x1B, 0xFF});
+    CHECK(d.exm());
+    CHECK_EQ(d.f.read(true), 0xC3);
+    while (d.exm()) d.f.read(true);
+    uint8_t r[7];
+    d.result7(r);
+    CHECK_EQ(r[3], 195);
+    d.cmd({0x0F, 0x00, 0xFF});  // past the disk: the head stops on its last cylinder
+    d.cmd({0x08});
+    d.f.read(true);
+    CHECK_EQ(d.f.read(true), 254);
+}
