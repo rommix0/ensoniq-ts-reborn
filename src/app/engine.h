@@ -27,7 +27,7 @@ constexpr double kFrameHz = ts::kCpuHz / 512.0;
 struct Event {
     enum class Kind : uint8_t { Button, Key, Analog, PatchSelect };
     Kind kind;
-    // Button: ts::Button code. Key: note 36-96. Analog: ts::Analog. PatchSelect: 0 = left, 1 = right.
+    // Button: ts::Button code. Key: note in the model's range (ts::keyRange). Analog: ts::Analog. PatchSelect: 0 = left, 1 = right.
     uint8_t id;
     bool down;
     uint16_t value;  // Key: strike 1-127. Analog: raw.
@@ -58,8 +58,10 @@ struct Snapshot {
 class Engine {
 public:
     ~Engine();
-    // scsi: the SP-4 board with a CD drive at ID 4 (Plan 7); simm8: 8 MB of sample RAM (T4).
-    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err, bool scsi = false, bool simm8 = false);
+    // scsi: the SP-4 board with a CD drive at ID 4 (Plan 7); simm8: 8 MB of sample RAM (T4); model: TS-10 or TS-12 (T31).
+    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err, bool scsi = false, bool simm8 = false,
+                                          ts::Model model = ts::Model::Ts10);
+    ts::Model model() const { return m_->model(); }
     // Message thread, audio stopped:
     void prepare(double outRate, int maxBlock);  // allocates the resampler and buffers
     bool loadRam(const std::vector<uint8_t>& img, std::string& err);

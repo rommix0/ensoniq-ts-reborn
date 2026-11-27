@@ -1,6 +1,6 @@
 // tsemu: runs the emulated TS-10 (OS v3.10 on the 68000 with the DUART and the OTTO/ESP board).
 //   tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] [--last <n>]
-//              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]... [--ram <file>] [--sqx70] [--simm8]
+//              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]... [--ram <file>] [--sqx70] [--simm8] [--ts12]
 //              [--disk <image>] [--save-disk <file>] [--cd <image>]
 // --trace takes a comma list of otto,esp,duart,fdc,iexp,scsi,unmapped,iack; matching bus events are
 // printed as "<cycle> <DEV> <R|W><size> <addr> <value>". --last <n> prints the last n instruction
@@ -13,14 +13,15 @@
 // --press presses the named buttons (kButtons names, e.g. SYSTEM, BANK5, SOFT1) in order at <ms> from
 // power-on, holds them 100 ms and releases them in reverse order; it may be repeated.
 // --analog sets an analog input to a raw 10-bit value (0-1023) from power-on instead of its resting
-// value (kAnalogRest): PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF; it may be repeated.
+// value (kAnalogRest): PITCH, MOD, VOLUME, CV, DATA, BATTERY, REF or PRESS; it may be repeated.
 // --ram <file> is the battery RAM (Machine::ramImage, 512 KB raw: OSRAM then SEQEXP, T13): loaded at
 // power-on if the file exists (otherwise a line says so and the RAM starts blank, a cold start) and written
 // back when boot or render ends without an error and the run covered at least kBootMs of emulated time (render
 // always does); a shorter boot --ms prints a line and leaves the file alone, so a diagnostic run cannot
 // replace a good settings image with a half-initialised one. --sqx70 fits the SQX-70 sequence expander (SEQEXP);
 // the default is a stock TS-10 (T13). Both use the same image layout. --simm8 fits the 4M x 8 SIMM pair (8 MB of
-// sample RAM, BankSets S8 and S9) in place of the factory 2 MB (T4).
+// sample RAM, BankSets S8 and S9) in place of the factory 2 MB (T4). --ts12 runs the TS-12 (76 keys, key release
+// velocity, pressure) from os/ts12_310h.bin and ts12_310l.bin; --analog PRESS=<raw> sets its pressure input (T31).
 // --disk <image> puts a disk image (raw .img, GKH, Giebler EDE/EDA or HFE, told apart by content, T21, T30) in the
 // drive from power-on; the file is only read. --save-disk <file> writes the disk as it is at the end of the run, in the
 // format the file's extension gives (.gkh GKH, .ede/.eda/.edt Giebler, .hfe HFE, anything else raw; the --disk file's
@@ -29,13 +30,13 @@
 // --cd <image> fits the SP-4 SCSI board (T25) and puts a CD image (.iso, or .cue with one MODE1/2352 track) in the
 // CD-ROM drive at SCSI ID 4 from power-on; its sectors are read from the file between frames (T29). Only read.
 //   tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] [--analog <name>=<raw>]...
-//                [--ram <file>] [--sqx70] [--simm8] [--disk <image>] [--save-disk <file>] [--cd <image>]
+//                [--ram <file>] [--sqx70] [--simm8] [--ts12] [--disk <image>] [--save-disk <file>] [--cd <image>]
 // render boots for kBootMs (not written), sends each MIDI file event to MIDI in at its frame and renders
 // until the last event plus --tail (default 2000 ms); it writes Main as a 16-bit stereo WAV at kWavRate
 // (--aux writes Aux the same way) and prints one summary line and "pcm hash <16 hex>", the FNV-1a 64 of
 // Main's samples. MIDI in takes channel messages only: system messages are not sent. (On Windows a file
 // named aux.<anything> is the AUX device and never completes: give --aux another name.)
-//   tsemu bench [--roms <dir>] [--seconds <n>]
+//   tsemu bench [--roms <dir>] [--seconds <n>] [--ts12]
 // bench boots (timed and printed on its own line), then plays a fixed 8-note chord from MIDI in every
 // second for n emulated seconds (default 20) and prints "emulated <s>, host <s>, realtime x<f>".
 // Errors print "error: <msg>" and exit 2.
@@ -84,6 +85,7 @@ struct Options {
     std::string ram;                                                  // --ram: the battery RAM image file
     bool sqx70 = false;                                               // --sqx70: SEQEXP fitted
     bool simm8 = false;                                               // --simm8: 8 MB of sample RAM (T4)
+    bool ts12 = false;                                                // --ts12: the TS-12 and its OS pair (T31)
     std::string disk, saveDisk;                                       // --disk, --save-disk
     std::string cd;                                                   // --cd: a CD image at SCSI ID 4
 };
@@ -106,7 +108,7 @@ constexpr struct {
     const char* name;
 } kAnalogNames[] = {{Analog::PitchWheel, "PITCH"}, {Analog::ModWheel, "MOD"},     {Analog::Volume, "VOLUME"},
                     {Analog::CvPedal, "CV"},       {Analog::DataEntry, "DATA"},  {Analog::Battery, "BATTERY"},
-                    {Analog::Reference, "REF"}};
+                    {Analog::Reference, "REF"}, {Analog::Pressure, "PRESS"}};
 
 uint64_t parseNum(const std::string& opt, const std::string& v) {
     char* end = nullptr;
@@ -231,20 +233,21 @@ std::pair<Analog, uint16_t> parseAnalog(const std::string& v) {
                 if (raw > 1023) fail("bad value '" + v + "' for --analog (raw 0-1023)");
                 return {a.input, static_cast<uint16_t>(raw)};
             }
-    fail("bad value '" + v + "' for --analog (PITCH, MOD, VOLUME, CV, DATA, BATTERY or REF=<raw>)");
+    fail("bad value '" + v + "' for --analog (PITCH, MOD, VOLUME, CV, DATA, BATTERY, REF or PRESS (TS-12)=<raw>)");
 }
 
 // kept: the --disk file's format and header, for --save-disk; cd: the --cd image, opened and inserted.
 std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = nullptr, ServedCd* cd = nullptr) {
     RomSet roms;
-    roms.osHigh = load(o.roms + "/os", "ts10_310h.bin");
-    roms.osLow = load(o.roms + "/os", "ts10_310l.bin");
+    roms.osHigh = load(o.roms + "/os", o.ts12 ? "ts12_310h.bin" : "ts10_310h.bin");
+    roms.osLow = load(o.roms + "/os", o.ts12 ? "ts12_310l.bin" : "ts10_310l.bin");
     roms.u41 = load(o.roms + "/waves", "901401_u41.bin");
     roms.u43 = load(o.roms + "/waves", "901301_u43.bin");
     roms.u45 = load(o.roms + "/waves", "901402_u45.bin");
     roms.u46 = load(o.roms + "/waves", "901302_u46.bin");
     std::string err;
-    auto m = Machine::create(roms, err, o.sqx70, !o.cd.empty(), o.simm8);
+    auto m = Machine::create(roms, err, o.sqx70, !o.cd.empty(), o.simm8,
+                           o.ts12 ? Model::Ts12 : Model::Ts10);
     if (!m) fail(err);
     for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
     if (!o.ram.empty()) {
@@ -485,11 +488,11 @@ int main(int argc, char** argv) {
         if (cmd != "boot" && cmd != "render" && cmd != "bench")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
                  "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...\n"
-                 "             [--ram <file>] [--sqx70] [--simm8] [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
+                 "             [--ram <file>] [--sqx70] [--simm8] [--ts12] [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
                  "  tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] "
-                 "[--analog <name>=<raw>]... [--ram <file>] [--sqx70] [--simm8]\n"
+                 "[--analog <name>=<raw>]... [--ram <file>] [--sqx70] [--simm8] [--ts12]\n"
                  "               [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
-                 "  tsemu bench [--roms <dir>] [--seconds <n>]");
+                 "  tsemu bench [--roms <dir>] [--seconds <n>] [--ts12]");
         Options o;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
@@ -497,8 +500,8 @@ int main(int argc, char** argv) {
                 o.positional.push_back(a);
                 continue;
             }
-            if (a == "--display-only" || a == "--sqx70" || a == "--simm8") {
-                (a == "--sqx70" ? o.sqx70 : a == "--simm8" ? o.simm8 : o.displayOnly) = true;
+            if (a == "--display-only" || a == "--sqx70" || a == "--simm8" || a == "--ts12") {
+                (a == "--sqx70" ? o.sqx70 : a == "--simm8" ? o.simm8 : a == "--ts12" ? o.ts12 : o.displayOnly) = true;
                 continue;
             }
             if (i + 1 >= argc) fail("option " + a + " needs a value");

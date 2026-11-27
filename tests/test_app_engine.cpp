@@ -770,3 +770,27 @@ TEST(engine_disk_reads_in_snapshot) {
     renderMs(*e, 10);
     CHECK_EQ(e->snapshot().diskReads, 2u);
 }
+
+// T31: a TS-12 engine boots the TS-12 OS and plays its low E (note 28, below the TS-10's range).
+TEST(engine_ts12_plays_low_e) {
+    ts::RomSet roms;
+    if (!readTsRoms(roms, ts::Model::Ts12)) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    std::string err;
+    auto e = Engine::create(roms, err, false, false, ts::Model::Ts12);
+    CHECK(e != nullptr);
+    if (!e) return;
+    CHECK(e->model() == ts::Model::Ts12);
+    e->prepare(48000, kBlock);
+    renderMs(*e, kBootedMs);
+    e->setMidiOut(collectOut, nullptr);
+    g_out.clear();
+    CHECK(e->post({Event::Kind::Key, 28, true, 99}));
+    renderMs(*e, 200);
+    bool on = false;
+    for (const auto& m : g_out) on |= m.size() == 3 && m[0] == 0x90 && m[1] == 0x1C && m[2] > 0;
+    CHECK(on);
+    e->setMidiOut(nullptr, nullptr);
+}

@@ -212,6 +212,54 @@ TEST(rt_engine_render_does_not_allocate) {
     CHECK_EQ(n, 0u);
 }
 
+TEST(rt_ts12_engine_render_does_not_allocate) {
+    RomSet roms;
+    if (!readTsRoms(roms, ens::ts::Model::Ts12)) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    std::string err;
+    auto e = ens::app::Engine::create(roms, err, false, false, ens::ts::Model::Ts12);
+    CHECK(e != nullptr);
+    if (!e) return;
+    constexpr int kBlock = 480;
+    e->prepare(48000, kBlock);
+    float ml[kBlock], mr[kBlock], al[kBlock], ar[kBlock];
+    for (int b = 0; b < 540; ++b) e->render(ml, mr, al, ar, kBlock);  // 5.4 s: booted
+    e->prepare(44100, 512);             // a device rate change, as prepareToPlay makes on a running machine
+    e->render(ml, mr, al, ar, kBlock);  // the first block at the new rate
+    using ens::app::Event;
+    const uint8_t on[] = {0x90, 0x3C, 0x64}, off[] = {0x80, 0x3C, 0x40}, pc[] = {0xC0, 0x05};
+    std::vector<uint8_t> ram(e->machine().ramImage().size());
+    ens::app::Snapshot s;
+    bool taken = false;
+    uint16_t mod = 0;
+    allocStart();
+    for (int b = 0; b < 200; ++b) {
+        if (b % 5 == 0) {
+            e->midi(10, on, 3);
+            e->midi(20, pc, 2);
+            e->midi(400, off, 3);
+            e->post({Event::Kind::Button, static_cast<uint8_t>(Button::Up), b % 10 == 0, 0});
+            e->post({Event::Kind::Key, 28, b % 10 == 0, 100});
+            e->post({Event::Kind::Analog, static_cast<uint8_t>(Analog::Pressure), false, mod});
+            e->post({Event::Kind::Analog, static_cast<uint8_t>(Analog::ModWheel), false, mod});
+            e->post({Event::Kind::PatchSelect, 0, b % 10 == 0, 0});
+            mod = static_cast<uint16_t>((mod + 0x40) & 0x3FF);
+            e->setProgram(b % 10 == 0 ? 9 : 5);
+            e->setAnalog(Analog::Volume, static_cast<uint16_t>(0x200 + b));
+        }
+        if (b == 50) e->requestRam();
+        e->render(ml, mr, al, ar, kBlock);
+        s = e->snapshot();
+        if (b >= 50 && !taken) taken = e->takeRam(ram);
+    }
+    const size_t n = allocStop();
+    std::printf("  allocations: %zu, frames %llu\n", n, static_cast<unsigned long long>(s.frames));
+    CHECK(taken);
+    CHECK_EQ(n, 0u);
+}
+
 // Real time: a disk inserted, copied out and ejected through the engine allocates nothing in render (A118).
 TEST(rt_engine_disk_swap_does_not_allocate) {
     RomSet roms;
