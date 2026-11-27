@@ -46,7 +46,7 @@ public:
     DiskDrive& drive() { return drive_; }
     // The CD-ROM drive at SCSI ID 4 (A128), message thread. The CD is not part of the state either.
     CdDrive& cdDrive() { return cd_; }
-    // DECISION A129: what the OS read from each medium, Project mode only (A121); message thread.
+    // DECISION A129: what the OS read from each medium, both modes (A138); message thread.
     ens::app::MediaRecord& record() { return record_; }
     // DECISION A129: a floppy's newly read blocks into the record (Project mode only), from a copy of the disk in the
     // drive or a disk leaving it (DiskDrive::poll). Message thread.
@@ -80,6 +80,10 @@ public:
     // machine running and sets memoryError. Project mode: a cold machine, the file untouched (A117).
     // Either way the machine boots to U0-0 and `sound` is set to 0.
     void eraseMemory();
+    // DECISION A138: the TS switched off and on; the caller has confirmed. The memory is kept (the running RAM once
+    // booted), sample RAM is empty and no sampled sound is restored, so the OS asks its auto-load question; the record
+    // and the disk's read marks are cleared. The disk and CD stay in. Nothing happens with no machine.
+    void powerCycle();
     // Project mode, once booted: writes the running RAM (A117) to the memory file. False with err before
     // the boot, in File mode, or when the write fails (also memoryError).
     bool copyToSharedMemory(juce::String& err);
@@ -119,6 +123,7 @@ private:
     // Both: the caller holds stateMu_.
     // A new engine from roms_; the old one stays if that fails. fromState: a project's RAM (A129).
     bool restart(Ram ram, bool fromState = false);
+    void applySelect(const std::vector<uint8_t>& sel);  // a state's select without RAM (stateMu_ held)
     void finishRestore(bool clean);  // A129: the restore has ended: the stand-ins into the record, restored_ dropped
     void unserve();        // A129: the CD drive stops serving the stand-in CDs (before restored_ changes)
     // A137: to model m (the caller holds stateMu_). start: its start image and the restart; a state sets its own.

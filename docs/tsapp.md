@@ -75,8 +75,9 @@ The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`
 
 - **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder, the memory file and the model (A137). Each change is saved at once. The Standalone and the VST3 share it.
 - **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, the machine starts cold, and the first save (on close or after 60 s, once booted) replaces it with the running memory. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page. The TS-12 has its own memory file, `ts12-memory.bin` beside it by default (A116, A137): each file is used, loaded and saved only while its model runs, and a switch of model saves the memory of the model left first.
+- **Power cycle...** asks first, then restarts the machine as a TS switched off and on (A138): the memory is kept, sample RAM is empty and no sampled sound is brought back, so the OS asks its AUTO-LOAD question. The disk and CD blocks kept for the next start are dropped too; the disk and CD stay in their drives.
 - **Erase memory...** asks first, then writes 512 KB of zeros to the memory file and restarts the machine from it. If the file cannot be written, nothing is erased and the settings page says so.
-- **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`, macOS `~/Library/Application Support/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. JUCE also writes the wrapper's plugin state there (the sound and the controls); the Standalone ignores it, and the Options menu's "Load a saved state..." too (A121). `TSR_SETTINGS_DIR` does not move it.
+- **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`, macOS `~/Library/Application Support/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. JUCE also writes the wrapper's plugin state there on close (the sound, the controls and the disk and CD blocks the sampled sounds came from), and the Standalone restores it at start (A138; see "What a project keeps"). With 8 MB of sampled sounds loaded the file grows to about 15 MB. `TSR_SETTINGS_DIR` does not move it.
 - **The VST3 does not write the shared memory file by itself.** A VST3 instance keeps its memory in the host's project (below) and never saves to the file on close or on a timer, so many instances cannot overwrite each other. A new instance starts from the file. **Copy to shared memory...** is the one way a VST3 writes it.
 
 ## Audio and MIDI
@@ -98,9 +99,10 @@ When a project loads, the instance restarts from the project's RAM. Once the boo
 |---|---|---|
 | Start | from the memory file | from the project's RAM if the project has one, else from the memory file |
 | Saves to the memory file on close and every 60 s | yes (A116) | **no** |
-| "AUTO-LOAD ALL SAMPLED-SOUNDS" at power-on (memory that remembers a loaded sampled sound) | asked, as on the TS | answered by the app during the boot: *YES* when the project holds the disks and CDs the sounds came from (A129, A130), else *NO* (A124); the question after loading a SAMPLE-BANKS file is still asked |
-| Disk and CD blocks the OS read | not kept (A121) | kept in the project (A129, "What a project keeps") |
-| Sound and the controls | not brought back (A121): the controls start at their defaults, and the sound is the one the memory boots on | from the project |
+| "AUTO-LOAD ALL SAMPLED-SOUNDS" at power-on (memory that remembers a loaded sampled sound) | answered *YES* when the state JUCE saved on close holds the disks and CDs the sounds came from (A138); else asked, as on the TS (after **Power cycle...** too) | answered by the app during the boot: *YES* when the project holds the disks and CDs the sounds came from (A129, A130), else *NO* (A124); the question after loading a SAMPLE-BANKS file is still asked |
+| Disk and CD blocks the OS read | kept in JUCE's wrapper state, saved on close (A138) | kept in the project (A129, "What a project keeps") |
+| Sound and the controls | from JUCE's wrapper state (A138); the memory is still the file's | from the project |
+| **Power cycle...** | a clean power-on: memory kept, sampled sounds not brought back (A138) | the same, for this instance |
 | **Erase memory...** | zeros to the file, then a cold boot (Sound goes to 0) | this instance only; the file is left alone |
 | **Copy to shared memory...** | not shown | asks first, then writes this instance's RAM to the shared file (once booted) |
 
@@ -119,7 +121,7 @@ a drive when the project loads goes back in once that is done. A project saved m
 loaded with. Afterwards the project keeps only what this load read, so blocks of sounds no longer in memory, or of
 files only browsed, drop out. If a sound could not be brought back (a prompt skipped, a read error), the project
 keeps everything it was loaded with, so saving it again loses nothing (A129). There is no size limit: the project grows by about 1.35 times the bytes read (a
-546-block CD sound, read as 143 CD sectors, adds about 400 KB). The Standalone keeps none of this (A121).
+546-block CD sound, read as 143 CD sectors, adds about 400 KB). The Standalone keeps the same record in the state JUCE's wrapper saves on close and brings the sounds back the same way at its next start, from its memory file's RAM (A138).
 
 **Which sounds come back** (A105). The app replays the last selection it saw (bank select and program change) once the boot has ended. The firmware always powers on to U0-0, so the display shows U0-0 for the boot and then changes. The rest of the memory (edited sounds, sequences, the system settings) is kept.
 

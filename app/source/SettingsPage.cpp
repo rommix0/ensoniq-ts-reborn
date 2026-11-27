@@ -59,6 +59,7 @@ SettingsPage::SettingsPage(TsProcessor& p)
                                               kText)),
       chooseRoms_(dots("Choose folder")),
       changeMem_(dots("Change")),
+      power_(dots("Power cycle")),
       erase_(dots("Erase memory")),
       copy_(dots("Copy to shared memory")) {
     setLookAndFeel(&lnf_);
@@ -66,11 +67,12 @@ SettingsPage::SettingsPage(TsProcessor& p)
     styleField(memField_);
     styleButton(chooseRoms_, kButton, kText, kButtonEdge);
     styleButton(changeMem_, kButton, kText, kButtonEdge);
+    styleButton(power_, kButton, kText, kButtonEdge);
     styleButton(erase_, juce::Colours::transparentBlack, kBad, kBadEdge);
     romField_.setTitle("ROM folder");
     memField_.setTitle("Memory file");
     for (auto* c : std::initializer_list<juce::Component*>{&model_, &romField_, &chooseRoms_, &memField_, &changeMem_,
-                                                           &erase_})
+                                                           &power_, &erase_})
         addAndMakeVisible(c);
     // DECISION A137: the model is chosen here; the choice is stored and the machine switches (message thread).
     model_.setTitle("Model");
@@ -82,6 +84,7 @@ SettingsPage::SettingsPage(TsProcessor& p)
     };
     chooseRoms_.onClick = [this] { chooseRomFolder(); };
     changeMem_.onClick = [this] { chooseMemoryFile(); };
+    power_.onClick = [this] { confirmPowerCycle(); };
     erase_.onClick = [this] { confirmErase(); };
     if (proc_.memoryMode() == MemoryMode::Project) {
         styleButton(copy_, kButton, kText, kButtonEdge);
@@ -169,8 +172,9 @@ int SettingsPage::layout() {
     y += kRow + 8;
     memNoteArea_ = {fx, y, w - 132, memNote_.isEmpty() ? 16 : 34};
     y += memNoteArea_.getHeight() + 8;
-    erase_.setBounds(fx, y, 140, kRow);
-    copy_.setBounds(fx + 140 + 12, y, 190, kRow);
+    power_.setBounds(fx, y, 130, kRow);
+    erase_.setBounds(fx + 130 + 12, y, 140, kRow);
+    copy_.setBounds(fx + 130 + 12 + 140 + 12, y, 190, kRow);
     return y + kRow + kPadY;
 }
 
@@ -280,6 +284,24 @@ void SettingsPage::chooseMemoryFile() {
                                                                          "Memory file", err);
                               changed();
                           });
+}
+
+// DECISION A138: a clean power-on, as switching the TS off and on.
+void SettingsPage::confirmPowerCycle() {
+    const auto options = juce::MessageBoxOptions()
+                             .withIconType(juce::MessageBoxIconType::QuestionIcon)
+                             .withTitle("Power cycle")
+                             .withMessage("This restarts the machine as if it were switched off and on. The memory "
+                                          "is kept; sampled sounds are cleared from sample RAM and are not reloaded "
+                                          "at the next start until you load them again.")
+                             .withButton("Power cycle")
+                             .withButton("Cancel")
+                             .withAssociatedComponent(this);
+    juce::AlertWindow::showAsync(options, [safe = juce::Component::SafePointer<SettingsPage>(this)](int result) {
+        if (safe == nullptr || result != 1) return;  // 1: Power cycle
+        safe->proc_.powerCycle();
+        safe->changed();
+    });
 }
 
 void SettingsPage::confirmErase() {

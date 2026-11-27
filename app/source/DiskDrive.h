@@ -44,8 +44,8 @@ public:
     // The file name, plus " (modified)"; "Untitled (blank)" for a new disk; empty with no disk.
     juce::String slotText() const;
 
-    // TsProcessor::tick: frees the disk a swap took out and writes a save whose copy has come. DECISION A129: in
-    // Project mode it also asks for a copy when the OS has read new blocks, and hands each copy and each disk that
+    // TsProcessor::tick: frees the disk a swap took out and writes a save whose copy has come. DECISION A129, A138: in
+    // both modes it also asks for a copy when the OS has read new blocks, and hands each copy and each disk that
     // left the drive to TsProcessor::capture.
     void poll();
 

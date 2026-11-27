@@ -30,6 +30,7 @@ private:
     void changed();
     void chooseRomFolder();
     void chooseMemoryFile();
+    void confirmPowerCycle();  // A138
     void confirmErase();
     void confirmCopy();  // Project mode: this instance's memory to the shared file (A117)
 
@@ -37,7 +38,7 @@ private:
     juce::LookAndFeel_V4 lnf_;
     juce::Label romField_, memField_;
     juce::ComboBox model_;  // TS-10 / TS-12 (A137)
-    juce::TextButton chooseRoms_, changeMem_, erase_, copy_;  // copy_: Project mode only
+    juce::TextButton chooseRoms_, changeMem_, power_, erase_, copy_;  // copy_: Project mode only
     std::unique_ptr<juce::AudioDeviceSelectorComponent> devices_;  // Standalone only
     std::unique_ptr<juce::FileChooser> chooser_;
     std::vector<RomFileStatus> roms_;

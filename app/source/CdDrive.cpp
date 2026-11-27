@@ -121,8 +121,8 @@ bool CdDrive::serveOne() {
     const std::lock_guard<std::mutex> lock(mu_);
     if (gen != portGen_) return true;
     port_->reply(medium, lba, buf, ok);
-    // DECISION A121: only a plugin instance records what the OS read (Project mode); the Standalone keeps nothing.
-    if (ok && proc_.memoryMode() == MemoryMode::Project) served_.push_back({s.sectors, lba, {buf, buf + sizeof buf}});
+    // DECISION A129, A138: what the OS read goes to the record, in both modes.
+    if (ok) served_.push_back({s.sectors, lba, {buf, buf + sizeof buf}});
     return true;
 }
 
