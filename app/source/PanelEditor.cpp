@@ -426,6 +426,7 @@ private:
             case ens::ts::Analog::DataEntry:
             case ens::ts::Analog::Battery:
             case ens::ts::Analog::Reference:
+            case ens::ts::Analog::Pressure:
             default: return "dataEntry";
         }
     }
