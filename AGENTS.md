@@ -5,7 +5,7 @@ project is; this file is how to work on it.
 
 ## The project in one paragraph
 
-An emulator of the Ensoniq TS-10 (the TS-12 is in scope again since 2026-11-26: its features are added where they fit) that runs the instrument's own OS v3.10 from the
+An emulator of the Ensoniq TS-10 and, as a second model since Plan 12 (2026-11-26, T31, A137), the TS-12, that runs the instrument's own OS v3.10 from the
 ROMs in `roms/`. Plain C++17 chip cores (68000, ES5506 OTTO from Plan 2, ES5510 ESP, 68681 DUART)
 make up a TS machine (`src/ts`, from Plan 3), a real-time engine drives it, and a JUCE 8 app wraps
 that engine as a Standalone and VST3 named "TS Reborn" (`app/`, from Plan 4) for Windows x64 (MSVC),
@@ -27,10 +27,11 @@ Linux x64 (GCC) and macOS arm64/x64 (Apple clang). The 68000, ESP and DUART core
   `tools/` and `tests/`, JUCE only in `app/`.
 - **The audio path is real-time safe.** Nothing in the engine's render path may allocate, lock or
   block after the boot.
-- **Ensoniq material.** The only Ensoniq files in git are the six ROMs the app needs (OS v3.10
-  `roms/os/ts10_310h.bin` and `ts10_310l.bin`, the four `roms/waves/*.bin`) and `roms/README.txt`,
+- **Ensoniq material.** The only Ensoniq files in git are the eight ROMs the app ships (OS v3.10
+  `roms/os/ts10_310h.bin` and `ts10_310l.bin`, the TS-12 OS v3.10 pair `ts12_310h.bin` and `ts12_310l.bin`
+  (added 2026-11-26, the user's decision), the four `roms/waves/*.bin`) and `roms/README.txt`,
   plus the two panel logos in `app/resources/` (the TS-10 logo and the Ensoniq badge, A122). Other OS versions, `roms/misc/`, `datasheets/` and `docs/reference/mame/` are ignored on purpose.
-  Nothing is pushed to a public remote until the user approves publishing those six ROMs.
+  Nothing is pushed to a public remote until the user approves publishing those eight ROMs.
 - **The panel layout** follows `datasheets/ts10-photo.webp` for arrangement and proportions and the
   TS-10 Musician's Manual page 3 ("Front Panel Controls") for the left section and the labels (the
   user's rule; design section 10).
@@ -72,7 +73,7 @@ cmake --build build-mac-app --target TSReborn_Standalone
 ```
 
 ```powershell
-# Release folder (Plan 6, A126): builds in build-dist and writes "dist\TS Reborn-<version>" with the six ROMs
+# Release folder (Plan 6, A126): builds in build-dist and writes "dist\TS Reborn-<version>" with the eight ROMs
 powershell -ExecutionPolicy Bypass -File tools\dist.ps1 [-RomFolder <folder>] [-JuceSource <JUCE checkout>]
 
 # Linux (in WSL): builds in build-dist-linux and writes "dist/TS Reborn-<version>-linux"
@@ -91,7 +92,7 @@ window; run them headless. Never start `TS Reborn.exe` or a plugin GUI from an a
 | Real-time suite | `build\ens_rt_tests.exe`, `build-msvc\Release\ens_rt_tests.exe` | Counts allocations in `Machine::runFrame` and `Engine::render` after the boot; must be 0. Also on Linux. |
 | App checks | `build-app\app\TSReborn_AppTests_artefacts\Release\TSReborn_AppTests.exe` | Headless: ROM folder, memory file, buses, parameters, state, the editor painted offscreen, the built VST3 through JUCE's host. About 55 s with the ROMs. Linux: `build-linux-app/app/TSReborn_AppTests_artefacts/Release/TSReborn_AppTests`. Sets `TSR_SETTINGS_DIR` to a temp folder. |
 | 68000 suite | `ctest --test-dir build -R m68k_suite` | Needs Tom Harte's tests (`testdata/`, ignored; see `docs/m68k.md`). `-DENS_M68K_TESTS_DIR=` can point at the KS-32 repo's local copy. |
-| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--trace`, `--press`, `--analog`, `--ram <file>` (the battery RAM image; written back only after a run of at least the boot time), `--sqx70`, `--disk <image>` and `--save-disk <file>` (a disk image in the drive; the disk written out at the end), `--cd <image>` (fits the SP-4 SCSI board and puts a `.iso` or `.cue` CD image in the CD-ROM drive at ID 4, read between frames; also for `render`): see the comment at the top of `tools/tsemu/main.cpp`. |
+| TS boot | `build\tsemu.exe boot --ms 5300 --display-only` | Prints each display change; `--ts12` (the TS-12 model, also for `render` and `bench`; T31), `--trace`, `--press`, `--analog` (`PRESS=<raw>` is the TS-12's channel pressure), `--ram <file>` (the battery RAM image; written back only after a run of at least the boot time), `--sqx70`, `--disk <image>` and `--save-disk <file>` (a disk image in the drive; the disk written out at the end), `--cd <image>` (fits the SP-4 SCSI board and puts a `.iso` or `.cue` CD image in the CD-ROM drive at ID 4, read between frames; also for `render`): see the comment at the top of `tools/tsemu/main.cpp`. |
 | TS render | `build\tsemu.exe render tests/data/player_smoke.mid out.wav` | Boots, plays the MIDI file, writes Main as a WAV and prints `pcm hash <16 hex>`. |
 | Speed | `build-msvc\Release\tsemu.exe bench` | Realtime factor of a 20 s chord load after the boot; must stay at x2 or more on MSVC. |
 

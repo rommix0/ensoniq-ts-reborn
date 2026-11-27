@@ -426,6 +426,7 @@ private:
             case ens::ts::Analog::DataEntry:
             case ens::ts::Analog::Battery:
             case ens::ts::Analog::Reference:
+            case ens::ts::Analog::Pressure:
             default: return "dataEntry";
         }
     }
@@ -438,7 +439,7 @@ private:
 
 class KeyPart : public Part {
 public:
-    KeyPart(PanelEditor& ed, const Control& c) : Part(ed, c) {
+    KeyPart(PanelEditor& ed, const Control& c, ens::ts::Model model) : Part(ed, c), model_(model) {
         const int n = c.id % 12;
         black_ = n == 1 || n == 3 || n == 6 || n == 8 || n == 10;
         setBounds(rect(c.r));
@@ -449,9 +450,11 @@ public:
     void mouseUp(const juce::MouseEvent& e) override;
 
     // DECISION A115: strike = 1 + round(126 x y / keyLength), y from the key's back edge: the front is loud.
+    // DECISION A115: the TS-12's strike is 1-120 (its curve reaches 127 at 120, design "Velocity"): 119 x y / len.
     int strikeAt(float y) const {
         const float len = static_cast<float>(getHeight());
-        return 1 + juce::roundToInt(126.0f * juce::jlimit(0.0f, len, y) / len);
+        const float span = model_ == ens::ts::Model::Ts12 ? 119.0f : 126.0f;
+        return 1 + juce::roundToInt(span * juce::jlimit(0.0f, len, y) / len);
     }
     // A release carries the press's strike as its release value (the mouse has no release speed).
     void set(bool down, int strike = 0) {
@@ -499,6 +502,7 @@ public:
     }
 
 private:
+    ens::ts::Model model_;
     bool black_ = false, want_ = false, down_ = false, midi_ = false;
     uint16_t strike_ = 1;
 };
@@ -506,10 +510,10 @@ private:
 // The panel at its design size; the editor scales it with a transform.
 class Board : public juce::Component {
 public:
-    explicit Board(PanelEditor& ed) {
+    Board(PanelEditor& ed, ens::ts::Model model) {
         setSize(ens::app::kDesignW, ens::app::kDesignH);
         // Order: the table's (the display before its soft buttons; the white keys, then the blacks over them).
-        for (const Control& c : ens::app::panelLayout()) {
+        for (const Control& c : ens::app::panelLayout(model)) {
             std::unique_ptr<Part> p;
             switch (c.kind) {
                 case ControlKind::Button:
@@ -541,7 +545,7 @@ public:
                     break;
                 }
                 case ControlKind::Key: {
-                    auto k = std::make_unique<KeyPart>(ed, c);
+                    auto k = std::make_unique<KeyPart>(ed, c, model);
                     keys_.push_back(k.get());
                     p = std::move(k);
                     break;
@@ -743,7 +747,8 @@ void KeyPart::mouseUp(const juce::MouseEvent&) { board(*getParentComponent()).ke
 
 PanelEditor::PanelEditor(TsProcessor& p) : AudioProcessorEditor(p), proc_(p), engine_(p.engine()) {
     if (engine_ != nullptr) snap_ = engine_->snapshot();
-    board_ = std::make_unique<Board>(*this);
+    built_ = p.model();
+    board_ = std::make_unique<Board>(*this, built_);
     addAndMakeVisible(*board_);
     // DECISION A112: 1546 x 552 by default, resizable from 1030 x 368 up, aspect fixed at kDesignW:kDesignH.
     setResizable(true, true);
@@ -763,7 +768,11 @@ void PanelEditor::resized() {
 
 juce::RangedAudioParameter* PanelEditor::param(const char* id) { return proc_.params().getParameter(id); }
 
-bool PanelEditor::post(const ens::app::Event& e) { return sameEngine() && engine_ != nullptr && engine_->post(e); }
+bool PanelEditor::post(const ens::app::Event& e) {
+    const bool ok = sameEngine() && engine_ != nullptr && engine_->post(e);
+    if (ok) lastPosted_ = e;
+    return ok;
+}
 
 // Erase and a ROM folder change replace the engine (the new one is made before the old one is freed,
 // so the pointer differs). The new machine starts with nothing held: the parts forget the old engine's
@@ -819,8 +828,17 @@ void PanelEditor::openSettings() {
 }
 
 void PanelEditor::timerCallback() {
-    auto& b = board(*board_);
     sameEngine();
+    // DECISION A137: a model switch (the settings page, a loaded state) replaces the board, keeping the editor's
+    // size. sameEngine() has reset the old parts first, so nothing is posted for them; the old board and every
+    // pointer into it (the parts, the arrows) go with it.
+    if (proc_.model() != built_) {
+        built_ = proc_.model();
+        board_ = std::make_unique<Board>(*this, built_);
+        addAndMakeVisible(*board_);
+        resized();
+    }
+    auto& b = board(*board_);
     b.sync();  // presses and releases the full queue turned away (A102)
     const auto old = snap_;
     if (engine_ != nullptr) snap_ = engine_->snapshot();

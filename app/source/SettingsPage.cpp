@@ -69,8 +69,17 @@ SettingsPage::SettingsPage(TsProcessor& p)
     styleButton(erase_, juce::Colours::transparentBlack, kBad, kBadEdge);
     romField_.setTitle("ROM folder");
     memField_.setTitle("Memory file");
-    for (auto* c : std::initializer_list<juce::Component*>{&romField_, &chooseRoms_, &memField_, &changeMem_, &erase_})
+    for (auto* c : std::initializer_list<juce::Component*>{&model_, &romField_, &chooseRoms_, &memField_, &changeMem_,
+                                                           &erase_})
         addAndMakeVisible(c);
+    // DECISION A137: the model is chosen here; the choice is stored and the machine switches (message thread).
+    model_.setTitle("Model");
+    model_.addItem("TS-10", 1);
+    model_.addItem("TS-12", 2);
+    model_.onChange = [this] {
+        proc_.setModel(model_.getSelectedId() == 2 ? ens::ts::Model::Ts12 : ens::ts::Model::Ts10);
+        changed();
+    };
     chooseRoms_.onClick = [this] { chooseRomFolder(); };
     changeMem_.onClick = [this] { chooseMemoryFile(); };
     erase_.onClick = [this] { confirmErase(); };
@@ -99,14 +108,15 @@ SettingsPage::SettingsPage(TsProcessor& p)
 SettingsPage::~SettingsPage() { setLookAndFeel(nullptr); }
 
 void SettingsPage::refresh() {
+    model_.setSelectedId(proc_.model() == ens::ts::Model::Ts12 ? 2 : 1, juce::dontSendNotification);
     // DECISION A125: the folder in use; the VST3 package's own ROMs are shown as such, though not stored.
     const auto dir = proc_.romFolder();
     romField_.setText(dir == juce::File()            ? juce::String("No folder chosen")
                       : proc_.romFolderStored() ? dir.getFullPathName()
                                                 : dir.getFullPathName() + " (inside the VST3 package)",
                       juce::dontSendNotification);
-    roms_ = checkRomFolder(dir, nullptr);
-    memField_.setText(proc_.settings().memoryFile().getFullPathName(), juce::dontSendNotification);
+    roms_ = checkRomFolder(dir, proc_.model(), nullptr);
+    memField_.setText(proc_.settings().memoryFile(proc_.model()).getFullPathName(), juce::dontSendNotification);
     memNote_ = proc_.memoryError();
 }
 
@@ -131,6 +141,9 @@ int SettingsPage::layout() {
 
     romsHead_ = {x, y, w, kHead};
     y += kHead + 10;
+    modelLabel_ = {x, y, 120, kRow};
+    model_.setBounds(x + 132, y, 140, kRow);
+    y += kRow + 10;
     romField_.setBounds(x, y, w - 130 - 8, kRow);
     chooseRoms_.setBounds(x + w - 130, y, 130, kRow);
     y += kRow + 10;
@@ -178,6 +191,9 @@ void SettingsPage::paint(juce::Graphics& g) {
     g.drawText("Changes to ROMs or memory restart the machine", header_, juce::Justification::bottomRight);
 
     heading(g, "ROMS", romsHead_);
+    g.setColour(kBody);
+    g.setFont(font(14.0f));
+    g.drawText("Model", modelLabel_, juce::Justification::centredLeft);
     g.setColour(kList);
     g.fillRoundedRectangle(romList_.toFloat(), 4.0f);
     g.setColour(kListEdge);
@@ -210,7 +226,8 @@ void SettingsPage::paint(juce::Graphics& g) {
         const auto rate = proc_.getSampleRate();
         g.setColour(kDim);
         g.setFont(font(12.0f));
-        g.drawText("The TS-10 runs at " + hz(ens::app::kFrameHz) + " Hz and is resampled to " +
+        g.drawText(juce::String("The ") + (proc_.model() == ens::ts::Model::Ts12 ? "TS-12" : "TS-10") + " runs at " +
+                       hz(ens::app::kFrameHz) + " Hz and is resampled to " +
                        (rate > 0 ? hz(rate) + " Hz." : juce::String("the device rate (no device open).")) +
                        " Underruns since start: " + (xruns >= 0 ? juce::String(xruns) : juce::String("not reported")),
                    rateLine_, juce::Justification::centredLeft, true);
@@ -251,7 +268,8 @@ void SettingsPage::chooseRomFolder() {
 }
 
 void SettingsPage::chooseMemoryFile() {
-    chooser_ = std::make_unique<juce::FileChooser>("Choose the memory file", proc_.settings().memoryFile(), "*.bin");
+    chooser_ = std::make_unique<juce::FileChooser>("Choose the memory file",
+                                                   proc_.settings().memoryFile(proc_.model()), "*.bin");
     chooser_->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
                           [this](const juce::FileChooser& fc) {
                               const auto file = fc.getResult();

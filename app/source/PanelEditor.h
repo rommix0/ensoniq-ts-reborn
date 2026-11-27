@@ -25,6 +25,7 @@ public:
     juce::RangedAudioParameter* param(const char* id);  // a host parameter (A111)
     void openSettings();
     const ens::app::Snapshot& snap() const { return snap_; }
+    const ens::app::Event& lastPosted() const { return lastPosted_; }  // the last event the engine took (checks)
     bool blinkOn() const { return blinkOn_; }
     bool hexCodes() const { return hexCodes_; }
     void toggleHexCodes();
@@ -44,6 +45,8 @@ private:
     std::unique_ptr<juce::Component> board_;  // kDesignW x kDesignH design units, scaled by a transform
     juce::TooltipWindow tooltips_{this};
     std::unique_ptr<juce::DocumentWindow> settings_;
+    ens::ts::Model built_ = ens::ts::Model::Ts10;  // the model the board was built for (A137)
+    ens::app::Event lastPosted_{ens::app::Event::Kind::Button, 0, false, 0};
     ens::app::Snapshot snap_{};
     bool blinkOn_ = true, hexCodes_ = false, foreground_ = true;
     int ticks_ = 0;

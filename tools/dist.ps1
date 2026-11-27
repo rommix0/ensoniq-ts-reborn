@@ -1,6 +1,6 @@
 # Builds the TS Reborn Standalone and VST3 (MSVC x64, Release, static C++ runtime) in build-dist and
 # assembles "dist\TS Reborn-<version>": TS Reborn.exe, the TS Reborn.vst3 package, README.md with panel.png,
-# LICENSE, the app guide, and the six ROM files the app loads, in roms\ beside the exe and again inside the VST3 package
+# LICENSE, the app guide, and the eight ROM files, in roms\ beside the exe and again inside the VST3 package
 # (Contents\Resources\roms), so the VST3 finds them wherever it is installed. DECISION A126.
 # The ROMs are Ensoniq's.
 #
@@ -17,9 +17,10 @@ if (-not $RomFolder) { $RomFolder = Join-Path $root 'roms' }
 $version = [regex]::Match((Get-Content app\CMakeLists.txt -Raw), 'VERSION (\d+\.\d+\.\d+)').Groups[1].Value
 if (-not $version) { throw 'No VERSION in app\CMakeLists.txt' }
 
-# The six files RomFolder.cpp loads, with their sizes: checked before anything is built or written.
+# The eight files (the six RomFolder.cpp loads, plus the TS-12 OS pair), with their sizes: checked before anything is built or written.
 $roms = [ordered]@{
     'os\ts10_310h.bin' = 262144; 'os\ts10_310l.bin' = 524288
+    'os\ts12_310h.bin' = 262144; 'os\ts12_310l.bin' = 524288
     'waves\901401_u41.bin' = 2097152; 'waves\901301_u43.bin' = 1048576
     'waves\901402_u45.bin' = 2097152; 'waves\901302_u46.bin' = 1048576
 }

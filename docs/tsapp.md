@@ -37,24 +37,29 @@ cmake --build build-mac-app --target TSReborn_Standalone
 
 **The release folder** (Plan 6, A126). `powershell -ExecutionPolicy Bypass -File tools\dist.ps1` (Linux, in WSL: `tools/dist.sh`) builds the Standalone and the VST3 in Release in `build-dist` (`build-dist-linux`), with the C++ runtime linked in, and writes `dist\TS Reborn-1.0.0` (`dist/TS Reborn-1.0.0-linux`):
 
-- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the six files above, so the Standalone starts on them.
-- `TS Reborn.vst3`, the VST3 package, with the same six files in `Contents\Resources\roms`. Copy the whole package to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`): it finds those ROMs there (A125) without any setup.
+- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the eight files above, so the Standalone starts on either model.
+- `TS Reborn.vst3`, the VST3 package, with the same eight files in `Contents\Resources\roms`. Copy the whole package to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`): it finds those ROMs there (A125) without any setup.
 - `README.md` with its picture `panel.png`, `LICENSE`, and this guide as `APP-GUIDE.md`.
 
-The scripts check the six ROMs (presence and size) before building anything, and replace an older folder of the same version. `-RomFolder` / `--rom-folder` takes them from another folder; `-JuceSource` / `--juce-source` uses a JUCE checkout instead of downloading it. The Windows folder needs nothing installed to run. The Linux folder has libstdc++ linked in but uses the system's glibc (2.38 or later, since it is built on Ubuntu 24.04: Ubuntu 24.04, Debian 13, Fedora 39 and newer) and its ALSA, fontconfig, freetype, libpng, zlib, bzip2, brotli and expat libraries, which a desktop system has. The settings page names the ROM folder in use; the VST3's own ROMs show as `... (inside the VST3 package)`.
+The scripts check the eight ROMs (presence and size) before building anything, and replace an older folder of the same version. `-RomFolder` / `--rom-folder` takes them from another folder; `-JuceSource` / `--juce-source` uses a JUCE checkout instead of downloading it. The Windows folder needs nothing installed to run. The Linux folder has libstdc++ linked in but uses the system's glibc (2.38 or later, since it is built on Ubuntu 24.04: Ubuntu 24.04, Debian 13, Fedora 39 and newer) and its ALSA, fontconfig, freetype, libpng, zlib, bzip2, brotli and expat libraries, which a desktop system has. The settings page names the ROM folder in use; the VST3's own ROMs show as `... (inside the VST3 package)`.
 
 **JUCE licence.** JUCE is dual-licensed: AGPLv3, or a commercial JUCE licence. A build of this app links JUCE, so giving the app to anyone else is under the AGPLv3's terms unless you hold a commercial JUCE licence. Building and using it yourself needs neither.
 
+## Model
+
+The settings page has a **Model** row above the ROM folder: TS-10 or TS-12 (A137). A change is stored, the machine restarts on that model's OS and memory file, and the panel redraws at once with the TS-12's 76 keys (E1 to G7) or the TS-10's 61 (C2 to C7); the window keeps its size. The ROM list under it shows the selected model's files. A model whose ROMs are missing still takes effect: the display area reads `ROM missing:` and the file's name (for example `os/ts12_310h.bin`), and the disk and CD you had loaded are held until the ROMs are there.
+
 ## First start and the ROMs
 
-The app needs six files in one folder, laid out as the repository's `roms` folder is:
+The app needs six files per model in one folder (the four wave ROMs and the model's OS pair), laid out as the repository's `roms` folder is:
 
 | File | What it is |
 |---|---|
-| `os/ts10_310h.bin` (256 KB), `os/ts10_310l.bin` (512 KB; 256 KB is accepted) | OS v3.10 |
+| `os/ts10_310h.bin` (256 KB), `os/ts10_310l.bin` (512 KB; 256 KB is accepted) | TS-10 OS v3.10 |
+| `os/ts12_310h.bin` (256 KB), `os/ts12_310l.bin` (512 KB; 256 KB is accepted) | TS-12 OS v3.10 |
 | `waves/901401_u41.bin`, `waves/901402_u45.bin` (2 MB each), `waves/901301_u43.bin`, `waves/901302_u46.bin` (1 MB each) | The wave ROMs |
 
-At start the app takes the first of these that holds the six files (A125):
+At start the app takes the first of these that holds the model's six files (A125):
 
 1. The folder stored in the settings (chosen in Settings, or stored by 2).
 2. A folder named `roms` beside the program. It is stored in the settings, so the other format finds it too.
@@ -62,14 +67,14 @@ At start the app takes the first of these that holds the six files (A125):
 
 So a stored folder that has been moved or deleted no longer stops the app when a `roms` folder sits beside it. A folder chosen in Settings still wins.
 
-Otherwise the first start shows a message in place of the display. Click the gear at the top right of the panel, then **Choose folder...** in ROMS. The list marks each file found, missing or the wrong size. When all six are good the machine starts. The firmware boots in real time, as the instrument does (next section). If a file is missing or the wrong size, the display area names it (for example `ROM missing:` / `os/ts10_310h.bin`). With the ROMs good but no audio device open, it reads `No audio device`. Choosing another good folder later restarts the machine and keeps its memory.
+Otherwise the first start shows a message in place of the display. Click the gear at the top right of the panel, then **Choose folder...** in ROMS. The list marks each file found, missing or the wrong size. When the model's six are good the machine starts. The firmware boots in real time, as the instrument does (next section). If a file is missing or the wrong size, the display area names it (for example `ROM missing:` / `os/ts10_310h.bin`). With the ROMs good but no audio device open, it reads `No audio device`. Choosing another good folder later restarts the machine and keeps its memory.
 
 ## Where the settings and the memory live
 
 The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`. On macOS it is `~/Library/Application Support/TS Reborn`.
 
-- **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder and the memory file. Each change is saved at once. The Standalone and the VST3 share it.
-- **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, the machine starts cold, and the first save (on close or after 60 s, once booted) replaces it with the running memory. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page.
+- **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder, the memory file and the model (A137). Each change is saved at once. The Standalone and the VST3 share it.
+- **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, the machine starts cold, and the first save (on close or after 60 s, once booted) replaces it with the running memory. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page. The TS-12 has its own memory file, `ts12-memory.bin` beside it by default (A116, A137): each file is used, loaded and saved only while its model runs, and a switch of model saves the memory of the model left first.
 - **Erase memory...** asks first, then writes 512 KB of zeros to the memory file and restarts the machine from it. If the file cannot be written, nothing is erased and the settings page says so.
 - **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`, macOS `~/Library/Application Support/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. JUCE also writes the wrapper's plugin state there (the sound and the controls); the Standalone ignores it, and the Options menu's "Load a saved state..." too (A121). `TSR_SETTINGS_DIR` does not move it.
 - **The VST3 does not write the shared memory file by itself.** A VST3 instance keeps its memory in the host's project (below) and never saves to the file on close or on a timer, so many instances cannot overwrite each other. A new instance starts from the file. **Copy to shared memory...** is the one way a VST3 writes it.
@@ -87,7 +92,7 @@ The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`
 
 The VST3 saves its state with the host's project, so a saved project brings each TS Reborn back as it was (A117). What is saved: the six parameters below, the sound to select again, the instance's whole 512 KB RAM (about 700 KB in the project) and the disk and CD blocks its sampled sounds were loaded from (see "What a project keeps" below). It is the running RAM once the machine has booted. Before the boot ends, it is the RAM the machine started from, so a project saved in the first seconds does not lose its memory.
 
-When a project loads, the instance restarts from the project's RAM. Once the boot has ended, the app selects the saved sound and sets the analogs. A new instance, one not loaded from a project, starts from the shared memory file.
+When a project loads, the instance restarts from the project's RAM. Once the boot has ended, the app selects the saved sound and sets the analogs. A new instance, one not loaded from a project, starts from the shared memory file. The project also names the model the instance runs and keeps one RAM per model it has run (A137): switching the model keeps the RAM left, and switching back starts from it; a model not run yet starts from its own shared memory file. A project from before the TS-12 is a TS-10 project. Loading a project switches the instance to the project's model without changing the model new instances start as. The project keeps the sampled sounds' disk and CD blocks through a switch, but a switch back does not load them again: load them again yourself.
 
 | | Standalone | VST3 |
 |---|---|---|
@@ -124,7 +129,7 @@ keeps everything it was loaded with, so saving it again loses nothing (A129). Th
 - **The chord latch** (A114). Right-click or Shift-click latches a button down, drawn pressed, until it is clicked again. That is how two buttons are held with one mouse. When the app stops being the foreground program (Alt-Tab), every button held by the mouse is released. Latched buttons stay down.
 - **Sliders and wheels** drag vertically. The pitch wheel springs back to centre on mouse-up. The mod wheel stays where it is left.
 - **Patch buttons.** The two buttons beside the wheels are the TS's patch selects (sent to the machine as the IEXP lines).
-- **Keys.** Click near the front of a key for loud and near the back for soft (A115: strike 1 to 127 along the key, which the OS reads through its own TOUCH table). Dragging across the keys plays each key entered and releases the one left. Notes arriving on MIDI light their keys the same way.
+- **Keys.** Click near the front of a key for loud and near the back for soft (A115: strike 1 to 127 along the key, 1 to 120 on the TS-12, which the OS reads through its own TOUCH table). Dragging across the keys plays each key entered and releases the one left. Notes arriving on MIDI light their keys the same way.
 - **Display.** Codes 0x20 to 0x7E are drawn as ASCII, others blank (A113). Underlined cells get a bar. Flashing cells and LEDs blink at 2 Hz. Right-click the display for **Show display codes**, a hex overlay of every cell.
 - **The disk drive** (A119, A120). Click the drive on the panel for its menu: **Open Disk Image...**, **New Blank Disk (DD)**, **New Blank Disk (HD)**, **Save Disk Image**, **Save Disk Image As...**, **Eject** and a **Write Protected** tick. A disk image dropped on the panel opens too. The menu also has **Send SysEx File...** (A136, under Audio and MIDI). The slot shows the file's name, with "(modified)" once the OS has written to the disk since it was opened or saved; a new disk is "Untitled (blank)" until saved. Images: raw `.img` (819 200 bytes DD, 1 638 400 HD; the size decides the density, other sizes are refused), `.gkh`, Giebler `.ede`/`.eda`, and HxC `.hfe` (v1, MFM; T30). An `.hfe` may be a "super disk" of up to 255 cylinders, as an HxC or Gotek drive serves (a 5 MB HD disk with 255 cylinders loads a 3.9 MB sound into 8 MB of sample RAM); it saves as `.hfe` only, since `.img`, `.gkh` and Giebler files hold 80 cylinders. Opening puts the disk in without resetting the TS; the OS sees a disk change, as with a real drive.
   - **Save** writes the file the disk came from, in its format, through `<file>.tmp` and then a replace, so a failed save keeps the old file. A new disk or a read-only file can only be saved with **Save As...**, whose extension picks the format (`.img`, `.gkh`, `.ede`/`.eda`; anything else is raw). Saving takes a moment: the disk is copied between audio blocks and written by the 30 Hz timer, so **a save needs the audio running**. With no audio device open it is refused; if the audio stops while a save waits, the save finishes when the audio starts again. Open, New, Eject or closing the Standalone while a save waits: the first one waits for the save while the audio runs; otherwise, or for a second one, the prompt below asks, and Don't Save gives the save up (the old file is kept).
@@ -158,7 +163,7 @@ Environment variables read when the app starts. Neither is needed for normal use
 ## Open items
 
 - **SCSI** has a CD-ROM drive at ID 4 only; no SCSI hard disk. Disk images in `.efe` format and HFE v3 are not read.
-- **The TS-12** is not emulated yet. It is in scope again since 2026-11-26 (the user's decision): its features are added where they fit.
+- **The TS-12** runs as a model (T31, A137). Not done: an on-screen control for channel pressure (the panel has none; MIDI channel pressure and `tsemu --analog PRESS=<raw>` reach it); the panel still shows the TS-10 logo on a TS-12; other TS-12 OS versions than v3.10. What is left for a person is in `docs/verification-plan12.md`.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **The small print the photo has** (jack labels, "Bypass", "Replace w/FX") is not drawn.
 - The person-only checks of Plans 4 and 5 were done by the user on 2026-11-15; what is left for a person is in `docs/verification-plan6.md`.

@@ -14,7 +14,8 @@ constexpr uint32_t kSeqExpBase = 0x038000, kSeqExpTop = 0x078000, kRamHighBase =
 constexpr uint32_t kIo1Base = 0x200000, kIo1Window = 0x100000;      // A19:A18 = DUART, SCSI, FDC, IEXP
 constexpr uint32_t kIo2Base = 0x300000, kIo2Window = 0x100000;      // A19 = OTTO, ESP
 constexpr uint32_t kHostBase = 0x400000, kHostWindow = 0x800000;    // DECISION T4: OTTO banks 3, then 2
-constexpr uint8_t kMuxSelect[kAnalogCount] = {0, 2, 3, 4, 5, 6, 7};  // Hardware facts: U69 Y0, Y2-Y7 (Y1 n.c.)
+// Hardware facts: U69 Y0, Y2-Y7. DECISION T31: Pressure on Y1, which only the TS-12 OS selects (n.c. on the TS-10).
+constexpr uint8_t kMuxSelect[kAnalogCount] = {0, 2, 3, 4, 5, 6, 7, 1};
 constexpr uint8_t kEmptyDrivePins = 0x3F;  // DECISION T10: no index pulse; IP1 (DSKCHG) and IP2 (DENS) high
 constexpr int kCdId = 4;  // Musician's Manual, Section 13: "CD ROM drives ... should always be set to SCSI ID #4"
 // DECISION T23: a 300 rpm drive: the index hole passes every 200 ms and holds IP0 low for 2 ms.
@@ -33,8 +34,11 @@ Machine::Region Machine::decode(uint32_t a) {
     return Region::None;
 }
 
-std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, bool sqx70, bool scsi, bool simm8) {
+std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, bool sqx70, bool scsi, bool simm8,
+                                         Model model) {
     std::unique_ptr<Machine> m(new Machine());
+    m->model_ = model;
+    m->panel_.setModel(model);  // DECISION T31: the keyboard's key codes and pressure
     if (simm8) m->waves_.setSampleRamWords(WaveMemory::kExpandedRamWords);  // DECISION T4
     m->sqx70_ = sqx70;
     m->scsi_ = scsi;

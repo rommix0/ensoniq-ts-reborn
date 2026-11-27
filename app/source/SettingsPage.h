@@ -1,5 +1,5 @@
 #pragma once
-// The settings page (from KS-32 Reborn's): the ROM folder and its six files, the Standalone wrapper's
+// The settings page (from KS-32 Reborn's): the model (A137), the ROM folder and its six files, the Standalone wrapper's
 // audio and MIDI devices (hidden in the VST3), and the memory file with Erase (A116) and, in a plugin,
 // Copy to shared memory (A117).
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -36,12 +36,14 @@ private:
     TsProcessor& proc_;
     juce::LookAndFeel_V4 lnf_;
     juce::Label romField_, memField_;
+    juce::ComboBox model_;  // TS-10 / TS-12 (A137)
     juce::TextButton chooseRoms_, changeMem_, erase_, copy_;  // copy_: Project mode only
     std::unique_ptr<juce::AudioDeviceSelectorComponent> devices_;  // Standalone only
     std::unique_ptr<juce::FileChooser> chooser_;
     std::vector<RomFileStatus> roms_;
     juce::String memNote_;
-    juce::Rectangle<int> header_, romsHead_, romList_, devHead_, rateLine_, memHead_, memLabel_, memNoteArea_;
+    juce::Rectangle<int> header_, romsHead_, modelLabel_, romList_, devHead_, rateLine_, memHead_, memLabel_,
+        memNoteArea_;
     bool laying_ = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SettingsPage)

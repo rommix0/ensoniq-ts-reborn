@@ -58,7 +58,8 @@ the on-screen panel as on the instrument. Supporting evidence:
   needs to boot and report an empty drive.
 - **The TS-12.** Same boards, different OS EPROMs and a 76-key mono-pressure keyboard (service
   manual p5). Out of scope for this project (the user's decision, 2026-11-14). Back in scope on 2026-11-26 (the user's
-  decision): TS-12 features are added where they fit.
+  decision): TS-12 features are added where they fit. Done in Plan 12 (`docs/design/2026-11-26-ts12-design.md`, T31, A137):
+  the TS-12 is a model of the machine and of the app.
 - **SCSI**, the SQX-70 sequence expander, sample-RAM sizes above 2 MB.
 - **MIDI out to the host.** As on the KS-32, the firmware's MIDI out is read and discarded.
 - **Disassembling or mapping the firmware** (see anti-goals; lifted 2026-11-14).

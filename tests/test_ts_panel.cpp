@@ -195,7 +195,7 @@ TEST(ts_panel_button_bytes) {
     CHECK(toCpu(p) == (std::vector<uint8_t>{0x86, 0x00, 0xBD, 0x00}));
     p.key(60, true, 100);
     p.key(60, false, 0);
-    CHECK(toCpu(p) == (std::vector<uint8_t>{0x98, 100, 0x18, 0x40}));
+    CHECK(toCpu(p) == (std::vector<uint8_t>{0x98, 100, 0x18, 0x01}));  // the release byte clamped to 1-127
     p.key(36, true, 0);    // a strike of 0 would read as a button: clamped to 1
     p.key(96, true, 200);  // the top key; clamped to 127
     CHECK(toCpu(p) == (std::vector<uint8_t>{0x80, 1, 0xBC, 127}));
@@ -206,6 +206,39 @@ TEST(ts_panel_button_bytes) {
     p.pressure(64, 0);
     p.pressure(64, 300);
     CHECK(toCpu(p) == (std::vector<uint8_t>{0x5C, 0, 0x5C, 127}));
+}
+
+// Key up carries the caller's release byte, clamped to 1-127 (T17, T31).
+TEST(ts_panel_key_up_sends_release_byte) {
+    Panel p;
+    p.setLines(false, false, false);
+    p.key(60, true, 10);
+    p.key(60, false, 33);
+    CHECK(toCpu(p) == (std::vector<uint8_t>{0x98, 0x0A, 0x18, 0x21}));
+}
+
+// The TS-12's 76 keys, E1-G7: key code = note - 28; no Poly-Key pressure code (T31).
+TEST(ts_panel_ts12_key_codes) {
+    Panel p;
+    CHECK(p.model() == Model::Ts10);
+    p.setModel(Model::Ts12);
+    p.reset();  // keeps the model
+    CHECK(p.model() == Model::Ts12);
+    p.setLines(false, false, false);
+    p.key(28, true, 90);
+    p.key(103, true, 90);
+    p.key(103, false, 77);
+    p.key(27, true, 90);  // outside E1-G7: ignored
+    p.key(104, true, 90);
+    p.pressure(60, 50);  // the TS-12 has no Poly-Key code: ignored
+    CHECK(toCpu(p) == (std::vector<uint8_t>{0x80, 0x5A, 0xCB, 0x5A, 0x4B, 0x4D}));
+}
+
+TEST(ts_key_range) {
+    CHECK_EQ(keyRange(Model::Ts10).lowest, 36);
+    CHECK_EQ(keyRange(Model::Ts10).count, 61);
+    CHECK_EQ(keyRange(Model::Ts12).lowest, 28);
+    CHECK_EQ(keyRange(Model::Ts12).count, 76);
 }
 
 // Every name maps to a different code, and the 62 buttons and 2 foot switch contacts fill the 6-bit codes.

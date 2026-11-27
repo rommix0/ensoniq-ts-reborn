@@ -27,9 +27,21 @@ juce::File AppSettings::romFolder() const {
 
 void AppSettings::setRomFolder(const juce::File& dir) { props_.setValue("romFolder", dir.getFullPathName()); }
 
-juce::File AppSettings::memoryFile() const {
-    const auto path = props_.getValue("memoryFile");
-    return juce::File::isAbsolutePath(path) ? juce::File(path) : folder().getChildFile("ts-memory.bin");
+// DECISION A137: the model is stored as "ts10" / "ts12"; anything else is the TS-10.
+ens::ts::Model AppSettings::model() const {
+    return props_.getValue("model") == "ts12" ? ens::ts::Model::Ts12 : ens::ts::Model::Ts10;
 }
 
-void AppSettings::setMemoryFile(const juce::File& file) { props_.setValue("memoryFile", file.getFullPathName()); }
+void AppSettings::setModel(ens::ts::Model m) { props_.setValue("model", m == ens::ts::Model::Ts12 ? "ts12" : "ts10"); }
+
+// DECISION A116: one memory file per model; the TS-10's key and default name are the old ones.
+juce::File AppSettings::memoryFile(ens::ts::Model m) const {
+    const bool t12 = m == ens::ts::Model::Ts12;
+    const auto path = props_.getValue(t12 ? "memoryFile12" : "memoryFile");
+    return juce::File::isAbsolutePath(path) ? juce::File(path)
+                                            : folder().getChildFile(t12 ? "ts12-memory.bin" : "ts-memory.bin");
+}
+
+void AppSettings::setMemoryFile(ens::ts::Model m, const juce::File& file) {
+    props_.setValue(m == ens::ts::Model::Ts12 ? "memoryFile12" : "memoryFile", file.getFullPathName());
+}

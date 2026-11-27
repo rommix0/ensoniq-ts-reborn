@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "MemoryFile.h"
 #include "PanelEditor.h"
@@ -23,6 +24,13 @@ juce::String romProblem(const std::vector<RomFileStatus>& list) {
 juce::String memoryInRomFolder(const juce::File& file, const juce::File& roms) {
     if (roms != juce::File() && file.isAChildOf(roms))
         return "The memory file cannot be in the ROM folder: " + file.getFullPathName();
+    return {};
+}
+
+// DECISION A137: either model's memory file; the TS-12's is the running one after a switch.
+juce::String memoriesInRomFolder(const AppSettings& s, const juce::File& roms) {
+    for (const auto m : {ens::ts::Model::Ts10, ens::ts::Model::Ts12})
+        if (const auto err = memoryInRomFolder(s.memoryFile(m), roms); err.isNotEmpty()) return err;
     return {};
 }
 
@@ -133,6 +141,19 @@ std::vector<SavedMedium> parseMedia(const juce::XmlElement* x) {
     return media;
 }
 
+// DECISION A137: the model's name in a state, as in settings.xml.
+const char* modelName(ens::ts::Model m) { return m == ens::ts::Model::Ts12 ? "ts12" : "ts10"; }
+
+// DECISION A137: an element's `model`: none is the TS-10 (a state from before A137); false for a name not known.
+bool modelOf(const juce::XmlElement& e, ens::ts::Model& m) {
+    const auto s = e.getStringAttribute("model", "ts10");
+    if (s != "ts10" && s != "ts12") return false;
+    m = s == "ts12" ? ens::ts::Model::Ts12 : ens::ts::Model::Ts10;
+    return true;
+}
+
+size_t slot(ens::ts::Model m) { return static_cast<size_t>(m); }
+
 }  // namespace
 
 // DECISION A111: the five analogs and the sound are host parameters (automatable): floats 0..1 whose
@@ -153,15 +174,17 @@ TsProcessor::TsProcessor(MemoryMode mode)
                          .withOutput("Main", juce::AudioChannelSet::stereo(), true)
                          .withOutput("Aux", juce::AudioChannelSet::stereo(),
                                      juce::PluginHostType::getPluginLoadedAs() != wrapperType_Standalone)),
-      mode_(mode), params_(*this, nullptr, "TS", layout()) {
+      mode_(mode), model_(settings_.model()), params_(*this, nullptr, "TS", layout()) {
+    // DECISION A137: the model last chosen on any settings page; its ROM folder (A125) and memory file (A116).
     for (size_t i = 0; i < std::size(kAnalogParams); ++i)
         analogRaw_[i] = params_.getRawParameterValue(kAnalogParams[i].id);
     sound_ = params_.getRawParameterValue("sound");
     // No compiled-in default. DECISION A125: the stored folder, "roms" beside the program (the release
     // folder's layout, stored so the other format finds it), or the VST3 package's own ROMs (not stored);
     // with none, the first start opens with no ROMs.
-    const auto choice =
-        findRomFolder(settings_.romFolder(), juce::File::getSpecialLocation(juce::File::currentExecutableFile));
+    const auto choice = findRomFolder(settings_.romFolder(),
+                                      juce::File::getSpecialLocation(juce::File::currentExecutableFile),
+                                      model_);
     if (choice.dir != juce::File())
         setRomFolder(choice.dir, romError_, choice.store);
     else
@@ -177,41 +200,39 @@ TsProcessor::~TsProcessor() {
     // DECISION A116: saved on close only once booted; audio has stopped, so the machine is read directly.
     // DECISION A117: File mode only; a plugin instance's memory is in the project.
     if (mode_ == MemoryMode::File && engine_ && engine_->snapshot().booted)
-        saveMemoryFile(settings_.memoryFile(), engine_->machine().ramImage());
+        saveMemoryFile(settings_.memoryFile(model_), engine_->machine().ramImage());
 }
 
 // Refused, with the reason in err, when the memory file is inside the new folder: it would load the
 // OS ROM as RAM and the 60 s save would overwrite it (setMemoryFile guards the other order).
 bool TsProcessor::setRomFolder(const juce::File& dir, juce::String& err, bool store) {
-    err = memoryInRomFolder(settings_.memoryFile(), dir);
+    const std::lock_guard<std::mutex> lock(stateMu_);  // DECISION A137: model_ and roms_ stay a pair
+    err = memoriesInRomFolder(settings_, dir);
     if (err.isNotEmpty()) return false;
     if (store) settings_.setRomFolder(dir);  // DECISION A125: a VST3 package's own ROMs are not stored
     romFolder_ = dir;
     romStored_ = settings_.romFolder() == dir;
     ens::ts::RomSet roms;
-    const auto problem = romProblem(checkRomFolder(dir, &roms));
+    const auto problem = romProblem(checkRomFolder(dir, model_, &roms));
     if (problem.isNotEmpty()) {
         if (!engine_) romError_ = problem;
         return false;  // a running machine keeps running
     }
     roms_ = std::move(roms);
-    const std::lock_guard<std::mutex> lock(stateMu_);
     return restart(Ram::Keep);
 }
 
 bool TsProcessor::setMemoryFile(const juce::File& file, juce::String& err) {
+    const std::lock_guard<std::mutex> lock(stateMu_);  // DECISION A137: the file is set for the model running
     err = memoryTargetProblem(file, romFolder_);  // DECISION A125: the folder in use, stored or not
     if (err.isNotEmpty()) return false;
     if (file.existsAsFile()) {
         loadMemoryFile(file, err);
         if (err.isNotEmpty()) return false;
     }
-    settings_.setMemoryFile(file);
+    settings_.setMemoryFile(model_, file);
     memoryError_ = {};
-    if (file.existsAsFile() && engine_) {
-        const std::lock_guard<std::mutex> lock(stateMu_);
-        restart(Ram::File);
-    }
+    if (file.existsAsFile() && engine_) restart(Ram::File);
     return true;
 }
 
@@ -226,7 +247,7 @@ void TsProcessor::eraseMemory() {
     {
         const std::lock_guard<std::mutex> lock(stateMu_);
         if (mode_ == MemoryMode::File) {
-            if (!saved(eraseMemoryFile(settings_.memoryFile()))) return;
+            if (!saved(eraseMemoryFile(settings_.memoryFile(model_)))) return;
             memoryError_ = {};
         }
         startSelect_.clear();
@@ -246,7 +267,7 @@ void TsProcessor::eraseMemory() {
 
 // A failed save is shown on the settings page (memoryError) until a save succeeds.
 bool TsProcessor::saved(bool ok) {
-    const auto msg = "Memory not saved: " + settings_.memoryFile().getFullPathName();
+    const auto msg = "Memory not saved: " + settings_.memoryFile(model_).getFullPathName();
     if (!ok)
         memoryError_ = msg;
     else if (memoryError_ == msg)
@@ -271,12 +292,12 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
         img = startImage_;  // DECISION A116, A117: never a half-booted image, nor the file over a project's
         fromStart = true;
     } else {
-        img = loadMemoryFile(settings_.memoryFile(), memoryError_);  // wrong size: reported, cold boot
+        img = loadMemoryFile(settings_.memoryFile(model_), memoryError_);  // wrong size: reported, cold boot
     }
     std::string e;
     // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4. DECISION A135: and the 4M x 8
     // SIMM pair, 8 MB of sample RAM (BankSets S8 and S9).
-    auto fresh = ens::app::Engine::create(roms_, e, true, true);
+    auto fresh = ens::app::Engine::create(roms_, e, true, true, model_);  // DECISION A137
     if (fresh) fresh->setMidiOut(&TsProcessor::addMidiOut, this);
     // DECISION A124: the VST3 answers the power-on auto-load question; the Standalone asks, as the TS does.
     if (fresh) fresh->setAnswerAutoLoad(mode_ == MemoryMode::Project);
@@ -285,15 +306,9 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
     if (ok) {
         fresh->setSelect(sel.data(), static_cast<int>(sel.size()));
         if (rate_ > 0) fresh->prepare(rate_, block_);
-        std::unique_ptr<ens::ts::Disk> disk;
-        std::pair<uint32_t, uint32_t> cd{0, 0};
-        if (engine_) {
-            disk = engine_->releaseDisk();
-            cd = engine_->releaseCd();
-        }
-        // DECISION A129: a stand-in of a restore that has not ended is not the user's: it goes with its engine.
-        if (std::find(standInDisks_.begin(), standInDisks_.end(), disk.get()) != standInDisks_.end()) disk.reset();
-        if (std::find(standInCds_.begin(), standInCds_.end(), cd.first) != standInCds_.end()) cd = {0, 0};
+        park();  // with no engine, the ones parked by a model switch (A137)
+        auto disk = std::move(parkedDisk_);
+        const auto cd = std::exchange(parkedCd_, std::pair<uint32_t, uint32_t>{0, 0});
         unserve();
         standInCds_.clear();
         standInDisks_.clear();
@@ -340,6 +355,8 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
         ticks_ = 0;
         romError_ = {};
         ++engineGen_;
+    } else if (engine_ && engine_->model() != model_) {
+        stopMachine(juce::String(e));  // DECISION A137: never another model's machine under this model's name
     } else if (!engine_) {
         romError_ = juce::String(e);
     }
@@ -366,6 +383,111 @@ void TsProcessor::finishRestore(bool clean) {
     restored_.clear();
     restoreWanted_ = false;
     restoreRan_ = false;
+}
+
+// DECISION A129: a stand-in of a restore that has not ended is not the user's: it goes with its engine.
+void TsProcessor::park() {
+    if (!engine_) return;
+    parkedDisk_ = engine_->releaseDisk();
+    parkedCd_ = engine_->releaseCd();
+    if (std::find(standInDisks_.begin(), standInDisks_.end(), parkedDisk_.get()) != standInDisks_.end())
+        parkedDisk_.reset();
+    if (std::find(standInCds_.begin(), standInCds_.end(), parkedCd_.first) != standInCds_.end()) parkedCd_ = {0, 0};
+}
+
+// DECISION A137: the settings page's choice is stored; a state's model switches the instance only (setStateInformation).
+void TsProcessor::setModel(ens::ts::Model m) {
+    settings_.setModel(m);
+    const std::lock_guard<std::mutex> lock(stateMu_);
+    switchModel(m, true);
+}
+
+// DECISION A137: the memory the old model leaves is kept first: File mode saves it to its memory file once booted
+// (A116); Project mode keeps the running RAM once booted, else the start image (never a half-booted one), and the
+// select, for the state and a switch back. Then the new model's ROMs from the folder in use. Missing, the machine
+// stops (the disk and CD parked), romError names the file and the start image waits for setRomFolder, as a start
+// with no ROMs. The start image is the RAM this instance's project keeps for the model, else its memory file. A
+// restore running or due is dropped, its media kept in the record (ponytail: no stand-ins after a switch back, so
+// the user loads the sampled sounds again; keep restored_ per model if that matters). The caller holds stateMu_.
+void TsProcessor::switchModel(ens::ts::Model m, bool start) {
+    if (m == model_) return;
+    suspendProcessing(true);  // the machine is ours to read
+    const auto snap = engine_ ? engine_->snapshot() : ens::app::Snapshot{};
+    if (restoreRan_ && snap.frames > 0 && !snap.restoring) finishRestore(snap.restoreClean);  // as restart does
+    keepRestoreMedia();
+    const bool booted = engine_ && snap.booted;
+    if (mode_ == MemoryMode::File) {
+        if (booted) saved(saveMemoryFile(settings_.memoryFile(model_), engine_->machine().ramImage()));
+    } else {
+        modelRam_[slot(model_)] = booted ? engine_->machine().ramImage() : startImage_;
+        modelSelect_[slot(model_)] = select(snap);
+    }
+    model_ = m;
+    if (start) {
+        if (!modelRam_[slot(m)].empty()) {
+            startImage_ = modelRam_[slot(m)];
+        } else {
+            juce::String err;  // a failed save above stays shown unless the file is the wrong size
+            startImage_ = loadMemoryFile(settings_.memoryFile(m), err);
+            if (err.isNotEmpty()) memoryError_ = err;
+        }
+        startSelect_ = modelSelect_[slot(m)];
+        haveStart_ = true;
+        restoreWanted_ = false;
+    }
+    ens::ts::RomSet roms;
+    auto problem = romProblem(checkRomFolder(romFolder_, m, &roms));
+    if (problem.isNotEmpty()) {
+        // DECISION A125, A137: the folder in use lacks the model's files: the order the constructor takes.
+        const auto choice = findRomFolder(settings_.romFolder(),
+                                          juce::File::getSpecialLocation(juce::File::currentExecutableFile), m);
+        if (choice.dir == juce::File()) {
+            problem = "No ROM folder:\nopen Settings";
+        } else if (choice.dir != romFolder_ && memoriesInRomFolder(settings_, choice.dir).isEmpty() &&
+                   romProblem(checkRomFolder(choice.dir, m, &roms)).isEmpty()) {
+            if (choice.store) settings_.setRomFolder(choice.dir);
+            romFolder_ = choice.dir;
+            romStored_ = settings_.romFolder() == choice.dir;
+            problem = {};
+        }
+    }
+    if (problem.isNotEmpty()) {
+        stopMachine(problem);
+        suspendProcessing(false);
+        return;
+    }
+    roms_ = std::move(roms);
+    if (start)
+        restart(Ram::Start);  // resumes processing
+    else
+        suspendProcessing(false);
+}
+
+// DECISION A129, A137: a restore due or running that is dropped leaves the project's media in the record under what
+// was read (as finishRestore's unclean end), so the next save keeps them. The caller holds stateMu_.
+void TsProcessor::keepRestoreMedia() {
+    if (!restoreWanted_ && !restoreRan_) return;
+    const std::lock_guard<std::mutex> lock(mediaMu_);
+    record_.merge(restored_);
+}
+
+// DECISION A137: no machine runs (the model's ROMs are missing, or its engine was not made): the disk and CD parked,
+// a restore dropped with its media kept, why in romError_. Audio suspended, stateMu_ held.
+void TsProcessor::stopMachine(const juce::String& why) {
+    keepRestoreMedia();
+    park();
+    unserve();
+    standInCds_.clear();
+    standInDisks_.clear();
+    restored_.clear();
+    restoreWanted_ = false;
+    restoreRan_ = false;
+    ramPending_ = false;  // a 60 s copy of the old model's RAM must not reach the new model's file
+    cd_.setEngine(nullptr);  // before the engine (and its port) is freed
+    engine_.reset();
+    ++engineGen_;
+    roms_ = {};
+    romError_ = why;
 }
 
 void TsProcessor::unserve() {
@@ -419,7 +541,7 @@ void TsProcessor::tick() {
     if (ramPending_) {
         if (engine_->takeRam(ramBuf_)) {
             ramPending_ = false;
-            saved(saveMemoryFile(settings_.memoryFile(), ramBuf_));
+            saved(saveMemoryFile(settings_.memoryFile(model_), ramBuf_));
         }
     } else if (mode_ == MemoryMode::File && ++ticks_ >= 1800 && snap.booted) {  // DECISION A117: File only
         ticks_ = 0;
@@ -639,17 +761,27 @@ std::vector<uint8_t> TsProcessor::ram() {
 // selection once booted, else the one the start image came with. The Standalone's state has no RAM; its
 // memory is the file. It takes the state mutex on every thread: a bounded wait behind a concurrent save
 // or restart. processBlock itself never takes it.
+// DECISION A137: `model="ts10|ts12"` names the running model, each <RAM> its model: the running one first, then the
+// RAM the other model left in this instance, when there is one.
 void TsProcessor::getStateInformation(juce::MemoryBlock& dest) {
     juce::XmlElement xml("TSState");
     xml.setAttribute("version", 1);
     const std::lock_guard<std::mutex> lock(stateMu_);
+    const ens::ts::Model running = model_;
+    xml.setAttribute("model", modelName(running));
     const auto sel = select(engine_ ? engine_->snapshot() : ens::app::Snapshot{});
     if (!sel.empty())
         xml.setAttribute("select", juce::String::toHexString(sel.data(), static_cast<int>(sel.size()), 0));
     if (auto tree = params_.copyState().createXml()) xml.addChildElement(tree.release());
     if (mode_ == MemoryMode::Project) {
-        if (const auto img = ram(); !img.empty())
-            xml.createNewChildElement("RAM")->addTextElement(juce::Base64::toBase64(img.data(), img.size()));
+        const auto addRam = [&xml](ens::ts::Model m, const std::vector<uint8_t>& img) {
+            auto* r = xml.createNewChildElement("RAM");
+            r->setAttribute("model", modelName(m));
+            r->addTextElement(juce::Base64::toBase64(img.data(), img.size()));
+        };
+        if (const auto img = ram(); !img.empty()) addRam(running, img);
+        const auto other = running == ens::ts::Model::Ts12 ? ens::ts::Model::Ts10 : ens::ts::Model::Ts12;
+        if (!modelRam_[slot(other)].empty()) addRam(other, modelRam_[slot(other)]);
         // DECISION A129 (Review Focus 3): while a restore is due or running, the media it restores, unchanged.
         const std::lock_guard<std::mutex> mediaLock(mediaMu_);
         const auto& media = restoreWanted_ ? restored_ : record_.media();
@@ -663,6 +795,10 @@ void TsProcessor::getStateInformation(juce::MemoryBlock& dest) {
 // follow), written into the restored tree so no extra host edit is sent while a project loads. In Project
 // mode a version 1 RAM of 524 288 bytes restarts the machine from it with that selection; with no ROMs it
 // waits as the start image. No RAM, a wrong size or another version leaves the machine as it is.
+// DECISION A137: a version 1 state's `model` (none: the TS-10, a state from before A137) switches this instance, not
+// the setting; each <RAM> goes to its model (none: the TS-10), so a state's RAM never starts the other model. The
+// running model's RAM restarts the machine as above (with that model's ROMs missing it waits); with none, the model
+// starts from its memory file. The other model's RAM, or none, replaces what this instance kept for it.
 void TsProcessor::setStateInformation(const void* data, int size) {
     // DECISION A121: only a plugin restores a state; the Standalone starts with the controls at their
     // defaults and the sound its memory file boots on, whatever JUCE's wrapper saved.
@@ -690,19 +826,37 @@ void TsProcessor::setStateInformation(const void* data, int size) {
     }
     if (tree.isValid()) params_.replaceState(tree);
 
-    std::vector<uint8_t> img;
-    if (const auto* r = xml->getChildByName("RAM");
-        r != nullptr && mode_ == MemoryMode::Project && xml->getIntAttribute("version") == 1) {
-        juce::MemoryOutputStream out;
-        if (juce::Base64::convertFromBase64(out, r->getAllSubText()) &&
-            out.getDataSize() == static_cast<size_t>(kMemoryBytes)) {
-            const auto* p = static_cast<const uint8_t*>(out.getData());
-            img.assign(p, p + out.getDataSize());
+    // Project mode (File returned above). A model not known leaves the machine as another version does.
+    auto stateModel = ens::ts::Model::Ts10;
+    const bool v1 = xml->getIntAttribute("version") == 1 && modelOf(*xml, stateModel);
+    std::array<std::vector<uint8_t>, 2> rams;  // by model; the first good one of each
+    if (v1) {
+        for (const auto* r : xml->getChildWithTagNameIterator("RAM")) {
+            auto m = ens::ts::Model::Ts10;
+            if (!modelOf(*r, m)) continue;  // a model not known is skipped, never taken as the TS-10's
+            auto& to = rams[slot(m)];
+            juce::MemoryOutputStream out;
+            if (to.empty() && juce::Base64::convertFromBase64(out, r->getAllSubText()) &&
+                out.getDataSize() == static_cast<size_t>(kMemoryBytes)) {
+                const auto* p = static_cast<const uint8_t*>(out.getData());
+                to.assign(p, p + out.getDataSize());
+            }
         }
     }
+    const bool anyRam = !rams[0].empty() || !rams[1].empty();
+    auto img = std::move(rams[slot(stateModel)]);
+    const auto other = stateModel == ens::ts::Model::Ts12 ? ens::ts::Model::Ts10 : ens::ts::Model::Ts12;
     // DECISION A129: the media go with the RAM; a medium that is not whole is dropped (Review Focus 5).
     auto media = img.empty() ? std::vector<SavedMedium>() : parseMedia(xml->getChildByName("Media"));
     const std::lock_guard<std::mutex> lock(stateMu_);
+    if (v1) {
+        if (anyRam) modelRam_[slot(stateModel)].clear();  // the project has none for it: its memory file
+        switchModel(stateModel, img.empty());
+        if (anyRam) {
+            modelRam_[slot(other)] = std::move(rams[slot(other)]);
+            modelSelect_[slot(other)].clear();  // a state keeps the running model's select only
+        }
+    }
     if (!img.empty()) {
         startImage_ = std::move(img);
         startSelect_ = std::move(sel);
@@ -715,7 +869,9 @@ void TsProcessor::setStateInformation(const void* data, int size) {
             const std::lock_guard<std::mutex> m(mediaMu_);
             record_.clear();
         }
-        if (engine_) restart(Ram::Start, true);  // with no ROMs, setRomFolder starts from it
+        // With no ROMs, setRomFolder starts from it. DECISION A137: a switch to a model whose ROMs are good gives
+        // roms_ with no engine yet (the instance ran a model whose ROMs are missing): it starts now.
+        if (engine_ || !roms_.osHigh.empty()) restart(Ram::Start, true);
     } else if (!sel.empty()) {
         // A state with no RAM arriving before the first block: its select is the one the next boot
         // replays, and with no ROMs it waits for setRomFolder's restart. Once booted the running
@@ -757,7 +913,7 @@ bool TsProcessor::copyToSharedMemory(juce::String& err) {
         const std::lock_guard<std::mutex> lock(stateMu_);
         img = ram();
     }
-    if (!saved(saveMemoryFile(settings_.memoryFile(), img))) {
+    if (!saved(saveMemoryFile(settings_.memoryFile(model_), img))) {
         err = memoryError_;
         return false;
     }

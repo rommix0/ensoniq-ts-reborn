@@ -4,7 +4,7 @@
 
 This emulator was created by Anthony C. Bartman (@rommix0) with the assistance of Claude Opus 5.5. If you find any issues, please leave an issue or do a pull request.
 
-An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. TS-12 support is planned. It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
+An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. The TS-12 runs as a second model (a 76-key keyboard with channel pressure, its own OS v3.10). It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
 **Status:** version 1.0.0. The TS-10 machine runs the unmodified OS v3.10 in a Standalone app and a VST3 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64, Linux x64 and macOS; see [docs/tsapp.md](docs/tsapp.md), named `APP-GUIDE.md` in a release folder).
 
@@ -16,7 +16,7 @@ The checks only a person can do (sound, the panel, the drives, a DAW) were done 
 
 ## The release folder
 
-`tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0` (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README with its panel picture, the license, the app guide, and the six ROMs, beside the program and inside the VST3 package.
+`tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0` (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README with its panel picture, the license, the app guide, and the eight ROMs, beside the program and inside the VST3 package.
 
 On Windows it needs nothing installed: run the program, or copy `TS Reborn.vst3` to `C:\Program Files\Common Files\VST3`, and it finds its ROMs.
 
@@ -26,12 +26,14 @@ A release folder holds Ensoniq's ROMs (below).
 
 ## The ROMs
 
-The ROMs are Ensoniq's copyrighted firmware and samples. The emulator needs six files, which the release folder includes (see [roms/README.txt](roms/README.txt)):
+The ROMs are Ensoniq's copyrighted firmware and samples. The emulator ships eight files (the app loads six per model: the four wave ROMs and that model's OS pair), which the release folder includes (see [roms/README.txt](roms/README.txt)):
 
 | File                                           | Size      | What it is                           |
 | ---------------------------------------------- | --------- | ------------------------------------ |
 | `os/ts10_310h.bin`                             | 256 KB    | OS v3.10, high byte (even addresses) |
 | `os/ts10_310l.bin`                             | 512 KB    | OS v3.10, low byte (odd addresses)   |
+| `os/ts12_310h.bin`                             | 256 KB    | TS-12 OS v3.10, high byte            |
+| `os/ts12_310l.bin`                             | 512 KB    | TS-12 OS v3.10, low byte             |
 | `waves/901401_u41.bin`, `waves/901402_u45.bin` | 2 MB each | Wave ROMs                            |
 | `waves/901301_u43.bin`, `waves/901302_u46.bin` | 1 MB each | Wave ROMs                            |
 

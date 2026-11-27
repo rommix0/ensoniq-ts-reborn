@@ -1,9 +1,12 @@
 #pragma once
-// The TS-10 front panel as a table in 2576 x 920 design units, measured on datasheets/ts10-photo.webp
-// scaled to that size (arrangement and proportions) with the labels of the Musician's Manual page 3.
+// The TS-10 and TS-12 front panel (one table; the TS-12 differs in its keys, A137) in 2576 x 920 design units,
+// measured on datasheets/ts10-photo.webp scaled to that size (arrangement and proportions) with the labels of the
+// Musician's Manual page 3.
 // JUCE-free; the editor scales it uniformly to the window.
 #include <cstdint>
 #include <vector>
+
+#include "ts/panel.h"
 
 namespace ens::app {
 
@@ -22,7 +25,7 @@ enum class Ink : uint8_t { Text, Bright, Dim, Decal };
 struct Control {
     ControlKind kind;
     // Button: ts::Button code, or kSettingsId (the gear). Led: 0-15, or kSeqLedId. Slider, Wheel: ts::Analog.
-    // Patch: 0 left, 1 right. Key: note 36-96. Display, Label, Decor: -1.
+    // Patch: 0 left, 1 right. Key: a note in ts::keyRange(model). Display, Label, Decor: -1.
     int id;
     Rect r;             // Label: its text box
     // Label: the text; the others: the name for tooltips. Either may hold a line break (a space in a tooltip).
@@ -36,6 +39,7 @@ constexpr int kSeqLedId = 16;    // the Seqs/Songs LED (DUART OP3, not on the di
 // Where the 2 x 40 character cells go, inside the display window.
 constexpr Rect kDisplayText = {820, 170, 565, 58};
 
-const std::vector<Control>& panelLayout();  // built once, on first call (message thread)
+// Two tables (TS-10, TS-12), each built once, on first call (message thread).
+const std::vector<Control>& panelLayout(ts::Model m = ts::Model::Ts10);
 
 }  // namespace ens::app

@@ -136,19 +136,22 @@ void Panel::button(Button b, bool down) {
     queue(down ? static_cast<uint8_t>(code | 0x80) : code, 0x00);
 }
 
-// DECISION T17: key down is 0x80 | k then the strike value (nonzero: 0 would make it a button
-// press), key up k then a nonzero value (the OS sends note-off velocity 64 whatever it is).
+// DECISION T17: key down is 0x80 | k then the strike value, key up k then the release value, both nonzero (0
+// would make them button events). The TS-10 OS sends note-off velocity 64 whatever the release value is.
+// DECISION T31: k = note - keyRange(model).lowest; the TS-12 OS turns the release value into the note-off velocity.
 void Panel::key(int note, bool down, int velocity) {
-    if (note < kLowestKey || note >= kLowestKey + kKeyCount) return;
-    const auto k = static_cast<uint8_t>(note - kLowestKey);
-    if (down) queue(static_cast<uint8_t>(0x80 | k), static_cast<uint8_t>(std::clamp(velocity, 1, 127)));
-    else queue(k, 0x40);
+    const KeyRange r = keyRange(model_);
+    if (note < r.lowest || note >= r.lowest + r.count) return;
+    const auto k = static_cast<uint8_t>(note - r.lowest);
+    queue(down ? static_cast<uint8_t>(0x80 | k) : k, static_cast<uint8_t>(std::clamp(velocity, 1, 127)));
 }
 
-// DECISION T17: Poly-Key pressure is 0x40 | k then the amount (0-127).
+// DECISION T17: Poly-Key pressure is 0x40 | k then the amount (0-127). DECISION T31: the TS-12 keyboard has none
+// (its pressure is one analog input, Analog::Pressure).
 void Panel::pressure(int note, int amount) {
-    if (note < kLowestKey || note >= kLowestKey + kKeyCount) return;
-    queue(static_cast<uint8_t>(0x40 | (note - kLowestKey)), static_cast<uint8_t>(std::clamp(amount, 0, 127)));
+    const KeyRange r = keyRange(model_);
+    if (model_ == Model::Ts12 || note < r.lowest || note >= r.lowest + r.count) return;
+    queue(static_cast<uint8_t>(0x40 | (note - r.lowest)), static_cast<uint8_t>(std::clamp(amount, 0, 127)));
 }
 
 }  // namespace ens::ts

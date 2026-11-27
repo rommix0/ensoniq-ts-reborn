@@ -258,6 +258,10 @@ it halted at the end of the boot. No error text either way.
 - Selects in the boot: 6 (battery) once at 1503 ms, 7 (reference) once at 1587 ms, 5 (data entry)
   at 1768 ms, 0 (pitch wheel) from 1843 ms, then the cycle 0 2 5 3 4 (10 ms) for good. The Analog
   Test page adds 7 and 6: 0 2 5 3 4 7 6 (14 ms). Select 1 (U69 Y1, not connected) is never used.
+- **TS-12 (T31).** Y1 is the TS-12's keyboard pressure (`Analog::Pressure`). Its OS adds select 1 to
+  the cycle: 0 2 5 3 4 1. Raw 0x000-0x080 sends nothing, 0x100 starts channel pressure (`D0 nn`),
+  0x280 and above gives 127; the OS filters it, several messages per change (running status), with
+  or without a key down. It rests at 0, no pressure. The TS-10 OS never selects 1.
 
 **Fact: the Analog Test page.** Hold Presets and press Compare (service manual p28). Two rows:
 `ANALOG  PTCH=ppp MOD=mmm PED=ccc VOL=vvv` and `TESTS   KNOB=kkk REF=rrr BAT=bbb`. The readings are
@@ -318,7 +322,8 @@ the boot but the readings.
 values (read off settled displays) and the reference scaling. Medium for the resting values: the real
 voltages are unknown; each reads what the service manual expects.
 
-**Tests.** ts_cold_boot_is_clean, ts_analog_resting_values, ts_slider_moves_volume, ts_key_sounds.
+**Tests.** ts_cold_boot_is_clean, ts_analog_resting_values, ts_slider_moves_volume, ts_key_sounds,
+ts12_pressure_is_analog_y1, ts10_ignores_pressure_input.
 
 ## IEXP port (T9)
 
@@ -681,9 +686,10 @@ Compare (LED only) and the foot switch's left/right naming (from the System page
 ## Keys and pressure (T17)
 
 **Fact.**
-- Key down: `0x80 | k`, then the strike value (1-0x7F). Key up: `k`, then any nonzero byte; the OS
-  sends note-off velocity 64 whatever it is. `k` = note - 36: the 61 keys C2-C7 are k = 0-60. A
-  strike value of 0 makes the pair a button press.
+- Key down: `0x80 | k`, then the strike value (1-0x7F). Key up: `k`, then the release value
+  (1-0x7F); the TS-10 OS sends note-off velocity 64 whatever it is. `k` = note - 36: the 61 keys
+  C2-C7 are k = 0-60. A value of 0 makes the pair a button event. `Panel::key` sends the caller's
+  release value, clamped to 1-127.
 - The strike value goes through the TOUCH table (VELTBL-4 by default). MIDI velocity out, white keys
   (C2, C4, C7) and black keys (C#4):
 
@@ -711,6 +717,14 @@ a key down, so this does not affect the model.
 **Tests.** ts_panel_commands, ts_panel_button_bytes, ts_panel_button_table,
 ts_panel_full_queue_drops_whole_events, ts_panel_lines (the model); ts_boot_shows_play_screen,
 ts_button_changes_page, ts_key_sounds, ts_poly_pressure_is_sent (the firmware).
+
+**TS-12 (T31).** The same forms with k = note - 28: the 76 keys E1-G7 (MIDI 28-103) are k = 0-75
+(codes 0x80-0xD0 play notes 28-108; no key sends 0xCC-0xD0). The release value becomes the note-off
+velocity on the strike curve (64 -> 20, 99 -> 68, 113 -> 110); the strike curve differs from the
+TS-10's (64 -> 20 with the default Touch). Codes 0x00-0x7F alone and 0xD1-0xFF give nothing: there is
+no Poly-Key pressure code, the pressure is analog ("Analog inputs"). Found by repeating the sweep above
+with the TS-12 OS pair. Tests: ts_panel_ts12_key_codes, ts12_keys_span_e1_to_g7,
+ts12_release_byte_sets_note_off_velocity.
 
 **Settled in Task 6.** With Task 4's analog inputs (every input 0 but the reference) the Volume slider
 at 0 silenced the TS and the Data Entry slider at 0 kept rewriting the selected value at its minimum.
