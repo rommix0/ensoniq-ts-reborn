@@ -25,7 +25,7 @@ enum class Ink : uint8_t { Text, Bright, Dim, Decal };
 struct Control {
     ControlKind kind;
     // Button: ts::Button code, or kSettingsId (the gear). Led: 0-15, or kSeqLedId. Slider, Wheel: ts::Analog.
-    // Patch: 0 left, 1 right. Key: note 36-96. Display, Label, Decor: -1.
+    // Patch: 0 left, 1 right. Key: a note in ts::keyRange(model). Display, Label, Decor: -1.
     int id;
     Rect r;             // Label: its text box
     // Label: the text; the others: the name for tooltips. Either may hold a line break (a space in a tooltip).

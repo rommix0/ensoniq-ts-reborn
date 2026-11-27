@@ -186,6 +186,8 @@ void processor(const juce::File& dir) {
     dummyRoms(roms);
     setSettingsDir(dir);
     AppSettings().setRomFolder(roms);
+    const auto dump12 = dir.getChildFile("dump12");  // the TS-12's memory file there (A137)
+    AppSettings().setMemoryFile(ens::ts::Model::Ts12, dump12.getChildFile("m12.bin"));
     TsProcessor p(MemoryMode::File);  // the memory file's own rules (A116)
     CHECK(p.engine() != nullptr);
     CHECK(p.settings().memoryFile(ens::ts::Model::Ts10) == dir.getChildFile("ts-memory.bin"));
@@ -204,6 +206,8 @@ void processor(const juce::File& dir) {
     CHECK(!p.setRomFolder(dump, err) && err.isNotEmpty() && p.settings().romFolder() == roms &&
           p.engine() == engine0 && inDump.getSize() == kMemoryBytes);
     CHECK(p.setMemoryFile(dir.getChildFile("mem0.bin"), err));  // back to a file outside the dump
+    // Either model's memory file: a folder holding the TS-12's is refused while the TS-10 runs (A137).
+    CHECK(!p.setRomFolder(dump12, err) && err.contains("m12.bin") && p.settings().romFolder() == roms);
 
     // A file that cannot be written is refused.
     const auto mem = dir.getChildFile("mem.bin");
@@ -1067,6 +1071,35 @@ void romsBesideApp(const juce::File& dir) {
     beside.deleteRecursively();
 }
 
+// model_switch_finds_roms (A125, A137): a switch takes the folder order the constructor takes. A stored folder with the
+// six TS-10-era files and the eight in "roms" beside the program (dummies, never run): the switch to the TS-12 takes
+// and stores the folder beside. With no folder at all, a switch keeps "No ROM folder".
+void modelSwitchFindsRoms(const juce::File& dir) {
+    const auto beside = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getSiblingFile("roms");
+    CHECK(!beside.exists());  // never a real folder of the user's
+    if (beside.exists()) return;
+    setSettingsDir(dir.getChildFile("none"));
+    {
+        TsProcessor p;
+        CHECK(p.engine() == nullptr && p.romError().startsWith("No ROM folder"));
+        p.setModel(ens::ts::Model::Ts12);
+        CHECK(p.engine() == nullptr && p.romError().startsWith("No ROM folder"));
+    }
+    setSettingsDir(dir);
+    const auto six = dir.getChildFile("six");
+    dummyRoms(six);
+    AppSettings().setRomFolder(six);
+    dummyRoms(beside, ens::ts::Model::Ts12);
+    {
+        TsProcessor p;
+        CHECK(p.engine() != nullptr && p.romFolder() == six);
+        p.setModel(ens::ts::Model::Ts12);
+        CHECK(p.engine() != nullptr && p.engine()->model() == ens::ts::Model::Ts12 && p.romError().isEmpty());
+        CHECK(p.romFolder() == beside && p.romFolderStored() && AppSettings().romFolder() == beside);
+    }
+    beside.deleteRecursively();
+}
+
 // rom_folder_in_use (A125): a folder used but not stored (a VST3 package's own ROMs) is still the folder the
 // settings page shows and the memory-file guard checks: a memory file inside it is refused.
 void romFolderInUse(const juce::File& dir) {
@@ -1617,7 +1650,8 @@ void editorTs12StrikeRange(const juce::File& dir) {
         CHECK(e.kind == ens::app::Event::Kind::Key && e.id == 60 && e.down);
         CHECK(e.value == (m == Model::Ts12 ? 120 : 127));
         c.mouseUp(mouse(c, at, at));
-        CHECK(static_cast<PanelEditor&>(*ed).lastPosted().value == e.value);  // the release carries it
+        const auto up = static_cast<PanelEditor&>(*ed).lastPosted();
+        CHECK(up.kind == ens::app::Event::Kind::Key && up.id == 60 && !up.down && up.value == e.value);  // carries it
     }
 }
 
@@ -2565,6 +2599,7 @@ int main() {
     dataEntryRestored(dir.getChildFile("data-entry"), r2);
     zeroAndBypassedBlocks(dir.getChildFile("zero"));
     romsBesideApp(dir.getChildFile("beside"));
+    modelSwitchFindsRoms(dir.getChildFile("model-finds-roms"));
     romFolderOrder(dir.getChildFile("order"));
     romFolderInUse(dir.getChildFile("inuse"));
     auxBusOff(dir.getChildFile("buses"));

@@ -24,8 +24,8 @@ constexpr bool isBlack(int note) {
     return n == 1 || n == 3 || n == 6 || n == 8 || n == 10;
 }
 
-// Keys C2-C7: 36 white keys across 2140 units, black keys 0.6 as wide and 0.62 as long, centred on the gap
-// between their white keys.
+// Keys: the model's white keys across 2140 units (36 for the TS-10's C2-C7, 45 for the TS-12's E1-G7), black keys
+// 0.6 as wide and 0.62 as long, centred on the gap between their white keys.
 constexpr int kKeysX = 335, kKeysY = 555, kKeysW = 2140, kKeysH = 350;
 
 void block(std::vector<Control>& t, int x0, int pitch, int cols, const char* const* labels, const Button* buttons) {

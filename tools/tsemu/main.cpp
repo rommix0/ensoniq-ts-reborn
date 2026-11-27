@@ -246,8 +246,7 @@ std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = null
     roms.u45 = load(o.roms + "/waves", "901402_u45.bin");
     roms.u46 = load(o.roms + "/waves", "901302_u46.bin");
     std::string err;
-    auto m = Machine::create(roms, err, o.sqx70, !o.cd.empty(), o.simm8,
-                           o.ts12 ? Model::Ts12 : Model::Ts10);
+    auto m = Machine::create(roms, err, o.sqx70, !o.cd.empty(), o.simm8, o.ts12 ? Model::Ts12 : Model::Ts10);
     if (!m) fail(err);
     for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
     if (!o.ram.empty()) {

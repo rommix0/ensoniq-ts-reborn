@@ -27,6 +27,13 @@ juce::String memoryInRomFolder(const juce::File& file, const juce::File& roms) {
     return {};
 }
 
+// DECISION A137: either model's memory file; the TS-12's is the running one after a switch.
+juce::String memoriesInRomFolder(const AppSettings& s, const juce::File& roms) {
+    for (const auto m : {ens::ts::Model::Ts10, ens::ts::Model::Ts12})
+        if (const auto err = memoryInRomFolder(s.memoryFile(m), roms); err.isNotEmpty()) return err;
+    return {};
+}
+
 juce::String memoryTargetProblem(const juce::File& file, const juce::File& roms) {
     if (const auto err = memoryInRomFolder(file, roms); err.isNotEmpty()) return err;
     if (file.isDirectory() || !file.hasWriteAccess())  // a new file: its folder's access
@@ -200,7 +207,7 @@ TsProcessor::~TsProcessor() {
 // OS ROM as RAM and the 60 s save would overwrite it (setMemoryFile guards the other order).
 bool TsProcessor::setRomFolder(const juce::File& dir, juce::String& err, bool store) {
     const std::lock_guard<std::mutex> lock(stateMu_);  // DECISION A137: model_ and roms_ stay a pair
-    err = memoryInRomFolder(settings_.memoryFile(model_), dir);
+    err = memoriesInRomFolder(settings_, dir);
     if (err.isNotEmpty()) return false;
     if (store) settings_.setRomFolder(dir);  // DECISION A125: a VST3 package's own ROMs are not stored
     romFolder_ = dir;
@@ -429,7 +436,21 @@ void TsProcessor::switchModel(ens::ts::Model m, bool start) {
         restoreWanted_ = false;
     }
     ens::ts::RomSet roms;
-    const auto problem = romProblem(checkRomFolder(romFolder_, m, &roms));
+    auto problem = romProblem(checkRomFolder(romFolder_, m, &roms));
+    if (problem.isNotEmpty()) {
+        // DECISION A125, A137: the folder in use lacks the model's files: the order the constructor takes.
+        const auto choice = findRomFolder(settings_.romFolder(),
+                                          juce::File::getSpecialLocation(juce::File::currentExecutableFile), m);
+        if (choice.dir == juce::File()) {
+            problem = "No ROM folder:\nopen Settings";
+        } else if (choice.dir != romFolder_ && memoriesInRomFolder(settings_, choice.dir).isEmpty() &&
+                   romProblem(checkRomFolder(choice.dir, m, &roms)).isEmpty()) {
+            if (choice.store) settings_.setRomFolder(choice.dir);
+            romFolder_ = choice.dir;
+            romStored_ = settings_.romFolder() == choice.dir;
+            problem = {};
+        }
+    }
     if (problem.isNotEmpty()) {
         stopMachine(problem);
         suspendProcessing(false);

@@ -32,7 +32,11 @@ The four TS-10 reference hashes are unchanged and are the same on all three tool
 - The Linux cores and app were configured earlier with an empty `ENS_DISK_DIR` (the images are on the Windows
   side), so the 22 floppy and CD tests print `skip: disk images not found` there. They run and pass on MinGW and
   MSVC. The Linux app checks skip their disk and CD project checks for the same reason.
-- `TSReborn_AppTests` on MSVC prints one skip, `TSR_RELEASE_VST3 not set` (no release folder was built).
+- Release folder (final fix wave): `powershell -ExecutionPolicy Bypass -File tools\dist.ps1` wrote
+  `dist\TS Reborn-1.0.0` with the eight ROMs in `roms\` beside the exe and in the VST3's `Contents\Resources\roms`.
+  `TSReborn_AppTests` on MSVC: `app_tests: all passed` without `TSR_RELEASE_VST3` (one skip, `TSR_RELEASE_VST3 not
+  set`), and `app_tests: all passed` with `TSR_RELEASE_VST3` set to that folder's `TS Reborn.vst3` (no skip; the
+  package loads on its own ROMs, A125).
 - `ens_rt_tests` counts 0 allocations in `Machine::runFrame` and `Engine::render`, for the TS-10 and for the
   TS-12 (`rt_ts12_engine_render_does_not_allocate`).
 - 68000 suite (`m68k_suite`): not run (the core is unchanged and Tom Harte's tests are not in `testdata/` here).
