@@ -155,7 +155,7 @@ Environment variables read when the app starts. Neither is needed for normal use
 ## Open items
 
 - **SCSI** has a CD-ROM drive at ID 4 only; no SCSI hard disk. Disk images in `.hfe` and `.efe` formats are not read (`docs/verification-plan5.md`).
-- **The TS-12** is out of scope for this project; this is the TS-10 only.
+- **The TS-12** is not emulated yet. It is in scope again since 2026-11-26 (the user's decision): its features are added where they fit.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.
 - **The small print the photo has** (jack labels, "Bypass", "Replace w/FX") is not drawn.
