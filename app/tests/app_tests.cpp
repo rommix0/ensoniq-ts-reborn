@@ -862,6 +862,13 @@ void romFolderOrder(const juce::File& dir) {
     // beside beats the package
     dummyRoms(contents.getChildFile("x86_64-win/roms"));
     CHECK(is(findRomFolder({}, plugin, ens::ts::Model::Ts10), contents.getChildFile("x86_64-win/roms"), true));
+    // per model: a stored folder good for the TS-10 only is kept for the TS-10 and passed over for the TS-12
+    // when "roms" beside the program holds all eight
+    const auto ts12 = dir.getChildFile("ts12app");
+    dummyRoms(ts12.getChildFile("roms"), ens::ts::Model::Ts12);
+    CHECK(is(findRomFolder(a, ts12.getChildFile("TS Reborn.exe"), ens::ts::Model::Ts10), a, false));
+    CHECK(is(findRomFolder(a, ts12.getChildFile("TS Reborn.exe"), ens::ts::Model::Ts12), ts12.getChildFile("roms"),
+             true));
 }
 
 // processor_aux_bus_off_mixes_into_main (A109): two processors get the same blocks. After the boot the
