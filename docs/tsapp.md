@@ -47,7 +47,7 @@ The scripts check the eight ROMs (presence and size) before building anything, a
 
 ## Model
 
-The settings page has a **Model** row above the ROM folder: TS-10 or TS-12 (A137). A change is stored, the machine restarts on that model's OS and memory file, and the panel redraws at once with the TS-12's 76 keys (E1 to G7) or the TS-10's 61 (C2 to C7); the window keeps its size. The ROM list under it shows the selected model's files. A model whose ROMs are missing still takes effect: the display area reads `ROM missing:` and the file's name (for example `os/ts12_310h.bin`), and the disk and CD you had loaded are held until the ROMs are there.
+The settings page has a **Model** row above the ROM folder: TS-10 or TS-12 (A137). A change is stored, the machine restarts on that model's OS and memory file, and the panel redraws at once with the TS-12's 76 keys (E1 to G7) or the TS-10's 61 (C2 to C7); the window keeps its size. The ROM list under it shows the selected model's files. A model whose ROMs are missing still takes effect: the display area reads `ROM MISSING:` and the file's name in capitals (for example `OS/TS12_310H.BIN`; the ROM list keeps the exact name), and the disk and CD you had loaded are held until the ROMs are there.
 
 ## First start and the ROMs
 
@@ -67,7 +67,7 @@ At start the app takes the first of these that holds the model's six files (A125
 
 So a stored folder that has been moved or deleted no longer stops the app when a `roms` folder sits beside it. A folder chosen in Settings still wins.
 
-Otherwise the first start shows a message in place of the display. Click the gear at the top right of the panel, then **Choose folder...** in ROMS. The list marks each file found, missing or the wrong size. When the model's six are good the machine starts. The firmware boots in real time, as the instrument does (next section). If a file is missing or the wrong size, the display area names it (for example `ROM missing:` / `os/ts10_310h.bin`). With the ROMs good but no audio device open, it reads `No audio device`. Choosing another good folder later restarts the machine and keeps its memory.
+Otherwise the first start shows a message in place of the display. Click the gear at the top right of the panel, then **Choose folder...** in ROMS. The list marks each file found, missing or the wrong size. When the model's six are good the machine starts. The firmware boots in real time, as the instrument does (next section). If a file is missing or the wrong size, the display area names it, in capitals as the instrument's display shows everything (for example `ROM MISSING:` / `OS/TS10_310H.BIN`; the ROM list shows the exact name). With the ROMs good but no audio device open, it reads `NO AUDIO DEVICE`. Choosing another good folder later restarts the machine and keeps its memory.
 
 ## Where the settings and the memory live
 

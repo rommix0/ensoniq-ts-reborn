@@ -1868,6 +1868,10 @@ void vfdFontCheck() {
     const auto inRow = vfdCursorBar(cell, {0.0f, rowH / 2.0f + 0.438f * emP});
     std::printf("  vfd cursor bar in a %.2f x %.2f cell: y %.2f-%.2f\n", cell, rowH, inRow.getY(), inRow.getBottom());
     CHECK(inRow.getBottom() < rowH && inRow.getRight() < cell);
+    // App messages in capitals, row by row; a missing row is empty.
+    CHECK(displayMessageRow("ROM missing:\nos/ts10_310h.bin", 0) == "ROM MISSING:");
+    CHECK(displayMessageRow("ROM missing:\nos/ts10_310h.bin", 1) == "OS/TS10_310H.BIN");
+    CHECK(displayMessageRow("No audio device", 0) == "NO AUDIO DEVICE" && displayMessageRow("No audio device", 1).isEmpty());
 }
 
 // The model's logo (A140) in a painted editor: its triangle's pixels (blue over green, as `editor`) and the letter

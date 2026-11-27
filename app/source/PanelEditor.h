@@ -17,6 +17,9 @@ class TsProcessor;
 // `baselineLeft`.
 juce::Font vfdFont(float cellWidth);
 juce::Rectangle<float> vfdCursorBar(float cellWidth, juce::Point<float> baselineLeft);
+// DECISION A141: row `row` of an app message (no ROMs, no audio device) as the display shows it: in capitals, as
+// the instrument's display only ever shows them.
+juce::String displayMessageRow(const juce::String& message, int row);
 
 class PanelEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer {
 public:

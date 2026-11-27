@@ -330,8 +330,8 @@ public:
                 int code = ' ';
                 bool hideChar = false, underline = false;
                 if (err.isNotEmpty()) {
-                    // No engine: the reason, two rows cut to 40 columns.
-                    const auto line = juce::StringArray::fromLines(err)[row];
+                    // No engine: the reason, in capitals (A141), two rows cut to 40 columns.
+                    const auto line = displayMessageRow(err, row);
                     if (col < line.length()) code = static_cast<int>(line[col]) & 0x7F;
                 } else {
                     code = static_cast<unsigned char>(p.text[row][col]);
@@ -871,6 +871,11 @@ juce::Font vfdFont(float cellWidth) {
 juce::Rectangle<float> vfdCursorBar(float cellWidth, juce::Point<float> baselineLeft) {
     const float em = cellWidth / 0.72f;
     return {baselineLeft.x + 0.053f * em, baselineLeft.y + 0.086f * em, 0.456f * em, 0.078f * em};
+}
+
+// DECISION A141: the display shows capitals only, as the instrument's; the settings page keeps a file's exact name.
+juce::String displayMessageRow(const juce::String& message, int row) {
+    return juce::StringArray::fromLines(message)[row].toUpperCase();
 }
 
 PanelEditor::PanelEditor(TsProcessor& p) : AudioProcessorEditor(p), proc_(p), engine_(p.engine()) {

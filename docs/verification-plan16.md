@@ -16,6 +16,8 @@
 - A whole-branch review (fresh reviewer) found no critical or important issues. Re-graded and fixed: the OFL went
   only into the release folder, not into the VST3 package that is installed on its own; LCD14 was not credited; the
   cursor bar's place inside its row was not checked (and a comment overstated its margin).
+- The app's own messages (no ROMs, no audio device) are shown in capitals, as the hardware shows everything (the
+  user's request: the font's lowercase made "ts10" read like "+s10"). The ROM list keeps a file's exact name.
 
 ## Toolchains
 
@@ -27,12 +29,12 @@
 
 Reference hashes unchanged: boot trace `ba7e34a4cf23d1e0`, render `23b6485893beb761`. The snapshots
 (`TSR_SNAPSHOT_DIR`) show the font on Windows and Linux: `panel.png` (U0-3 SPACEBELLS..., the cursor bars under the
-layered sound's name), `panel-ts12.png`, `panel-noroms.png` ("ROM missing:" and the file name).
+layered sound's name), `panel-ts12.png`, `panel-noroms.png` ("ROM MISSING:" and the file name, in capitals).
 
 New check, seen failing first (link error, `vfdFont` not defined): `vfdFontCheck` (the typeface is "Ensoniq VFD";
 A, W, 0 and _ one cell wide within 1 % for cells of 8.48, 14.125 and 28.25; the cursor bar 101.04, 51.69,
 8.95 x 1.53 for a cell of 14.125 at baseline 100, 50; on the panel's 14.125 x 29 cell the bar ends at y 26.31, inside
-the row).
+the row; the messages in capitals, row by row).
 
 ## Open
 
@@ -41,8 +43,6 @@ the row).
   drawn like other characters (80 cells per repaint, as the old `drawText`).
 - The release scripts were syntax-checked, not run end to end; the next release run should show
   `OFL-EnsoniqVFD.txt` in the folder and in the VST3 package's `Contents/Resources`.
-- The app's own messages (no ROMs, no audio device) have lowercase letters, which the font draws from its LCD14-based
-  set (the hardware shows capitals only): "ts10" reads a little like "+s10".
 
 ## User to run
 
