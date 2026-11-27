@@ -27,10 +27,11 @@ Linux x64 (GCC) and macOS arm64/x64 (Apple clang). The 68000, ESP and DUART core
   `tools/` and `tests/`, JUCE only in `app/`.
 - **The audio path is real-time safe.** Nothing in the engine's render path may allocate, lock or
   block after the boot.
-- **Ensoniq material.** The only Ensoniq files in git are the six ROMs the app needs (OS v3.10
-  `roms/os/ts10_310h.bin` and `ts10_310l.bin`, the four `roms/waves/*.bin`) and `roms/README.txt`,
+- **Ensoniq material.** The only Ensoniq files in git are the eight ROMs the app ships (OS v3.10
+  `roms/os/ts10_310h.bin` and `ts10_310l.bin`, the TS-12 OS v3.10 pair `ts12_310h.bin` and `ts12_310l.bin`
+  (added 2026-11-26, the user's decision), the four `roms/waves/*.bin`) and `roms/README.txt`,
   plus the two panel logos in `app/resources/` (the TS-10 logo and the Ensoniq badge, A122). Other OS versions, `roms/misc/`, `datasheets/` and `docs/reference/mame/` are ignored on purpose.
-  Nothing is pushed to a public remote until the user approves publishing those six ROMs.
+  Nothing is pushed to a public remote until the user approves publishing those eight ROMs.
 - **The panel layout** follows `datasheets/ts10-photo.webp` for arrangement and proportions and the
   TS-10 Musician's Manual page 3 ("Front Panel Controls") for the left section and the labels (the
   user's rule; design section 10).
@@ -72,7 +73,7 @@ cmake --build build-mac-app --target TSReborn_Standalone
 ```
 
 ```powershell
-# Release folder (Plan 6, A126): builds in build-dist and writes "dist\TS Reborn-<version>" with the six ROMs
+# Release folder (Plan 6, A126): builds in build-dist and writes "dist\TS Reborn-<version>" with the eight ROMs
 powershell -ExecutionPolicy Bypass -File tools\dist.ps1 [-RomFolder <folder>] [-JuceSource <JUCE checkout>]
 
 # Linux (in WSL): builds in build-dist-linux and writes "dist/TS Reborn-<version>-linux"

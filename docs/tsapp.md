@@ -37,11 +37,11 @@ cmake --build build-mac-app --target TSReborn_Standalone
 
 **The release folder** (Plan 6, A126). `powershell -ExecutionPolicy Bypass -File tools\dist.ps1` (Linux, in WSL: `tools/dist.sh`) builds the Standalone and the VST3 in Release in `build-dist` (`build-dist-linux`), with the C++ runtime linked in, and writes `dist\TS Reborn-1.0.0` (`dist/TS Reborn-1.0.0-linux`):
 
-- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the six files above, so the Standalone starts on them.
-- `TS Reborn.vst3`, the VST3 package, with the same six files in `Contents\Resources\roms`. Copy the whole package to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`): it finds those ROMs there (A125) without any setup.
+- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the six files above and the TS-12 OS pair (`os/ts12_310h.bin`, `os/ts12_310l.bin`; the app does not load it yet), so the Standalone starts on them.
+- `TS Reborn.vst3`, the VST3 package, with the same eight files in `Contents\Resources\roms`. Copy the whole package to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`): it finds those ROMs there (A125) without any setup.
 - `README.md` with its picture `panel.png`, `LICENSE`, and this guide as `APP-GUIDE.md`.
 
-The scripts check the six ROMs (presence and size) before building anything, and replace an older folder of the same version. `-RomFolder` / `--rom-folder` takes them from another folder; `-JuceSource` / `--juce-source` uses a JUCE checkout instead of downloading it. The Windows folder needs nothing installed to run. The Linux folder has libstdc++ linked in but uses the system's glibc (2.38 or later, since it is built on Ubuntu 24.04: Ubuntu 24.04, Debian 13, Fedora 39 and newer) and its ALSA, fontconfig, freetype, libpng, zlib, bzip2, brotli and expat libraries, which a desktop system has. The settings page names the ROM folder in use; the VST3's own ROMs show as `... (inside the VST3 package)`.
+The scripts check the eight ROMs (presence and size) before building anything, and replace an older folder of the same version. `-RomFolder` / `--rom-folder` takes them from another folder; `-JuceSource` / `--juce-source` uses a JUCE checkout instead of downloading it. The Windows folder needs nothing installed to run. The Linux folder has libstdc++ linked in but uses the system's glibc (2.38 or later, since it is built on Ubuntu 24.04: Ubuntu 24.04, Debian 13, Fedora 39 and newer) and its ALSA, fontconfig, freetype, libpng, zlib, bzip2, brotli and expat libraries, which a desktop system has. The settings page names the ROM folder in use; the VST3's own ROMs show as `... (inside the VST3 package)`.
 
 **JUCE licence.** JUCE is dual-licensed: AGPLv3, or a commercial JUCE licence. A build of this app links JUCE, so giving the app to anyone else is under the AGPLv3's terms unless you hold a commercial JUCE licence. Building and using it yourself needs neither.
 

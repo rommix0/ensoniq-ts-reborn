@@ -16,7 +16,7 @@ The checks only a person can do (sound, the panel, the drives, a DAW) were done 
 
 ## The release folder
 
-`tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0` (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README with its panel picture, the license, the app guide, and the six ROMs, beside the program and inside the VST3 package.
+`tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0` (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README with its panel picture, the license, the app guide, and the eight ROMs, beside the program and inside the VST3 package.
 
 On Windows it needs nothing installed: run the program, or copy `TS Reborn.vst3` to `C:\Program Files\Common Files\VST3`, and it finds its ROMs.
 
@@ -26,12 +26,14 @@ A release folder holds Ensoniq's ROMs (below).
 
 ## The ROMs
 
-The ROMs are Ensoniq's copyrighted firmware and samples. The emulator needs six files, which the release folder includes (see [roms/README.txt](roms/README.txt)):
+The ROMs are Ensoniq's copyrighted firmware and samples. The emulator ships eight files (the TS-12 OS pair is not loaded by the app yet), which the release folder includes (see [roms/README.txt](roms/README.txt)):
 
 | File                                           | Size      | What it is                           |
 | ---------------------------------------------- | --------- | ------------------------------------ |
 | `os/ts10_310h.bin`                             | 256 KB    | OS v3.10, high byte (even addresses) |
 | `os/ts10_310l.bin`                             | 512 KB    | OS v3.10, low byte (odd addresses)   |
+| `os/ts12_310h.bin`                             | 256 KB    | TS-12 OS v3.10, high byte            |
+| `os/ts12_310l.bin`                             | 512 KB    | TS-12 OS v3.10, low byte             |
 | `waves/901401_u41.bin`, `waves/901402_u45.bin` | 2 MB each | Wave ROMs                            |
 | `waves/901301_u43.bin`, `waves/901302_u46.bin` | 1 MB each | Wave ROMs                            |
 

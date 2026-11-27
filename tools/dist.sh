@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Linux counterpart of tools/dist.ps1: builds the TS Reborn Standalone and VST3 (GCC x64, Release, static
 # libstdc++ and libgcc) in build-dist-linux and assembles "dist/TS Reborn-<version>-linux": TS Reborn, the
-# TS Reborn.vst3 package, README.md with panel.png, LICENSE, the app guide, and the six ROM files the app
+# TS Reborn.vst3 package, README.md with panel.png, LICENSE, the app guide, and the eight ROM files the app
 # loads, in roms/ beside the program and again inside the VST3 package (Contents/Resources/roms). DECISION A126.
 # The ROMs are Ensoniq's.
 #
@@ -26,8 +26,9 @@ done
 version=$(grep -oP 'VERSION \K\d+\.\d+\.\d+' app/CMakeLists.txt | head -1)
 [ -n "$version" ] || { echo 'No VERSION in app/CMakeLists.txt' >&2; exit 1; }
 
-# The six files RomFolder.cpp loads, with their sizes: checked before anything is built or written.
+# The eight files (the six RomFolder.cpp loads, plus the TS-12 OS pair), with their sizes: checked before anything is built or written.
 roms=(os/ts10_310h.bin:262144 os/ts10_310l.bin:524288
+      os/ts12_310h.bin:262144 os/ts12_310l.bin:524288
       waves/901401_u41.bin:2097152 waves/901301_u43.bin:1048576
       waves/901402_u45.bin:2097152 waves/901302_u46.bin:1048576)
 for entry in "${roms[@]}"; do
