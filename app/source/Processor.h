@@ -124,6 +124,8 @@ private:
     // A137: to model m (the caller holds stateMu_). start: its start image and the restart; a state sets its own.
     void switchModel(ens::ts::Model m, bool start);
     void park();  // A137: the user's disk and CD out of the engine into parkedDisk_ / parkedCd_ (audio suspended)
+    void keepRestoreMedia();                 // A129, A137: a dropped restore's media into the record
+    void stopMachine(const juce::String& why);  // A137: the engine released, why in romError_
     std::vector<uint8_t> ram();  // the RAM a state or a copy saves (A117); empty when there is none
     std::vector<uint8_t> select(const ens::app::Snapshot& snap) const;  // the select a state saves
     int soundNow() const;  // `sound` 0-127; NaN reads as 0

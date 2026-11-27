@@ -546,6 +546,23 @@ void modelOldStateIsTs10(const juce::File& dir, const juce::MemoryBlock& a) {
     CHECK(p.model() == Model::Ts10 && p.engine() != nullptr && p.engine()->model() == Model::Ts10);
     const auto s = stateOf(p);
     CHECK(ramOf(s, "ts10") == ramOf(a) && ramCount(s) == 1 && AppSettings().model() == Model::Ts12);
+
+    // An unknown model: a <RAM model="ts99"> is skipped (not the TS-10's), and a state naming one leaves the machine.
+    const std::vector<uint8_t> junk(static_cast<size_t>(kMemoryBytes), 0x55);
+    auto* r = new juce::XmlElement("RAM");
+    r->setAttribute("model", "ts99");
+    r->addTextElement(juce::Base64::toBase64(junk.data(), junk.size()));
+    x->insertChildElement(r, 0);
+    juce::MemoryBlock withJunk;
+    juce::AudioProcessor::copyXmlToBinary(*x, withJunk);
+    p.setStateInformation(withJunk.getData(), static_cast<int>(withJunk.getSize()));
+    CHECK(ramOf(stateOf(p), "ts10") == ramOf(a) && ramCount(stateOf(p)) == 1);
+    x->setAttribute("model", "ts99");
+    juce::MemoryBlock unknown;
+    juce::AudioProcessor::copyXmlToBinary(*x, unknown);
+    const auto* engine = p.engine();
+    p.setStateInformation(unknown.getData(), static_cast<int>(unknown.getSize()));
+    CHECK(p.engine() == engine && p.model() == Model::Ts10 && ramOf(stateOf(p), "ts10") == ramOf(a));
 }
 
 // model_state_waits_for_roms: a TS-12 state into an instance whose folder has the six TS-10-era files (dummies):
@@ -574,16 +591,40 @@ void modelStateWaitsForRoms(const juce::File& dir, const juce::MemoryBlock& s12)
     CHECK(p.engine()->snapshot().booted);
 }
 
+// The six real TS-10-era ROM files copied into dir/six (temp), a folder that lacks the TS-12 OS.
+juce::File sixRealRoms(const juce::File& dir) {
+    const juce::File real(TSR_ROM_DIR);
+    const auto six = dir.getChildFile("six");
+    for (const auto& s : checkRomFolder(real, Model::Ts10, nullptr)) {
+        six.getChildFile(s.file).getParentDirectory().createDirectory();
+        CHECK(real.getChildFile(s.file).copyFileTo(six.getChildFile(s.file)));
+    }
+    return six;
+}
+
+// model_state_boots_without_own_roms: a TS-12 instance with no machine (the folder has the six TS-10-era files) given
+// a TS-10 state boots the TS-10 from it, and the stale ROM error goes.
+void modelStateBootsWithoutOwnRoms(const juce::File& dir, const juce::MemoryBlock& a) {
+    if (a.isEmpty() || !realRoms(dir)) return;
+    AppSettings().setRomFolder(sixRealRoms(dir));
+    AppSettings().setModel(Model::Ts12);
+    TsProcessor p;
+    CHECK(p.model() == Model::Ts12 && p.engine() == nullptr && p.romError().contains("ts12_310h.bin"));
+    p.prepareToPlay(48000, 480);
+    p.setStateInformation(a.getData(), static_cast<int>(a.getSize()));
+    CHECK(p.model() == Model::Ts10 && p.engine() != nullptr && p.romError().isEmpty());
+    if (!p.engine()) return;
+    CHECK(p.engine()->model() == Model::Ts10);
+    run(p, kRestored);
+    CHECK(rowStarts(p, 0, "U0-5"));
+}
+
 // model_switch_keeps_disk: the disk in the drive goes into the other model's machine; while that model's ROMs are
 // missing it waits, and goes in once they are found.
 void modelSwitchKeepsDisk(const juce::File& dir) {
     if (!realRoms(dir)) return;
     const juce::File real(TSR_ROM_DIR);
-    const auto six = dir.getChildFile("six");  // the six TS-10-era files, copied
-    for (const auto& s : checkRomFolder(real, Model::Ts10, nullptr)) {
-        six.getChildFile(s.file).getParentDirectory().createDirectory();
-        CHECK(real.getChildFile(s.file).copyFileTo(six.getChildFile(s.file)));
-    }
+    const auto six = sixRealRoms(dir);
     TsProcessor p;
     if (!p.engine()) return;
     p.prepareToPlay(48000, 480);
@@ -2073,6 +2114,26 @@ void mediaStateDuringRestore(const juce::File& dir) {
     CHECK(runRestore(p) > 0);
 }
 
+// model_switch_keeps_media (A129, A137): a switch while a project's restore is due, or running, keeps the project's
+// media in the next save, though the restore itself is dropped. Synthetic <Media>, as mediaStateDuringRestore.
+void modelSwitchKeepsMedia(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    auto media = std::make_unique<juce::XmlElement>("Media");
+    addRun(*addMedium(*media, "floppy-dd", "SYNTH", 1600), 0, 3, 512);
+    addRun(*addMedium(*media, "cd", "SYN-CD", 100), 0, 2, 2048);
+    const auto s = syntheticState(std::move(media));
+    for (const int ms : {0, 1000}) {  // due (at once), then running
+        TsProcessor p;
+        if (!p.engine()) return;
+        restoreFrom(p, s);
+        if (ms > 0) runCd(p, ms);
+        p.setModel(Model::Ts12);
+        const auto st = xmlOf(stateOf(p));
+        const auto got = mediaOf(st.get());
+        CHECK(got.media.size() == 2 && got.blocks == 5);
+    }
+}
+
 // project_state_drops_bad_media (Review Focus 5): bad base64, a block past `size` and kind "zip" each drop that medium;
 // the good one, the RAM and the parameters restore.
 void mediaStateBadBlobs(const juce::File& dir) {
@@ -2383,6 +2444,7 @@ int main() {
     modelStateSwitchesInstance(dir.getChildFile("model-state-switches"), s12);
     modelOldStateIsTs10(dir.getChildFile("model-old-state"), a);
     modelStateWaitsForRoms(dir.getChildFile("model-waits"), s12);
+    modelStateBootsWithoutOwnRoms(dir.getChildFile("model-boots-other"), a);
     modelSwitchKeepsDisk(dir.getChildFile("model-disk"));
     modelFileModeMemoryPerModel(dir.getChildFile("model-file-mode"));
     projectLeavesSharedFile(dir.getChildFile("shared"));
@@ -2412,6 +2474,7 @@ int main() {
     dropGoesToCd(dir.getChildFile("drop"));
     mediaStateDuringRestore(dir.getChildFile("media-during"));
     mediaStateBadBlobs(dir.getChildFile("media-bad"));
+    modelSwitchKeepsMedia(dir.getChildFile("model-media"));
     standaloneHasNoMedia(dir.getChildFile("media-standalone"));
     const auto media = mediaStateRoundTrip(dir.getChildFile("media-round-trip"));
     mediaStateKeepsUnrestored(dir.getChildFile("media-keep"), media);
