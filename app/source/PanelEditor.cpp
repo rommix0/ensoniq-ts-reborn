@@ -4,6 +4,7 @@
 #include <cstring>
 #include <vector>
 
+#include "AppSettings.h"
 #include "Processor.h"
 #include "SettingsPage.h"
 #include "TsArt.h"
@@ -86,6 +87,26 @@ void drawGear(juce::Graphics& g, juce::Rectangle<float> r) {
     g.fillEllipse(c.x - rad * 0.42f, c.y - rad * 0.42f, rad * 0.84f, rad * 0.84f);
 }
 
+// DECISION A139: the keyboard toggle: a small keyboard with a chevron above it, pointing down while the strip shows
+// (a click hides it) and up while it is out.
+void drawKeyboardToggle(juce::Graphics& g, juce::Rectangle<float> r, bool shown) {
+    const auto k = r.reduced(r.getWidth() * 0.2f, 0).withTrimmedTop(r.getHeight() * 0.5f).withTrimmedBottom(
+        r.getHeight() * 0.18f);
+    g.setColour(kText);
+    g.drawRect(k, 1.0f);
+    for (int i = 1; i < 4; ++i) {
+        const float x = k.getX() + k.getWidth() * static_cast<float>(i) / 4;
+        g.drawLine(x, k.getY(), x, k.getBottom(), 1.0f);
+    }
+    const float cx = r.getCentreX(), w = r.getWidth() * 0.2f, top = r.getY() + r.getHeight() * 0.18f,
+                h = r.getHeight() * 0.2f;
+    juce::Path chevron;
+    chevron.startNewSubPath(cx - w, shown ? top : top + h);
+    chevron.lineTo(cx, shown ? top + h : top);
+    chevron.lineTo(cx + w, shown ? top : top + h);
+    g.strokePath(chevron, juce::PathStrokeType(2.0f));
+}
+
 juce::Font labelFont(float height, bool bold) {
     return juce::Font(juce::FontOptions("Segoe UI", height, bold ? juce::Font::bold : juce::Font::plain));
 }
@@ -131,7 +152,8 @@ protected:
 class ButtonPart : public Part {
 public:
     ButtonPart(PanelEditor& ed, const Control& c)
-        : Part(ed, c), gear_(c.id == ens::app::kSettingsId),
+        : Part(ed, c), gear_(c.id == ens::app::kSettingsId), keyboard_(c.id == ens::app::kKeyboardId),
+          local_(c.kind == ControlKind::Button && c.id < 0),
           kind_(c.kind == ControlKind::Patch ? ens::app::Event::Kind::PatchSelect : ens::app::Event::Kind::Button) {
         setWantsKeyboardFocus(true);
         setBounds(rect(c.r));
@@ -140,7 +162,7 @@ public:
     // DECISION A114: a right-click or Shift-click latches the button down until it is clicked again; a
     // plain press is sent on mouse-down and its release on mouse-up, wherever the mouse is (as KS-32 A9).
     void mouseDown(const juce::MouseEvent& e) override {
-        if (gear_) return;
+        if (local_) return;
         if (latched_) {
             latched_ = false;
             set(false);
@@ -153,8 +175,8 @@ public:
         }
     }
     void mouseUp(const juce::MouseEvent& e) override {
-        if (gear_) {
-            if (getLocalBounds().contains(e.getPosition())) ed_.openSettings();
+        if (local_) {
+            if (getLocalBounds().contains(e.getPosition())) act();
         } else if (byMouse_) {
             byMouse_ = false;
             if (!latched_) set(false);
@@ -163,8 +185,8 @@ public:
     // Space presses the focused button while it is held.
     bool keyPressed(const juce::KeyPress& k) override {
         if (k != juce::KeyPress::spaceKey) return false;
-        if (gear_) {
-            ed_.openSettings();
+        if (local_) {
+            act();
         } else if (!want_) {
             byKey_ = true;
             set(true);
@@ -191,7 +213,7 @@ public:
     // Sends the wanted state until the engine takes it: a full queue (A102) delays a press or a
     // release (the timer retries), never loses it.
     void sync() {
-        if (gear_ || want_ == down_ || !ed_.post({kind_, static_cast<uint8_t>(c_.id), want_, 0})) return;
+        if (local_ || want_ == down_ || !ed_.post({kind_, static_cast<uint8_t>(c_.id), want_, 0})) return;
         down_ = want_;
         repaint();
     }
@@ -206,6 +228,7 @@ public:
         const auto r = getLocalBounds().toFloat();
         drawButton(g, r, down_);
         if (gear_) drawGear(g, r);
+        if (keyboard_) drawKeyboardToggle(g, r, ed_.keyboardShown());
         if (hasKeyboardFocus(false)) {
             g.setColour(kFocus);
             g.drawRoundedRectangle(r.reduced(1.0f), 3.0f, 2.0f);
@@ -215,8 +238,8 @@ public:
 private:
     juce::AccessibilityActions actions() override {
         return juce::AccessibilityActions().addAction(juce::AccessibilityActionType::press, [this] {
-            if (gear_) {
-                ed_.openSettings();
+            if (local_) {
+                act();
             } else if (!want_) {
                 set(true);
                 set(false);
@@ -227,8 +250,24 @@ private:
         want_ = down;
         sync();
     }
+    // The gear and the keyboard toggle (A139) act in the editor; they are never posted to the engine.
+    void act() {
+        if (gear_) ed_.openSettings();
+        if (keyboard_) {
+            ed_.toggleKeyboard();
+            repaint();  // the chevron (no resize repaints it on a reversal mid-slide; review fix)
+        }
+    }
 
-    const bool gear_;
+public:
+    // DECISION A139: the toggle's tooltip follows the state it would change to.
+    juce::String getTooltip() override {
+        return keyboard_ ? juce::String(ed_.keyboardShown() ? "Hide keyboard" : "Show keyboard")
+                         : SettableTooltipClient::getTooltip();
+    }
+
+private:
+    const bool gear_, keyboard_, local_;
     const ens::app::Event::Kind kind_;
     // want_: what the mouse and keys ask for; down_: what the engine has been sent.
     bool want_ = false, down_ = false, latched_ = false, byMouse_ = false, byKey_ = false;
@@ -558,9 +597,38 @@ public:
                 }
                 case ControlKind::Label: painted_.push_back(&c); continue;
             }
-            addAndMakeVisible(*p);
+            if (c.r.y >= ens::app::kTopH) {  // A139: the strip's parts live in its layer, in its coordinates
+                p->setTopLeftPosition(p->getX(), p->getY() - ens::app::kTopH);
+                layer_.addAndMakeVisible(*p);
+            } else {
+                addAndMakeVisible(*p);
+            }
             parts_.push_back(std::move(p));
         }
+        // DECISION A139: the strip is a layer inside a window (clip_) that starts at kTopH: moving the layer up slides
+        // the strip under the top panel, which clip_'s top edge cuts it at.
+        clip_.setBounds(0, ens::app::kTopH, ens::app::kDesignW, ens::app::kDesignH - ens::app::kTopH);
+        layer_.setBounds(clip_.getLocalBounds());
+        clip_.setInterceptsMouseClicks(false, true);
+        clip_.addAndMakeVisible(layer_);
+        addAndMakeVisible(clip_);
+    }
+
+    // DECISION A139: the strip (everything at y >= kTopH) moved up by dy design units, under the top panel: 0 in place,
+    // kDesignH - kTopH all the way under, where it is hidden. Only a strip in place takes the mouse.
+    void setStripOffset(int dy) {
+        layer_.setTopLeftPosition(0, -dy);
+        clip_.setVisible(dy < ens::app::kDesignH - ens::app::kTopH);
+        clip_.setInterceptsMouseClicks(false, dy == 0);
+    }
+    // Before the strip goes: its key, its patch buttons (latched too) and its wheels released; the pitch wheel springs
+    // back, the mod wheel keeps its value (AnalogPart::release).
+    void releaseStrip() {
+        keyUp();
+        for (auto* b : buttons_)
+            if (b->getParentComponent() == &layer_) b->release(true);
+        for (auto* a : analogs_)
+            if (a->getParentComponent() == &layer_) a->release();
     }
 
     void release(bool latchedToo) {
@@ -596,7 +664,7 @@ public:
     }
     void keyMove(const juce::MouseEvent& e) {
         if (!keyDrag_) return;
-        const auto p = e.getEventRelativeTo(this).position;
+        const auto p = e.getEventRelativeTo(&layer_).position;  // the keys' parent (A139)
         KeyPart* k = nullptr;
         for (auto it = keys_.rbegin(); it != keys_.rend() && k == nullptr; ++it)  // blacks first: on top
             if ((*it)->getBounds().toFloat().contains(p)) k = *it;
@@ -616,7 +684,24 @@ public:
     }
 
     void paint(juce::Graphics& g) override {
-        // The body as the photo: the panel, the brushed strip's edge, the key bed and the wheel box.
+        g.fillAll(kPanel);  // the top panel; the strip's layer paints the rest (A139)
+        for (const Control* c : painted_)
+            if (c->r.y < ens::app::kTopH) paintLabel(g, c);
+
+        // The outline arrows printed above Up and below Down (the photo).
+        g.setColour(kText);
+        for (const Control* c : arrows_) {
+            const bool up = c->id == static_cast<int>(ens::ts::Button::Up);
+            const float x = c->r.x + c->r.w / 2.0f, y = up ? c->r.y - 9.0f : static_cast<float>(c->r.y + c->r.h + 9);
+            const float tip = up ? -4.0f : 4.0f;
+            juce::Path t;
+            t.addTriangle(x - 7, y - tip, x + 7, y - tip, x, y + tip);
+            g.strokePath(t, juce::PathStrokeType(1.5f));
+        }
+    }
+    // The strip's body as the photo, in board coordinates: the panel down to the brushed strip's edge, the key bed, the
+    // wheel box and the strip's labels (A139: drawn by the layer, which moves with it).
+    void paintStrip(juce::Graphics& g) {
         g.fillAll(kPanel);
         g.setColour(kEdge);
         g.fillRect(60, 395, 2470, 2);
@@ -625,8 +710,13 @@ public:
         box(g, {62.0f, 552.0f, 266.0f, 352.0f}, kPanel, kEdge, 6.0f);
         g.setColour(kGroove);
         g.fillRect(330, 548, 2150, 362);
+        for (const Control* c : painted_)
+            if (c->r.y >= ens::app::kTopH) paintLabel(g, c);
+    }
 
-        for (const Control* c : painted_) {
+private:
+    void paintLabel(juce::Graphics& g, const Control* c) {
+        {
             const auto r = rect(c->r);
             if (c->ink == Ink::Decal) {
                 // DECISION A122: the TS-10 logo and the Ensoniq badge are drawn from their SVGs, kept to
@@ -637,7 +727,7 @@ public:
                                                                               : nullptr;
                 if (art != nullptr) {
                     art->drawWithin(g, r.toFloat(), juce::RectanglePlacement::centred, 1.0f);
-                    continue;
+                    return;
                 }
                 auto font = labelFont(c->r.h * 1.3f, false).withExtraKerningFactor(0.08f);
                 const float w = juce::GlyphArrangement::getStringWidth(font, c->label);
@@ -645,7 +735,7 @@ public:
                 g.setColour(kDecal);
                 g.setFont(font);
                 g.drawText(c->label, r, juce::Justification::centred, false);
-                continue;
+                return;
             }
             // A box 20 or more high holds two lines (the photo's button labels), even when the text has
             // one, which is centred. Each line is squeezed, never wrapped.
@@ -673,20 +763,18 @@ public:
                            juce::Justification::centred, false);
             }
         }
-
-        // The outline arrows printed above Up and below Down (the photo).
-        g.setColour(kText);
-        for (const Control* c : arrows_) {
-            const bool up = c->id == static_cast<int>(ens::ts::Button::Up);
-            const float x = c->r.x + c->r.w / 2.0f, y = up ? c->r.y - 9.0f : static_cast<float>(c->r.y + c->r.h + 9);
-            const float tip = up ? -4.0f : 4.0f;
-            juce::Path t;
-            t.addTriangle(x - 7, y - tip, x + 7, y - tip, x, y + tip);
-            g.strokePath(t, juce::PathStrokeType(1.5f));
-        }
     }
 
-private:
+    // A139: the strip's layer: paints the strip's body in its own coordinates (kTopH below the board's).
+    struct Layer : juce::Component {
+        explicit Layer(Board& b) : board(b) {}
+        void paint(juce::Graphics& g) override {
+            g.setOrigin(0, -ens::app::kTopH);
+            board.paintStrip(g);
+        }
+        Board& board;
+    };
+
     std::vector<std::unique_ptr<Part>> parts_;
     std::vector<ButtonPart*> buttons_;
     std::vector<LedPart*> leds_;
@@ -697,7 +785,9 @@ private:
     DrivePart* drive_ = nullptr;
     std::unique_ptr<juce::Drawable> ts10_ = art(TsArt::ts10_logo_svg, TsArt::ts10_logo_svgSize);
     std::unique_ptr<juce::Drawable> ensoniq_ = art(TsArt::ensoniq_logo_svg, TsArt::ensoniq_logo_svgSize, kBadge);
-    std::vector<const Control*> painted_;  // labels, drawn by the board
+    std::vector<const Control*> painted_;  // labels: the top's drawn by the board, the strip's by its layer
+    juce::Component clip_;  // A139: the strip's window, kTopH down; layer_ moves up inside it
+    Layer layer_{*this};
     std::vector<const Control*> arrows_;   // Up and Down
     juce::Component* display_ = nullptr;
 };
@@ -739,9 +829,10 @@ private:
 
 Board& board(juce::Component& c) { return static_cast<Board&>(c); }
 
-void KeyPart::mouseDown(const juce::MouseEvent& e) { board(*getParentComponent()).keyDown(e); }
-void KeyPart::mouseDrag(const juce::MouseEvent& e) { board(*getParentComponent()).keyMove(e); }
-void KeyPart::mouseUp(const juce::MouseEvent&) { board(*getParentComponent()).keyUp(); }
+// A139: a key's parent is the strip's layer; its board is further up.
+void KeyPart::mouseDown(const juce::MouseEvent& e) { findParentComponentOfClass<Board>()->keyDown(e); }
+void KeyPart::mouseDrag(const juce::MouseEvent& e) { findParentComponentOfClass<Board>()->keyMove(e); }
+void KeyPart::mouseUp(const juce::MouseEvent&) { findParentComponentOfClass<Board>()->keyUp(); }
 
 }  // namespace
 
@@ -751,19 +842,80 @@ PanelEditor::PanelEditor(TsProcessor& p) : AudioProcessorEditor(p), proc_(p), en
     board_ = std::make_unique<Board>(*this, built_);
     addAndMakeVisible(*board_);
     // DECISION A112: 1546 x 552 by default, resizable from 1030 x 368 up, aspect fixed at kDesignW:kDesignH.
+    // DECISION A139: 1546 x 258 with the keyboard strip out (aspect kDesignW:kTopH), as the setting says.
     setResizable(true, true);
-    setResizeLimits(1030, 368, 2 * ens::app::kDesignW, 2 * ens::app::kDesignH);
-    getConstrainer()->setFixedAspectRatio(static_cast<double>(ens::app::kDesignW) / ens::app::kDesignH);
+    shown_ = full_ = AppSettings().keyboardShown();
+    offset_ = from_ = to_ = shown_ ? 0 : ens::app::kDesignH - ens::app::kTopH;
+    board(*board_).setStripOffset(static_cast<int>(offset_));
     setSize(1546, 552);
+    fitSize(full_);
     startTimerHz(30);
 }
 
 PanelEditor::~PanelEditor() { board(*board_).release(true); }
 
+// DECISION A139: the panel shown in full (kDesignH) or the top only (kTopH) fits the window, as A112's letterbox did:
+// a window wider than that shape (a host ignoring the aspect) is fitted by its height, not cut off (review fix).
 void PanelEditor::resized() {
-    const float s = std::min(getWidth() / static_cast<float>(ens::app::kDesignW),
-                             getHeight() / static_cast<float>(ens::app::kDesignH));
-    board_->setTransform(juce::AffineTransform::scale(s));
+    const auto h = static_cast<float>(ens::app::kDesignH - offset_);  // the panel down to the strip's bottom
+    board_->setTransform(juce::AffineTransform::scale(
+        std::min(getWidth() / static_cast<float>(ens::app::kDesignW), getHeight() / h)));
+}
+
+// DECISION A139 (approach A): hiding releases the strip, slides it under the top panel, then shrinks the window;
+// showing grows the window, then slides it down. The Standalone (File mode: its own window, no host) instead resizes
+// with the slide, the window's bottom following the strip (the user's choice); a plugin keeps one host resize each
+// way. A click mid-slide reverses from where the strip is. The state is stored at once.
+void PanelEditor::toggleKeyboard() {
+    shown_ = !shown_;
+    AppSettings().setKeyboardShown(shown_);
+    if (!shown_) board(*board_).releaseStrip();
+    if (follows()) {
+        // Any height from the top panel's to the whole panel's at this width, while the slide sets it.
+        full_ = true;
+        setLimits(0, ens::app::kTopH, ens::app::kDesignH);
+    } else if (shown_ && !full_) {
+        fitSize(true);
+    }
+    from_ = offset_;
+    to_ = shown_ ? 0 : ens::app::kDesignH - ens::app::kTopH;
+    startMs_ = juce::Time::getMillisecondCounterHiRes();
+    slide_.startTimerHz(60);
+}
+
+// About 250 ms for the whole way, ease-out; a shorter way takes its share.
+void PanelEditor::stepSlide() {
+    constexpr double kSlideMs = 250, kOut = ens::app::kDesignH - ens::app::kTopH;
+    const double ms = std::max(1.0, kSlideMs * std::abs(to_ - from_) / kOut);
+    const double t = std::min(1.0, (juce::Time::getMillisecondCounterHiRes() - startMs_) / ms);
+    offset_ = from_ + (to_ - from_) * (1 - (1 - t) * (1 - t));
+    board(*board_).setStripOffset(static_cast<int>(std::lround(offset_)));
+    if (follows())  // the window's bottom at the strip's
+        setSize(getWidth(), static_cast<int>(std::lround(getWidth() * (ens::app::kDesignH - offset_) / ens::app::kDesignW)));
+    if (t < 1) return;
+    slide_.stopTimer();
+    if (follows() || !shown_) fitSize(shown_);
+}
+
+bool PanelEditor::follows() const { return proc_.memoryMode() == MemoryMode::File; }
+
+// The limits and aspect for the full panel or the top only; the width stays, the height follows. The constrainer is
+// set before the size and set directly: the Standalone's window, and Windows for every native resize
+// (juce_Windowing_windows.cpp, handlePositionChanging), check the new size against the editor's constrainer, so limits
+// set after it kept the window at the old minimum (2424 x 367 around a 1546 x 234 panel: the user's check); and
+// setResizeLimits would constrain the old bounds first, a second host resize (review fix).
+void PanelEditor::fitSize(bool full) {
+    full_ = full;
+    const int h = full ? ens::app::kDesignH : ens::app::kTopH, w = getWidth();
+    setLimits(static_cast<double>(ens::app::kDesignW) / h, h, h);
+    setSize(w, static_cast<int>(std::lround(static_cast<double>(w) * h / ens::app::kDesignW)));
+}
+
+// Widths 1030 to 2 x kDesignW, heights for design heights lowH to highH at those widths, and the aspect (0: free).
+void PanelEditor::setLimits(double aspect, int lowH, int highH) {
+    auto* c = getConstrainer();
+    c->setSizeLimits(1030, 1030 * lowH / ens::app::kDesignW, 2 * ens::app::kDesignW, 2 * highH);
+    c->setFixedAspectRatio(aspect);
 }
 
 juce::RangedAudioParameter* PanelEditor::param(const char* id) { return proc_.params().getParameter(id); }
@@ -835,6 +987,7 @@ void PanelEditor::timerCallback() {
     if (proc_.model() != built_) {
         built_ = proc_.model();
         board_ = std::make_unique<Board>(*this, built_);
+        board(*board_).setStripOffset(static_cast<int>(std::lround(offset_)));  // A139: the strip where it was
         addAndMakeVisible(*board_);
         resized();
     }

@@ -193,3 +193,18 @@ TEST(analog_map_data_entry_never_zero) {
     CHECK(analogRaw(Analog::DataEntry, 1.0f) == 0x3FF);
     CHECK(analogRaw(Analog::Volume, 0.0f) == 0);
 }
+
+// DECISION A139: the strip (keys, wheels, patch buttons and their labels) lies below kTopH, everything else above;
+// one keyboard toggle per table.
+TEST(panel_layout_strip_below_top) {
+    for (auto m : {ens::ts::Model::Ts10, ens::ts::Model::Ts12}) {
+        int toggles = 0;
+        for (const Control& c : panelLayout(m)) {
+            const bool strip = c.kind == ControlKind::Key || c.kind == ControlKind::Wheel ||
+                               c.kind == ControlKind::Patch || (c.kind == ControlKind::Label && c.r.y >= kTopH);
+            CHECK(strip ? c.r.y >= kTopH : c.r.y + c.r.h <= kTopH);
+            toggles += c.kind == ControlKind::Button && c.id == kKeyboardId;
+        }
+        CHECK_EQ(toggles, 1);
+    }
+}

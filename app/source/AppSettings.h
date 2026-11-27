@@ -20,7 +20,11 @@ public:
     // Per model (A116): keys memoryFile / memoryFile12; default ts-memory.bin / ts12-memory.bin in folder().
     juce::File memoryFile(ens::ts::Model m) const;
     void setMemoryFile(ens::ts::Model m, const juce::File& file);
+    // The keyboard strip (A139): key "keyboard", "shown" or "hidden"; default shown.
+    bool keyboardShown() const;
+    void setKeyboardShown(bool shown);
 
 private:
+    void set(const juce::String& key, const juce::String& value);  // reload, then the change (A139)
     juce::PropertiesFile props_;
 };

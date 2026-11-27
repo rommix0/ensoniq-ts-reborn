@@ -13,6 +13,14 @@ juce::PropertiesFile::Options options() {
 
 AppSettings::AppSettings() : props_(folder().getChildFile("settings.xml"), options()) {}
 
+// DECISION A139: the file is read again before each change, so an instance made before another's change (a
+// processor's, read at its start) writes only its own key and never puts back an older value of another (the A137
+// limit, which a keyboard toggle in the editor would hit at every model or folder change).
+void AppSettings::set(const juce::String& key, const juce::String& value) {
+    props_.reload();
+    props_.setValue(key, value);
+}
+
 juce::File AppSettings::folder() {
     const auto env = juce::SystemStats::getEnvironmentVariable("TSR_SETTINGS_DIR", {});
     return env.isNotEmpty() ? juce::File(env)
@@ -25,14 +33,19 @@ juce::File AppSettings::romFolder() const {
     return juce::File::isAbsolutePath(path) ? juce::File(path) : juce::File();
 }
 
-void AppSettings::setRomFolder(const juce::File& dir) { props_.setValue("romFolder", dir.getFullPathName()); }
+void AppSettings::setRomFolder(const juce::File& dir) { set("romFolder", dir.getFullPathName()); }
 
 // DECISION A137: the model is stored as "ts10" / "ts12"; anything else is the TS-10.
 ens::ts::Model AppSettings::model() const {
     return props_.getValue("model") == "ts12" ? ens::ts::Model::Ts12 : ens::ts::Model::Ts10;
 }
 
-void AppSettings::setModel(ens::ts::Model m) { props_.setValue("model", m == ens::ts::Model::Ts12 ? "ts12" : "ts10"); }
+void AppSettings::setModel(ens::ts::Model m) { set("model", m == ens::ts::Model::Ts12 ? "ts12" : "ts10"); }
+
+// DECISION A139: the keyboard strip's last state, shared by the Standalone and every plugin; anything but "hidden" shows.
+bool AppSettings::keyboardShown() const { return props_.getValue("keyboard") != "hidden"; }
+
+void AppSettings::setKeyboardShown(bool shown) { set("keyboard", shown ? "shown" : "hidden"); }
 
 // DECISION A116: one memory file per model; the TS-10's key and default name are the old ones.
 juce::File AppSettings::memoryFile(ens::ts::Model m) const {
@@ -43,5 +56,5 @@ juce::File AppSettings::memoryFile(ens::ts::Model m) const {
 }
 
 void AppSettings::setMemoryFile(ens::ts::Model m, const juce::File& file) {
-    props_.setValue(m == ens::ts::Model::Ts12 ? "memoryFile12" : "memoryFile", file.getFullPathName());
+    set(m == ens::ts::Model::Ts12 ? "memoryFile12" : "memoryFile", file.getFullPathName());
 }
