@@ -11,6 +11,9 @@
   curves elsewhere, the S as straight edges joined by smooth bends, and outline rings at an even gap and width. The
   TS-12 logo shares the T, S, triangle and 1 and has a 2 redrawn to the TS-12 manual cover's. The user approved the
   pictures on 2026-11-27, after three rounds (the cover's coarse 2; the trace's bumps; an angled S).
+- A whole-branch review (fresh reviewer) found no critical issues and one important one, fixed: the logos were
+  fitted by their ink, so both filled the rect's width and the TS-12 logo was drawn about 4 % larger than the TS-10's;
+  they are now fitted by their viewBox, one scale for both.
 
 ## Toolchains
 
@@ -26,13 +29,17 @@ Reference hashes unchanged: boot trace `ba7e34a4cf23d1e0`, render `23b6485893beb
 
 New and changed checks, the new ones seen failing first: `panel_layout_logo_follows_model` (core: no TS-12 logo
 before); `panel_layout_decals_are_clear` (now both models); `panel_layout_ts12_keys` (the logo is the one label that
-differs between the tables); `editorTs12HasKeys` (app: the TS-12 logo drew as text with no triangle before; now 406
-triangle pixels on Windows, 402 on Linux; after a switch to the TS-10 on the open editor 1448 of the last digit's
-1472 letter pixels differ, and back to the TS-12 none differ).
+differs between the tables); `editorTs12HasKeys` (app: the TS-12 logo drew as text with no triangle before; now 343
+triangle pixels; after a switch to the TS-10 on the open editor 1216 of the last digit's 1404 letter pixels differ,
+and back to the TS-12 none differ; the triangle is 23 x 28 px at y 111 on both models, 25 x 30 against 25 x 28
+before the review fix).
 
-## Open
+## Open (deferred minors from the review)
 
-- Nothing known.
+- The A122 comment above the decals in `src/app/panel_layout.cpp` still says "the TS-10 logo"; the decal is the
+  model's logo now (the A140 comment under it says so).
+- The two waits for the board's rebuild in `editorTs12HasKeys` do not check the key count was reached; a rebuild that
+  never came would fail as a logo mismatch rather than by name.
 
 ## User to run
 

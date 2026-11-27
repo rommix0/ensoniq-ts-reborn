@@ -726,6 +726,15 @@ private:
                                       : std::strcmp(c->label, "TS-12") == 0   ? ts12_.get()
                                       : std::strcmp(c->label, "ensoniq") == 0 ? ensoniq_.get()
                                                                               : nullptr;
+                // DECISION A140: a logo is fitted by its viewBox (the SVG's content area), not its ink, so the
+                // letters the two logos share are drawn at one scale on both models; the badge by its ink, as
+                // its rect was measured.
+                auto* svg = art == ensoniq_.get() ? nullptr : dynamic_cast<juce::DrawableComposite*>(art);
+                if (svg != nullptr) {
+                    svg->draw(g, 1.0f, juce::RectanglePlacement(juce::RectanglePlacement::centred)
+                                            .getTransformToFit(svg->getContentArea(), r.toFloat()));
+                    return;
+                }
                 if (art != nullptr) {
                     art->drawWithin(g, r.toFloat(), juce::RectanglePlacement::centred, 1.0f);
                     return;

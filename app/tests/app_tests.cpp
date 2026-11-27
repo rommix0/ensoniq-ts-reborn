@@ -1853,6 +1853,7 @@ KeyCount keysOf(juce::Component& ed, Model m) {
 struct LogoPixels {
     int triangle = 0, lastDigit = 0;
     std::vector<bool> digit;
+    juce::Rectangle<int> triangleBox;  // the triangle's pixels' bounds: the same size on both models (one scale)
 };
 LogoPixels logoPixels(const juce::Image& img, Model m) {
     ens::app::Rect r{};
@@ -1863,7 +1864,11 @@ LogoPixels logoPixels(const juce::Image& img, Model m) {
     for (int y = static_cast<int>(r.y * kEdScale); y < static_cast<int>((r.y + r.h) * kEdScale); ++y)
         for (int x = x0; x < x1; ++x) {
             const auto c = img.getPixelAt(x, y);
-            n.triangle += c.getBlue() > c.getGreen() + 15;
+            if (c.getBlue() > c.getGreen() + 15) {
+                ++n.triangle;
+                const juce::Rectangle<int> px(x, y, 1, 1);
+                n.triangleBox = n.triangleBox.isEmpty() ? px : n.triangleBox.getUnion(px);
+            }
             if (x < x1 - (x1 - x0) / 4) continue;
             n.digit.push_back(c.getGreen() > c.getRed() + 20);
             n.lastDigit += n.digit.back();
@@ -1907,6 +1912,13 @@ void editorTs12HasKeys(const juce::File& dir) {
     CHECK(ts12.triangle > 50 && ts10.triangle > 50 && ts10.lastDigit > 100);
     CHECK(shapeDifference(ts12, ts10) * 4 > ts10.lastDigit);
     CHECK(shapeDifference(ts12, back) == 0);
+    // Both logos are fitted by their viewBox (437 units high) to the rect's height, so the letters they share are
+    // the same size and height on both models; only the narrower TS-12 logo sits further right (review fix).
+    const auto &a = ts12.triangleBox, &b = ts10.triangleBox;
+    std::printf("  triangle: TS-12 %d,%d %dx%d, TS-10 %d,%d %dx%d\n", a.getX(), a.getY(), a.getWidth(), a.getHeight(),
+                b.getX(), b.getY(), b.getWidth(), b.getHeight());
+    CHECK(std::abs(a.getWidth() - b.getWidth()) <= 1 && std::abs(a.getHeight() - b.getHeight()) <= 1 &&
+          std::abs(a.getY() - b.getY()) <= 1);
 }
 
 // One timer tick, as the editor's 30 Hz timer would give it (no message loop runs here).
