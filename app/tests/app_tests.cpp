@@ -25,6 +25,7 @@
 #include "../source/PanelEditor.h"
 #include "../source/Processor.h"
 #include "../source/RomFolder.h"
+#include "../source/SettingsPage.h"
 #include "app/analog_map.h"
 #include "app/panel_layout.h"
 #include "ts/disk_image.h"
@@ -1537,6 +1538,112 @@ void diskDrive(const juce::File& dir) {
     ed.reset();
 }
 
+// The TS-12 on the panel and the Model row (A137, A115). Dummy ROMs: the machine is made, never run.
+juce::File ts12Roms(const juce::File& dir) {
+    const auto roms = dir.getChildFile("roms");
+    dummyRoms(roms, Model::Ts12);
+    setSettingsDir(dir);
+    AppSettings().setRomFolder(roms);
+    return roms;
+}
+
+// The key parts of the board for a model's table: how many, and the lowest and highest note.
+struct KeyCount {
+    int n = 0, lo = 999, hi = -1;
+};
+KeyCount keysOf(juce::Component& ed, Model m) {
+    KeyCount k;
+    for (const auto& c : ens::app::panelLayout(m)) {
+        if (c.kind != ens::app::ControlKind::Key) continue;
+        auto* p = ed.getChildComponent(0)->getComponentAt(c.r.x + c.r.w / 2, c.r.y + c.r.h - 4);  // the front: on top
+        if (p != nullptr && p->getBounds() == juce::Rectangle<int>(c.r.x, c.r.y, c.r.w, c.r.h)) {
+            ++k.n;
+            k.lo = std::min(k.lo, c.id);
+            k.hi = std::max(k.hi, c.id);
+        }
+    }
+    return k;
+}
+
+void editorTs12HasKeys(const juce::File& dir) {
+    ts12Roms(dir);
+    AppSettings().setModel(Model::Ts12);
+    TsProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    const auto k = keysOf(*ed, Model::Ts12);
+    CHECK(k.n == 76 && k.lo == 28 && k.hi == 103);
+    CHECK(!paintEditor(*ed, "panel-ts12.png").isNull());
+}
+
+// One timer tick, as the editor's 30 Hz timer would give it (no message loop runs here).
+void tick() {
+    juce::Thread::sleep(40);
+    juce::Timer::callPendingTimersSynchronously();
+}
+
+void editorFollowsModelSwitch(const juce::File& dir) {
+    ts12Roms(dir);
+    TsProcessor p;
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    const auto size = ed->getBounds();
+    const int children = ed->getNumChildComponents();  // the old board must go, not pile up
+    CHECK(keysOf(*ed, Model::Ts10).n == 61);
+    p.setModel(Model::Ts12);
+    for (int i = 0; i < 50 && keysOf(*ed, Model::Ts12).n != 76; ++i) tick();
+    CHECK(keysOf(*ed, Model::Ts12).n == 76);
+    CHECK(ed->getNumChildComponents() == children);
+    CHECK(ed->getBounds() == size);
+    p.setModel(Model::Ts10);
+    for (int i = 0; i < 50 && keysOf(*ed, Model::Ts10).n != 61; ++i) tick();
+    CHECK(keysOf(*ed, Model::Ts10).n == 61 && ed->getNumChildComponents() == children);
+    ed.reset();
+}
+
+// The strike (A115): a press at the key's front edge posts 127 on the TS-10 and 120 on the TS-12.
+void editorTs12StrikeRange(const juce::File& dir) {
+    ts12Roms(dir);
+    for (const Model m : {Model::Ts10, Model::Ts12}) {
+        AppSettings().setModel(m);
+        TsProcessor p;
+        std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+        auto& c = part(*ed, [&]() -> const ens::app::Control& {
+            for (const auto& k : ens::app::panelLayout(m))
+                if (k.kind == ens::app::ControlKind::Key && k.id == 60) return k;
+            std::abort();
+        }());
+        const juce::Point<float> at(8, static_cast<float>(c.getHeight() - 1));  // inside the key
+        c.mouseDown(mouse(c, at, at));
+        const auto e = static_cast<PanelEditor&>(*ed).lastPosted();
+        CHECK(e.kind == ens::app::Event::Kind::Key && e.id == 60 && e.down);
+        CHECK(e.value == (m == Model::Ts12 ? 120 : 127));
+        c.mouseUp(mouse(c, at, at));
+        CHECK(static_cast<PanelEditor&>(*ed).lastPosted().value == e.value);  // the release carries it
+    }
+}
+
+void settingsPageModelCombo(const juce::File& dir) {
+    ts12Roms(dir);
+    AppSettings().setModel(Model::Ts12);
+    TsProcessor p;
+    const auto combo = [](SettingsPage& page) {
+        for (auto* c : page.getChildren())
+            if (auto* b = dynamic_cast<juce::ComboBox*>(c)) return b;
+        return static_cast<juce::ComboBox*>(nullptr);
+    };
+    {
+        SettingsPage page(p);
+        auto* b = combo(page);
+        CHECK(b != nullptr && b->getNumItems() == 2 && b->getText() == "TS-12");
+        if (b != nullptr) b->setSelectedId(1, juce::sendNotificationSync);
+        CHECK(p.model() == Model::Ts10 && AppSettings().model() == Model::Ts10);
+    }
+    SettingsPage page(p);
+    auto* b = combo(page);
+    CHECK(b != nullptr && b->getText() == "TS-10");
+    if (b != nullptr) b->setSelectedId(2, juce::sendNotificationSync);
+    CHECK(p.model() == Model::Ts12 && AppSettings().model() == Model::Ts12);
+}
+
 // The CD drive (A127, A128). CDR-13's .cue under TSR_DISK_DIR (the user's images, read only); an empty File and
 // a skip line without it.
 juce::File cdr13() {
@@ -2465,6 +2572,10 @@ int main() {
     dcBlocked(dir.getChildFile("dc"));
     sampleRam8(dir.getChildFile("simm8"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
+    editorTs12HasKeys(dir.getChildFile("ed-ts12"));
+    editorFollowsModelSwitch(dir.getChildFile("ed-switch"));
+    editorTs12StrikeRange(dir.getChildFile("ed-strike"));
+    settingsPageModelCombo(dir.getChildFile("settings-combo"));
     diskDrive(dir.getChildFile("disk"));
     hfeDrive(dir.getChildFile("hfe"));
     sysexFile(dir.getChildFile("syx"));
