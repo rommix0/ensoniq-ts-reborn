@@ -1847,6 +1847,23 @@ KeyCount keysOf(juce::Component& ed, Model m) {
     return k;
 }
 
+// DECISION A141: the display's font is Ensoniq VFD Regular, one glyph advance per cell at any size, and the cursor
+// bar sits where the font's Cursor weight puts it. With the ink centred in its row, the bar's bottom is 0.602 em below
+// the row's centre, inside the row's half-height of 1.03 em.
+void vfdFontCheck() {
+    for (const float cell : {8.48f, 14.125f, 28.25f}) {
+        const auto f = vfdFont(cell);
+        CHECK(f.getTypefaceName() == "Ensoniq VFD");
+        for (const char* s : {"A", "W", "0", "_"})
+            CHECK(std::abs(juce::GlyphArrangement::getStringWidth(f, s) - cell) < cell * 0.01f);
+    }
+    const float em = 14.125f / 0.72f;
+    const auto bar = vfdCursorBar(14.125f, {100.0f, 50.0f});
+    std::printf("  vfd cursor bar: %.2f,%.2f %.2f x %.2f\n", bar.getX(), bar.getY(), bar.getWidth(), bar.getHeight());
+    CHECK(std::abs(bar.getX() - (100 + 0.053f * em)) < 0.01f && std::abs(bar.getRight() - (100 + 0.509f * em)) < 0.01f);
+    CHECK(std::abs(bar.getY() - (50 + 0.086f * em)) < 0.01f && std::abs(bar.getBottom() - (50 + 0.164f * em)) < 0.01f);
+}
+
 // The model's logo (A140) in a painted editor: its triangle's pixels (blue over green, as `editor`) and the letter
 // pixels (green over red) in the rect's right quarter, where the last digit is: a 0 on the TS-10, a 2 on the TS-12.
 // The two digits cover about as many pixels, so they are told apart by shape (`digit`, the letter mask there).
@@ -2976,6 +2993,7 @@ int main() {
     midiOut(dir.getChildFile("midi-out"));
     dcBlocked(dir.getChildFile("dc"));
     sampleRam8(dir.getChildFile("simm8"));  // not "aux": a reserved device name on Windows
+    vfdFontCheck();
     editor(dir.getChildFile("editor"));
     editorKeyboardSlide(dir.getChildFile("ed-keyboard"));
     keyboardToggleMidSlide(dir.getChildFile("ed-keyboard-mid"));

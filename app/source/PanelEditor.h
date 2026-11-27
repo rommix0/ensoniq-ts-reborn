@@ -12,6 +12,12 @@
 
 class TsProcessor;
 
+// DECISION A141: the display's font, Ensoniq VFD Regular, sized so one glyph's advance is `cellWidth` (the
+// monospaced font if the typeface did not load); the cursor bar's rect for a cell whose glyph baseline starts at
+// `baselineLeft`.
+juce::Font vfdFont(float cellWidth);
+juce::Rectangle<float> vfdCursorBar(float cellWidth, juce::Point<float> baselineLeft);
+
 class PanelEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer {
 public:
     explicit PanelEditor(TsProcessor& p);

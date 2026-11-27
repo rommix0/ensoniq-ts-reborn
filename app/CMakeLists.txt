@@ -31,9 +31,10 @@ if(APPLE)
     COMMAND_ERROR_IS_FATAL ANY)
 endif()
 
-# The panel's logos (A122, A140): TsArt::ts10_logo_svg, TsArt::ts12_logo_svg, TsArt::ensoniq_logo_svg.
+# The panel's logos (A122, A140): TsArt::ts10_logo_svg, TsArt::ts12_logo_svg, TsArt::ensoniq_logo_svg; the
+# display's font (A141): TsArt::EnsoniqVFD_otf (SIL OFL 1.1, resources/fonts/OFL.txt).
 juce_add_binary_data(TSReborn_Art HEADER_NAME TsArt.h NAMESPACE TsArt
-  SOURCES resources/ts10_logo.svg resources/ts12_logo.svg resources/ensoniq_logo.svg)
+  SOURCES resources/ts10_logo.svg resources/ts12_logo.svg resources/ensoniq_logo.svg resources/fonts/EnsoniqVFD.otf)
 
 set(TSR_SOURCES source/Processor.cpp source/PanelEditor.cpp source/AppSettings.cpp source/RomFolder.cpp
   source/MemoryFile.cpp source/SettingsPage.cpp source/DiskDrive.cpp source/CdDrive.cpp)
