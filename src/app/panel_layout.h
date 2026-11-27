@@ -1,6 +1,7 @@
 #pragma once
-// The TS-10 front panel as a table in 2576 x 920 design units, measured on datasheets/ts10-photo.webp
-// scaled to that size (arrangement and proportions) with the labels of the Musician's Manual page 3.
+// The TS-10 and TS-12 front panel (one table; the TS-12 differs in its keys, A137) in 2576 x 920 design units,
+// measured on datasheets/ts10-photo.webp scaled to that size (arrangement and proportions) with the labels of the
+// Musician's Manual page 3.
 // JUCE-free; the editor scales it uniformly to the window.
 #include <cstdint>
 #include <vector>

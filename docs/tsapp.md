@@ -37,7 +37,7 @@ cmake --build build-mac-app --target TSReborn_Standalone
 
 **The release folder** (Plan 6, A126). `powershell -ExecutionPolicy Bypass -File tools\dist.ps1` (Linux, in WSL: `tools/dist.sh`) builds the Standalone and the VST3 in Release in `build-dist` (`build-dist-linux`), with the C++ runtime linked in, and writes `dist\TS Reborn-1.0.0` (`dist/TS Reborn-1.0.0-linux`):
 
-- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the six files above and the TS-12 OS pair (`os/ts12_310h.bin`, `os/ts12_310l.bin`; the app does not load it yet), so the Standalone starts on them.
+- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the six files above and the TS-12 OS pair (`os\ts12_310h.bin`, `os\ts12_310l.bin`), so the Standalone starts on either model.
 - `TS Reborn.vst3`, the VST3 package, with the same eight files in `Contents\Resources\roms`. Copy the whole package to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`): it finds those ROMs there (A125) without any setup.
 - `README.md` with its picture `panel.png`, `LICENSE`, and this guide as `APP-GUIDE.md`.
 
@@ -162,7 +162,7 @@ Environment variables read when the app starts. Neither is needed for normal use
 ## Open items
 
 - **SCSI** has a CD-ROM drive at ID 4 only; no SCSI hard disk. Disk images in `.efe` format and HFE v3 are not read.
-- **The TS-12** is not emulated yet. It is in scope again since 2026-11-26 (the user's decision): its features are added where they fit.
+- **The TS-12** runs as a model (T31, A137). Not done: an on-screen control for channel pressure (the panel has none; MIDI channel pressure and `tsemu --analog PRESS=<raw>` reach it); the panel still shows the TS-10 logo on a TS-12; other TS-12 OS versions than v3.10. What is left for a person is in `docs/verification-plan12.md`.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **The small print the photo has** (jack labels, "Bypass", "Replace w/FX") is not drawn.
 - The person-only checks of Plans 4 and 5 were done by the user on 2026-11-15; what is left for a person is in `docs/verification-plan6.md`.

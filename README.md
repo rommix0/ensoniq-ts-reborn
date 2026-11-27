@@ -4,7 +4,7 @@
 
 This emulator was created by Anthony C. Bartman (@rommix0) with the assistance of Claude Opus 5.5. If you find any issues, please leave an issue or do a pull request.
 
-An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. TS-12 support is planned. It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
+An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. The TS-12 runs as a second model (a 76-key keyboard with channel pressure, its own OS v3.10). It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
 **Status:** version 1.0.0. The TS-10 machine runs the unmodified OS v3.10 in a Standalone app and a VST3 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64, Linux x64 and macOS; see [docs/tsapp.md](docs/tsapp.md), named `APP-GUIDE.md` in a release folder).
 
@@ -26,7 +26,7 @@ A release folder holds Ensoniq's ROMs (below).
 
 ## The ROMs
 
-The ROMs are Ensoniq's copyrighted firmware and samples. The emulator ships eight files (the TS-12 OS pair is not loaded by the app yet), which the release folder includes (see [roms/README.txt](roms/README.txt)):
+The ROMs are Ensoniq's copyrighted firmware and samples. The emulator ships eight files (the app loads six per model: the four wave ROMs and that model's OS pair), which the release folder includes (see [roms/README.txt](roms/README.txt)):
 
 | File                                           | Size      | What it is                           |
 | ---------------------------------------------- | --------- | ------------------------------------ |
