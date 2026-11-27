@@ -1504,10 +1504,27 @@ void editorKeyboardSlide(const juce::File& dir) {
     ed.reset(p.createEditor());
     auto& again = static_cast<PanelEditor&>(*ed);
     CHECK(ed->getWidth() == 1546 && ed->getHeight() == 258 && !again.sliding() && stripOut(*ed));
+    // Showing resizes once, straight to 1546 x 552 (review fix: the new limits under the old aspect first went
+    // through about 2205 x 368, a second host resize).
+    struct Sizes : juce::ComponentListener {
+        std::vector<juce::Point<int>> seen;
+        void componentMovedOrResized(juce::Component& c, bool, bool resized) override {
+            if (resized) seen.push_back({c.getWidth(), c.getHeight()});
+        }
+    } sizes;
+    ed->addComponentListener(&sizes);
     again.toggleKeyboard();
     settle(again);
+    ed->removeComponentListener(&sizes);
+    for (const auto s : sizes.seen) std::printf("  show resize: %d x %d\n", s.x, s.y);
+    CHECK(sizes.seen.size() == 1 && sizes.seen[0] == juce::Point<int>(1546, 552));
     CHECK(ed->getWidth() == 1546 && ed->getHeight() == 552 && again.keyboardShown() && !stripOut(*ed));
     CHECK(AppSettings().keyboardShown());
+    // A window wider than the panel's shape (a host ignoring the aspect, a maximised Standalone): the panel fits by
+    // its height, as before A139, not cut off by its width (review fix).
+    ed->setSize(3000, 552);
+    CHECK(std::abs(ed->getChildComponent(0)->getTransform().mat00 - 552.0f / ens::app::kDesignH) < 1e-3f);
+    ed->setSize(1546, 552);
     ed.reset();
 }
 

@@ -253,7 +253,10 @@ private:
     // The gear and the keyboard toggle (A139) act in the editor; they are never posted to the engine.
     void act() {
         if (gear_) ed_.openSettings();
-        if (keyboard_) ed_.toggleKeyboard();
+        if (keyboard_) {
+            ed_.toggleKeyboard();
+            repaint();  // the chevron (no resize repaints it on a reversal mid-slide; review fix)
+        }
     }
 
 public:
@@ -825,9 +828,12 @@ PanelEditor::PanelEditor(TsProcessor& p) : AudioProcessorEditor(p), proc_(p), en
 
 PanelEditor::~PanelEditor() { board(*board_).release(true); }
 
-// DECISION A139: scaled by the width, the same in both states (the window's height is the top panel's or the whole).
+// DECISION A139: the panel shown in full (kDesignH) or the top only (kTopH) fits the window, as A112's letterbox did:
+// a window wider than that shape (a host ignoring the aspect) is fitted by its height, not cut off (review fix).
 void PanelEditor::resized() {
-    board_->setTransform(juce::AffineTransform::scale(getWidth() / static_cast<float>(ens::app::kDesignW)));
+    const auto h = static_cast<float>(full_ ? ens::app::kDesignH : ens::app::kTopH);
+    board_->setTransform(juce::AffineTransform::scale(
+        std::min(getWidth() / static_cast<float>(ens::app::kDesignW), getHeight() / h)));
 }
 
 // DECISION A139 (approach A): hiding releases the strip, slides it out, then shrinks the window; showing grows the
@@ -855,13 +861,15 @@ void PanelEditor::stepSlide() {
     if (!shown_) fitSize(false);
 }
 
-// The limits and aspect for the full panel or the top only; the width stays, the height follows.
+// The limits and aspect for the full panel or the top only; the width stays, the height follows. One resize: the new
+// aspect and size first, then the limits, which the bounds then already meet (setResizeLimits constrains the bounds
+// it finds: under the old aspect it went through about 2200 x 367 on a show, a second host resize; review fix).
 void PanelEditor::fitSize(bool full) {
     full_ = full;
     const int h = full ? ens::app::kDesignH : ens::app::kTopH, w = getWidth();
-    setResizeLimits(1030, 1030 * h / ens::app::kDesignW, 2 * ens::app::kDesignW, 2 * h);
     getConstrainer()->setFixedAspectRatio(static_cast<double>(ens::app::kDesignW) / h);
     setSize(w, static_cast<int>(std::lround(static_cast<double>(w) * h / ens::app::kDesignW)));
+    setResizeLimits(1030, 1030 * h / ens::app::kDesignW, 2 * ens::app::kDesignW, 2 * h);
 }
 
 juce::RangedAudioParameter* PanelEditor::param(const char* id) { return proc_.params().getParameter(id); }
