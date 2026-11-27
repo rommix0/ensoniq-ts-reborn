@@ -32,6 +32,11 @@ public:
     juce::String romError() const;  // empty while the engine runs
     juce::String slotText() const;  // the disk drive's (A119)
     void driveMenu(juce::Component* target);
+    // DECISION A139: the keyboard strip. toggleKeyboard starts the slide toward the other state (or reverses one under
+    // way) and stores it; keyboardShown is that target state; sliding is true while the strip moves.
+    void toggleKeyboard();
+    bool keyboardShown() const { return shown_; }
+    bool sliding() const { return slide_.isTimerRunning(); }
 
     bool isInterestedInFileDrag(const juce::StringArray& files) override { return files.size() == 1; }
     void filesDropped(const juce::StringArray& files, int, int) override;
@@ -39,6 +44,8 @@ public:
 private:
     void timerCallback() override;
     bool sameEngine();  // false, after resetting the parts, when the engine was replaced
+    void stepSlide();        // A139: the slide timer
+    void fitSize(bool full);  // A139: the limits, aspect and height for the full panel or the top only
 
     TsProcessor& proc_;
     ens::app::Engine* engine_ = nullptr;  // the engine the parts' state belongs to
@@ -50,6 +57,11 @@ private:
     ens::app::Snapshot snap_{};
     bool blinkOn_ = true, hexCodes_ = false, foreground_ = true;
     int ticks_ = 0;
+    // A139: the strip's offset in design units (0 in place, kDesignH - kTopH out), the slide's start and target,
+    // when it started, and whether the window has the full panel's size.
+    bool shown_ = true, full_ = true;
+    double offset_ = 0, from_ = 0, to_ = 0, startMs_ = 0;
+    juce::TimedCallback slide_{[this] { stepSlide(); }};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PanelEditor)
 };

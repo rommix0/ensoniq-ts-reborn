@@ -135,6 +135,14 @@ void settingsKeyboard(const juce::File& dir) {
     CHECK(AppSettings::folder().getChildFile("settings.xml").loadFileAsString().contains("hidden"));
     AppSettings().setKeyboardShown(true);
     CHECK(AppSettings().keyboardShown());
+    // An instance made before another's change writes only its own key (A139; the A137 limit): the processor's
+    // settings, read at its start, must not put the keyboard back when its model or folder changes.
+    AppSettings early;
+    AppSettings().setKeyboardShown(false);
+    early.setModel(ens::ts::Model::Ts12);
+    CHECK(!AppSettings().keyboardShown() && AppSettings().model() == ens::ts::Model::Ts12);
+    AppSettings().setModel(ens::ts::Model::Ts10);
+    AppSettings().setKeyboardShown(true);
 }
 
 // settings_memory_file_per_model (A116): two defaults; setting one leaves the other as it was.
@@ -1392,6 +1400,142 @@ void editor(const juce::File& dir) {
     std::printf("  key peak back %.4f, front %.4f\n", back, front);
     CHECK(front > 2 * back && back > 0);
     ed.reset();
+}
+
+// The keyboard strip (A139). The editor's slide runs on its own timer: no message loop runs here, so the checks call
+// the due timers until the slide ends (at most 1 s).
+void settle(PanelEditor& pe) {
+    for (int i = 0; i < 100 && pe.sliding(); ++i) {
+        juce::Thread::sleep(10);
+        juce::Timer::callPendingTimersSynchronously();
+    }
+}
+
+// True when nothing visible of the board is at the middle C key's place (the strip is out).
+bool stripOut(juce::Component& ed) {
+    auto& board = *ed.getChildComponent(0);
+    const auto& c = control(ens::app::ControlKind::Key, 60);
+    return board.getComponentAt(c.r.x + c.r.w / 2, c.r.y + c.r.h / 2) == &board;
+}
+
+// editor_keyboard_slide (A139): shown at 1546 x 552; a held key, a bent pitch wheel, a moved mod wheel and a latched
+// patch button; the toggle releases them (the mod wheel keeps its value), slides the strip out and leaves 1546 x 258,
+// stored as hidden. Resizing keeps 2576:430; a model switch keeps the new board's strip out; a new editor opens
+// hidden with no slide; toggling back gives 1546 x 552 with the keys in.
+void editorKeyboardSlide(const juce::File& dir) {
+    using ens::app::ControlKind;
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    auto& pe = static_cast<PanelEditor&>(*ed);
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 552 && pe.keyboardShown() && !stripOut(*ed));
+
+    auto& key = part(*ed, control(ControlKind::Key, 60));
+    const juce::Point<float> at(8, 300);
+    key.mouseDown(mouse(key, at, at));
+    auto& bendWheel = part(*ed, control(ControlKind::Wheel, static_cast<int>(ens::ts::Analog::PitchWheel)));
+    auto& modWheel = part(*ed, control(ControlKind::Wheel, static_cast<int>(ens::ts::Analog::ModWheel)));
+    const juce::Point<float> from(20, 100), to(20, 50);
+    bendWheel.mouseDown(mouse(bendWheel, from, from));
+    bendWheel.mouseDrag(mouse(bendWheel, to, from));
+    modWheel.mouseDown(mouse(modWheel, from, from));
+    modWheel.mouseDrag(mouse(modWheel, to, from));
+    auto& patch = part(*ed, control(ControlKind::Patch, 0));
+    const auto now = juce::Time::getCurrentTime();
+    const juce::Point<float> p5(5, 5);
+    patch.mouseDown({juce::Desktop::getInstance().getMainMouseSource(), p5,
+                     juce::ModifierKeys(juce::ModifierKeys::shiftModifier), 1.0f, 0, 0, 0, 0, &patch, &patch, now, p5,
+                     now, 1, false});  // Shift-click: latched (A114)
+    // The OS sends the panel's keys on MIDI out (A133): note 60's on, then its off when the strip releases it.
+    const auto sent = [&p](int ms, bool on) {
+        juce::AudioBuffer<float> buf(4, 480);
+        bool seen = false;
+        for (int i = 0; i < ms / 10; ++i) {
+            juce::MidiBuffer midi;
+            buf.clear();
+            p.processBlock(buf, midi);
+            for (const auto m : midi)
+                seen = seen || (m.getMessage().getNoteNumber() == 60 &&
+                                (on ? m.getMessage().isNoteOn() : m.getMessage().isNoteOff()));
+        }
+        return seen;
+    };
+    const bool keyOn = sent(200, true);
+    auto* bend = p.params().getParameter("pitchWheel");
+    auto* mod = p.params().getParameter("modWheel");
+    const float modBefore = mod->getValue();
+    std::printf("  before: key on %d, bend %.2f, mod %.2f\n", static_cast<int>(keyOn), bend->getValue(), modBefore);
+    CHECK(keyOn && bend->getValue() > 0.7f && modBefore > 0.1f);
+
+    pe.toggleKeyboard();
+    CHECK(!pe.keyboardShown() && pe.sliding());
+    const bool keyOff = sent(200, false);
+    settle(pe);
+    std::printf("  hidden: %d x %d\n", ed->getWidth(), ed->getHeight());
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 258 && !pe.sliding() && stripOut(*ed) && !key.isVisible());
+    CHECK(keyOff && feq(bend->getValue(), 0.5f) && feq(mod->getValue(), modBefore));
+    CHECK(pe.lastPosted().kind == ens::app::Event::Kind::PatchSelect && !pe.lastPosted().down);
+    CHECK(!AppSettings().keyboardShown());
+    paintEditor(*ed, "panel-keyboard-hidden.png");
+
+    // Review Focus 3: a resize keeps 2576:430.
+    pe.setBoundsConstrained({0, 0, 2000, 900});
+    std::printf("  resized hidden: %d x %d\n", ed->getWidth(), ed->getHeight());
+    CHECK(std::abs(ed->getHeight() - static_cast<int>(std::lround(ed->getWidth() * 430.0 / 2576))) <= 1);
+    pe.setSize(1546, 258);
+
+    // Review Focus 2: a model switch rebuilds the board with its strip out.
+    p.setModel(ens::ts::Model::Ts12);
+    for (int i = 0; i < 10; ++i) {
+        juce::Thread::sleep(40);
+        juce::Timer::callPendingTimersSynchronously();
+    }
+    CHECK(stripOut(*ed) && ed->getHeight() == 258);
+    p.setModel(ens::ts::Model::Ts10);
+    for (int i = 0; i < 10; ++i) {
+        juce::Thread::sleep(40);
+        juce::Timer::callPendingTimersSynchronously();
+    }
+
+    ed.reset();
+    ed.reset(p.createEditor());
+    auto& again = static_cast<PanelEditor&>(*ed);
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 258 && !again.sliding() && stripOut(*ed));
+    again.toggleKeyboard();
+    settle(again);
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 552 && again.keyboardShown() && !stripOut(*ed));
+    CHECK(AppSettings().keyboardShown());
+    ed.reset();
+}
+
+// keyboard_toggle_mid_slide (A139, Review Focus 1 and 5): a second click 100 ms into the slide reverses it, ending
+// shown at full size; an editor closed mid-slide leaves the setting hidden and a new one opens hidden.
+void keyboardToggleMidSlide(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+        auto& pe = static_cast<PanelEditor&>(*ed);
+        pe.toggleKeyboard();
+        for (int i = 0; i < 10; ++i) {
+            juce::Thread::sleep(10);
+            juce::Timer::callPendingTimersSynchronously();
+        }
+        CHECK(pe.sliding());
+        pe.toggleKeyboard();
+        CHECK(pe.sliding() && pe.keyboardShown());
+        settle(pe);
+        CHECK(ed->getWidth() == 1546 && ed->getHeight() == 552 && !stripOut(*ed));
+        pe.toggleKeyboard();  // closed at once
+    }
+    CHECK(!AppSettings().keyboardShown());
+    std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 258 && stripOut(*ed));
+    AppSettings().setKeyboardShown(true);
 }
 
 // One Write Data of cylinder 0, head 0, sector 0 put straight into the floppy controller between blocks, as
@@ -2673,6 +2817,8 @@ int main() {
     dcBlocked(dir.getChildFile("dc"));
     sampleRam8(dir.getChildFile("simm8"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
+    editorKeyboardSlide(dir.getChildFile("ed-keyboard"));
+    keyboardToggleMidSlide(dir.getChildFile("ed-keyboard-mid"));
     editorTs12HasKeys(dir.getChildFile("ed-ts12"));
     editorFollowsModelSwitch(dir.getChildFile("ed-switch"));
     editorTs12StrikeRange(dir.getChildFile("ed-strike"));

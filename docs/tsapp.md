@@ -144,6 +144,7 @@ keeps everything it was loaded with, so saving it again loses nothing (A129). Th
   - To use it: Storage, then SCSI (Soft4), DEVICE-ID=4: STATUS shows the volume name once mounted (about 1.5 s after the page opens), and *LOAD* lists its directories (Musician's Manual Section 13, "SCSI Option").
   - Insert and eject need the audio running, as the floppy's. The CD stays in across a ROM-folder change or Erase, starts empty when the app starts, and is not in the VST3's project state.
 - **Size.** The window opens at 1546 x 552 and resizes from 1030 x 368 up, keeping the panel's shape (A112).
+- **Hiding the keyboard** (A139). The button beside the gear slides the lower strip (the keys, the wheels and the patch buttons) out, and the window shrinks to the top panel: 1546 x 258 at the default width, for smaller screens. Click it again and the window grows back and the strip slides in. A key, patch button or pitch-wheel drag still held is released first (the mod wheel keeps its value). The choice is remembered for the Standalone and every plugin window: the last one wins.
 
 ## Firmware behaviours to know
 
