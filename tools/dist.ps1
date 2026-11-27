@@ -31,7 +31,16 @@ foreach ($f in $roms.Keys) {
 }
 
 if (-not (Test-Path build-dist\CMakeCache.txt)) {
-    $cfg = @('-S', '.', '-B', 'build-dist', '-G', 'Visual Studio 17 2022', '-A', 'x64', '-DENS_BUILD_APP=ON',
+    # The newest Visual Studio with the C++ tools, named explicitly: a CMake's own default can be Ninja or an older
+    # Visual Studio. 17 is Visual Studio 2022; a later one gives its own generator name ("Visual Studio 18 2026").
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    $ask = { param($p) if (Test-Path -LiteralPath $vswhere) {
+        & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property $p } }
+    $major = "$(& $ask installationVersion)".Split('.')[0]
+    $year = "$(& $ask catalog_productLineVersion)"
+    if (-not $major -or -not $year) { throw 'No Visual Studio with C++ found: install its "Desktop development with C++" workload' }
+    $gen = "Visual Studio $major $year"
+    $cfg = @('-S', '.', '-B', 'build-dist', '-G', $gen, '-A', 'x64', '-DENS_BUILD_APP=ON',
              '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded')  # no Visual C++ redistributable needed
     if ($JuceSource) { $cfg += "-DFETCHCONTENT_SOURCE_DIR_JUCE=$JuceSource" }
     & cmake @cfg

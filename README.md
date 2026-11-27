@@ -37,7 +37,12 @@ The ROMs are Ensoniq's copyrighted firmware and samples. The emulator needs six 
 
 ## Building
 
-Needs CMake 3.20 or later and either Visual Studio 2022 (MSVC x64) or MinGW-w64 with Ninja.
+**New to this? Follow [docs/building.md](docs/building.md)**: step by step, from installing Visual Studio to a
+working `TS Reborn.exe` and VST3 (Windows, Linux and macOS).
+
+For developers: the commands below build only the emulator core and its tests (CMake 3.20 or later, and either
+Visual Studio 2022 or MinGW-w64 with Ninja). The app is built with `-DENS_BUILD_APP=ON`; see
+[docs/tsapp.md](docs/tsapp.md#building).
 
 ```powershell
 cmake -S . -B build-msvc -G "Visual Studio 17 2022" -A x64
