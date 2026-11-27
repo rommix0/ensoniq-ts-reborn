@@ -3,6 +3,8 @@
 // Standalone and VST3 builds (design section 8). Each change is saved at once.
 #include <juce_data_structures/juce_data_structures.h>
 
+#include "ts/panel.h"
+
 class AppSettings {
 public:
     AppSettings();
@@ -12,8 +14,12 @@ public:
 
     juce::File romFolder() const;  // juce::File() until one is chosen
     void setRomFolder(const juce::File& dir);
-    juce::File memoryFile() const;  // default: ts-memory.bin in folder()
-    void setMemoryFile(const juce::File& file);
+    // The instrument model (A137): key "model", "ts10" or "ts12"; default TS-10.
+    ens::ts::Model model() const;
+    void setModel(ens::ts::Model m);
+    // Per model (A116): keys memoryFile / memoryFile12; default ts-memory.bin / ts12-memory.bin in folder().
+    juce::File memoryFile(ens::ts::Model m) const;
+    void setMemoryFile(ens::ts::Model m, const juce::File& file);
 
 private:
     juce::PropertiesFile props_;

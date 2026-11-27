@@ -160,8 +160,9 @@ TsProcessor::TsProcessor(MemoryMode mode)
     // No compiled-in default. DECISION A125: the stored folder, "roms" beside the program (the release
     // folder's layout, stored so the other format finds it), or the VST3 package's own ROMs (not stored);
     // with none, the first start opens with no ROMs.
-    const auto choice =
-        findRomFolder(settings_.romFolder(), juce::File::getSpecialLocation(juce::File::currentExecutableFile));
+    const auto choice = findRomFolder(settings_.romFolder(),
+                                      juce::File::getSpecialLocation(juce::File::currentExecutableFile),
+                                      ens::ts::Model::Ts10);
     if (choice.dir != juce::File())
         setRomFolder(choice.dir, romError_, choice.store);
     else
@@ -177,19 +178,19 @@ TsProcessor::~TsProcessor() {
     // DECISION A116: saved on close only once booted; audio has stopped, so the machine is read directly.
     // DECISION A117: File mode only; a plugin instance's memory is in the project.
     if (mode_ == MemoryMode::File && engine_ && engine_->snapshot().booted)
-        saveMemoryFile(settings_.memoryFile(), engine_->machine().ramImage());
+        saveMemoryFile(settings_.memoryFile(ens::ts::Model::Ts10), engine_->machine().ramImage());
 }
 
 // Refused, with the reason in err, when the memory file is inside the new folder: it would load the
 // OS ROM as RAM and the 60 s save would overwrite it (setMemoryFile guards the other order).
 bool TsProcessor::setRomFolder(const juce::File& dir, juce::String& err, bool store) {
-    err = memoryInRomFolder(settings_.memoryFile(), dir);
+    err = memoryInRomFolder(settings_.memoryFile(ens::ts::Model::Ts10), dir);
     if (err.isNotEmpty()) return false;
     if (store) settings_.setRomFolder(dir);  // DECISION A125: a VST3 package's own ROMs are not stored
     romFolder_ = dir;
     romStored_ = settings_.romFolder() == dir;
     ens::ts::RomSet roms;
-    const auto problem = romProblem(checkRomFolder(dir, &roms));
+    const auto problem = romProblem(checkRomFolder(dir, ens::ts::Model::Ts10, &roms));
     if (problem.isNotEmpty()) {
         if (!engine_) romError_ = problem;
         return false;  // a running machine keeps running
@@ -206,7 +207,7 @@ bool TsProcessor::setMemoryFile(const juce::File& file, juce::String& err) {
         loadMemoryFile(file, err);
         if (err.isNotEmpty()) return false;
     }
-    settings_.setMemoryFile(file);
+    settings_.setMemoryFile(ens::ts::Model::Ts10, file);
     memoryError_ = {};
     if (file.existsAsFile() && engine_) {
         const std::lock_guard<std::mutex> lock(stateMu_);
@@ -226,7 +227,7 @@ void TsProcessor::eraseMemory() {
     {
         const std::lock_guard<std::mutex> lock(stateMu_);
         if (mode_ == MemoryMode::File) {
-            if (!saved(eraseMemoryFile(settings_.memoryFile()))) return;
+            if (!saved(eraseMemoryFile(settings_.memoryFile(ens::ts::Model::Ts10)))) return;
             memoryError_ = {};
         }
         startSelect_.clear();
@@ -246,7 +247,7 @@ void TsProcessor::eraseMemory() {
 
 // A failed save is shown on the settings page (memoryError) until a save succeeds.
 bool TsProcessor::saved(bool ok) {
-    const auto msg = "Memory not saved: " + settings_.memoryFile().getFullPathName();
+    const auto msg = "Memory not saved: " + settings_.memoryFile(ens::ts::Model::Ts10).getFullPathName();
     if (!ok)
         memoryError_ = msg;
     else if (memoryError_ == msg)
@@ -271,7 +272,7 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
         img = startImage_;  // DECISION A116, A117: never a half-booted image, nor the file over a project's
         fromStart = true;
     } else {
-        img = loadMemoryFile(settings_.memoryFile(), memoryError_);  // wrong size: reported, cold boot
+        img = loadMemoryFile(settings_.memoryFile(ens::ts::Model::Ts10), memoryError_);  // wrong size: reported, cold boot
     }
     std::string e;
     // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4. DECISION A135: and the 4M x 8
@@ -419,7 +420,7 @@ void TsProcessor::tick() {
     if (ramPending_) {
         if (engine_->takeRam(ramBuf_)) {
             ramPending_ = false;
-            saved(saveMemoryFile(settings_.memoryFile(), ramBuf_));
+            saved(saveMemoryFile(settings_.memoryFile(ens::ts::Model::Ts10), ramBuf_));
         }
     } else if (mode_ == MemoryMode::File && ++ticks_ >= 1800 && snap.booted) {  // DECISION A117: File only
         ticks_ = 0;
@@ -757,7 +758,7 @@ bool TsProcessor::copyToSharedMemory(juce::String& err) {
         const std::lock_guard<std::mutex> lock(stateMu_);
         img = ram();
     }
-    if (!saved(saveMemoryFile(settings_.memoryFile(), img))) {
+    if (!saved(saveMemoryFile(settings_.memoryFile(ens::ts::Model::Ts10), img))) {
         err = memoryError_;
         return false;
     }

@@ -65,8 +65,12 @@ int count(const std::vector<RomFileStatus>& list, RomFileStatus::State s) {
     return n;
 }
 
-// The six ROM files as zeros of the right sizes.
-void dummyRoms(const juce::File& dir) {
+// The six ROM files as zeros of the right sizes; with Ts12 the two TS-12 OS files too (the TS-10's stay).
+void dummyRoms(const juce::File& dir, ens::ts::Model model = ens::ts::Model::Ts10) {
+    if (model == ens::ts::Model::Ts12) {
+        write(dir.getChildFile("os/ts12_310h.bin"), 0x40000);
+        write(dir.getChildFile("os/ts12_310l.bin"), 0x80000);
+    }
     const std::pair<const char*, size_t> files[] = {
         {"os/ts10_310h.bin", 0x40000},       {"os/ts10_310l.bin", 0x80000},       {"waves/901401_u41.bin", 0x200000},
         {"waves/901301_u43.bin", 0x100000}, {"waves/901402_u45.bin", 0x200000}, {"waves/901302_u46.bin", 0x100000}};
@@ -83,7 +87,7 @@ void romFolder(const juce::File& dir) {
     dummyRoms(dir);
 
     ens::ts::RomSet roms;
-    auto list = checkRomFolder(dir, &roms);
+    auto list = checkRomFolder(dir, ens::ts::Model::Ts10, &roms);
     CHECK(list.size() == 6 && count(list, RomFileStatus::Found) == 6);
     std::string err;
     CHECK(ens::ts::Machine::create(roms, err) != nullptr);  // the sizes are the ones create takes
@@ -91,24 +95,62 @@ void romFolder(const juce::File& dir) {
     // The 256 KB low OS image Machine::create also takes.
     write(dir.getChildFile("os/ts10_310l.bin"), 0x40000);
     ens::ts::RomSet half;
-    list = checkRomFolder(dir, &half);
+    list = checkRomFolder(dir, ens::ts::Model::Ts10, &half);
     CHECK(count(list, RomFileStatus::Found) == 6 && half.osLow.size() == 0x40000);
     CHECK(ens::ts::Machine::create(half, err) != nullptr);
 
     // A renamed wave ROM: missing, and no RomSet.
     CHECK(dir.getChildFile("waves/901302_u46.bin").moveFileTo(dir.getChildFile("waves/901302_u46.bak")));
     ens::ts::RomSet none;
-    list = checkRomFolder(dir, &none);
+    list = checkRomFolder(dir, ens::ts::Model::Ts10, &none);
     CHECK(list[5].file == "waves/901302_u46.bin" && list[5].state == RomFileStatus::Missing);
     CHECK(count(list, RomFileStatus::Found) == 5 && none.osHigh.empty() && none.u41.empty());
 
     write(dir.getChildFile("waves/901402_u45.bin"), 100);  // a short file
-    list = checkRomFolder(dir, nullptr);
+    list = checkRomFolder(dir, ens::ts::Model::Ts10, nullptr);
     CHECK(list[4].state == RomFileStatus::WrongSize);
     write(dir.getChildFile("os/ts10_310h.bin"), 0x80000);  // the high OS image has one size only
-    CHECK(checkRomFolder(dir, nullptr)[0].state == RomFileStatus::WrongSize);
+    CHECK(checkRomFolder(dir, ens::ts::Model::Ts10, nullptr)[0].state == RomFileStatus::WrongSize);
 
-    CHECK(count(checkRomFolder(juce::File(), nullptr), RomFileStatus::Missing) == 6);  // no folder chosen
+    CHECK(count(checkRomFolder(juce::File(), ens::ts::Model::Ts10, nullptr), RomFileStatus::Missing) == 6);  // no folder chosen
+}
+
+// settings_model_round_trip (A137): the default is the TS-10; the model is read back by a fresh AppSettings.
+void settingsModel(const juce::File& dir) {
+    setSettingsDir(dir);
+    CHECK(AppSettings().model() == ens::ts::Model::Ts10);
+    AppSettings().setModel(ens::ts::Model::Ts12);
+    CHECK(AppSettings().model() == ens::ts::Model::Ts12);
+    AppSettings().setModel(ens::ts::Model::Ts10);
+    CHECK(AppSettings().model() == ens::ts::Model::Ts10);
+}
+
+// settings_memory_file_per_model (A116): two defaults; setting one leaves the other as it was.
+void settingsMemoryPerModel(const juce::File& dir) {
+    using M = ens::ts::Model;
+    setSettingsDir(dir);
+    CHECK(AppSettings().memoryFile(M::Ts10) == dir.getChildFile("ts-memory.bin"));
+    CHECK(AppSettings().memoryFile(M::Ts12) == dir.getChildFile("ts12-memory.bin"));
+    const auto f12 = dir.getChildFile("elsewhere/mine12.bin");
+    AppSettings().setMemoryFile(M::Ts12, f12);
+    CHECK(AppSettings().memoryFile(M::Ts12) == f12);
+    CHECK(AppSettings().memoryFile(M::Ts10) == dir.getChildFile("ts-memory.bin"));
+}
+
+// rom_folder_per_model (A125): six TS-10-era files: the TS-10 is complete, the TS-12 lacks exactly its OS pair.
+void romFolderPerModel(const juce::File& dir) {
+    using M = ens::ts::Model;
+    dummyRoms(dir);
+    auto list = checkRomFolder(dir, M::Ts10, nullptr);
+    CHECK(list.size() == 6 && count(list, RomFileStatus::Found) == 6);
+    list = checkRomFolder(dir, M::Ts12, nullptr);
+    CHECK(list.size() == 6 && count(list, RomFileStatus::Missing) == 2);
+    CHECK(list[0].file == "os/ts12_310h.bin" && list[0].state == RomFileStatus::Missing);
+    CHECK(list[1].file == "os/ts12_310l.bin" && list[1].state == RomFileStatus::Missing);
+    dummyRoms(dir, M::Ts12);
+    ens::ts::RomSet rs;
+    CHECK(count(checkRomFolder(dir, M::Ts10, nullptr), RomFileStatus::Found) == 6);
+    CHECK(count(checkRomFolder(dir, M::Ts12, &rs), RomFileStatus::Found) == 6 && rs.osLow.size() == 0x80000);
 }
 
 void memoryFile(const juce::File& dir) {
@@ -145,18 +187,18 @@ void processor(const juce::File& dir) {
     AppSettings().setRomFolder(roms);
     TsProcessor p(MemoryMode::File);  // the memory file's own rules (A116)
     CHECK(p.engine() != nullptr);
-    CHECK(p.settings().memoryFile() == dir.getChildFile("ts-memory.bin"));
+    CHECK(p.settings().memoryFile(ens::ts::Model::Ts10) == dir.getChildFile("ts-memory.bin"));
 
     // A ROM is never the memory file, though os/ts10_310l.bin is 512 KB: the 60 s save would overwrite it.
     juce::String err;
     const auto low = roms.getChildFile("os/ts10_310l.bin");
-    CHECK(!p.setMemoryFile(low, err) && err.isNotEmpty() && p.settings().memoryFile() != low);
+    CHECK(!p.setMemoryFile(low, err) && err.isNotEmpty() && p.settings().memoryFile(ens::ts::Model::Ts10) != low);
 
     // The other order: a memory file chosen first, then a ROM folder that contains it, is refused;
     // the file and the ROM folder setting are untouched.
     const auto dump = dir.getChildFile("dump"), inDump = dump.getChildFile("m.bin");
     CHECK(eraseMemoryFile(inDump));
-    CHECK(p.setMemoryFile(inDump, err) && p.settings().memoryFile() == inDump);
+    CHECK(p.setMemoryFile(inDump, err) && p.settings().memoryFile(ens::ts::Model::Ts10) == inDump);
     const auto* engine0 = p.engine();
     CHECK(!p.setRomFolder(dump, err) && err.isNotEmpty() && p.settings().romFolder() == roms &&
           p.engine() == engine0 && inDump.getSize() == kMemoryBytes);
@@ -165,7 +207,7 @@ void processor(const juce::File& dir) {
     // A file that cannot be written is refused.
     const auto mem = dir.getChildFile("mem.bin");
     CHECK(eraseMemoryFile(mem) && mem.setReadOnly(true));
-    CHECK(!p.setMemoryFile(mem, err) && err.isNotEmpty() && p.settings().memoryFile() != mem);
+    CHECK(!p.setMemoryFile(mem, err) && err.isNotEmpty() && p.settings().memoryFile(ens::ts::Model::Ts10) != mem);
 
     // Taken while writable (a restart from it). Then, read-only, Erase fails: the memory error says
     // so and the machine is not restarted.
@@ -182,7 +224,7 @@ void processor(const juce::File& dir) {
     // A memory file of the wrong size is refused and the setting stays.
     const auto shortFile = dir.getChildFile("short.bin");
     write(shortFile, 0x10000);
-    CHECK(!p.setMemoryFile(shortFile, err) && err.isNotEmpty() && p.settings().memoryFile() == mem);
+    CHECK(!p.setMemoryFile(shortFile, err) && err.isNotEmpty() && p.settings().memoryFile(ens::ts::Model::Ts10) == mem);
 }
 
 // parameters (A111): six host parameters, by ID and name; the defaults are the analogs' rest values.
@@ -384,7 +426,7 @@ void stateBadBlobs(const juce::File& dir) {
 // copyToSharedMemory writes it, once booted.
 void projectLeavesSharedFile(const juce::File& dir) {
     if (!realRoms(dir)) return;
-    const auto shared = AppSettings().memoryFile();
+    const auto shared = AppSettings().memoryFile(ens::ts::Model::Ts10);
     CHECK(eraseMemoryFile(shared));
     const auto before = fileBytes(shared);
     {
@@ -421,7 +463,7 @@ void projectLeavesSharedFile(const juce::File& dir) {
 // after the boot, never the start image (512 KB of zeros here).
 void stateThreads(const juce::File& dir) {
     if (!realRoms(dir)) return;
-    CHECK(eraseMemoryFile(AppSettings().memoryFile()));
+    CHECK(eraseMemoryFile(AppSettings().memoryFile(ens::ts::Model::Ts10)));
     TsProcessor p;
     if (!p.engine()) return;
     p.prepareToPlay(48000, 480);
@@ -483,7 +525,7 @@ void standaloneNoRam(const juce::File& dir) {
     dummyRoms(roms);
     setSettingsDir(dir);
     AppSettings().setRomFolder(roms);
-    CHECK(eraseMemoryFile(AppSettings().memoryFile()));
+    CHECK(eraseMemoryFile(AppSettings().memoryFile(ens::ts::Model::Ts10)));
     TsProcessor p(MemoryMode::File), project;
     CHECK(p.memoryMode() == MemoryMode::File);
     const auto xml = xmlOf(stateOf(p));
@@ -774,7 +816,7 @@ void romFolderInUse(const juce::File& dir) {
     p.setRomFolder(packaged, err, false);
     CHECK(p.romFolder() == packaged && !p.romFolderStored() && p.settings().romFolder() == juce::File());
     CHECK(!p.setMemoryFile(packaged.getChildFile("os/ts10_310l.bin"), err) && err.isNotEmpty());
-    CHECK(p.settings().memoryFile() != packaged.getChildFile("os/ts10_310l.bin"));
+    CHECK(p.settings().memoryFile(ens::ts::Model::Ts10) != packaged.getChildFile("os/ts10_310l.bin"));
     const auto chosen = dir.getChildFile("chosen");
     dummyRoms(chosen);
     p.setRomFolder(chosen, err);
@@ -796,30 +838,30 @@ void romFolderOrder(const juce::File& dir) {
     const auto a = dir.getChildFile("a"), b = dir.getChildFile("b/roms");
     dummyRoms(a);
     dummyRoms(b);
-    CHECK(is(findRomFolder(a, dir.getChildFile("b/TS Reborn.exe")), a, false));
+    CHECK(is(findRomFolder(a, dir.getChildFile("b/TS Reborn.exe"), ens::ts::Model::Ts10), a, false));
     // stored missing: the folder beside the program, stored
     const auto app = dir.getChildFile("app");
     dummyRoms(app.getChildFile("roms"));
-    CHECK(is(findRomFolder(dir.getChildFile("gone"), app.getChildFile("TS Reborn.exe")), app.getChildFile("roms"),
+    CHECK(is(findRomFolder(dir.getChildFile("gone"), app.getChildFile("TS Reborn.exe"), ens::ts::Model::Ts10), app.getChildFile("roms"),
              true));
     // package: Contents/Resources/roms, not stored
     const auto contents = dir.getChildFile("pkg/TS Reborn.vst3/Contents");
     contents.getChildFile("x86_64-win").createDirectory();
     dummyRoms(contents.getChildFile("Resources/roms"));
     const auto plugin = contents.getChildFile("x86_64-win/TS Reborn.vst3");
-    CHECK(is(findRomFolder({}, plugin), contents.getChildFile("Resources/roms"), false));
+    CHECK(is(findRomFolder({}, plugin, ens::ts::Model::Ts10), contents.getChildFile("Resources/roms"), false));
     // not a package: a ../Resources/roms is never taken
     const auto plain = dir.getChildFile("plain");
     plain.getChildFile("bin").createDirectory();
     dummyRoms(plain.getChildFile("Resources/roms"));
-    CHECK(is(findRomFolder({}, plain.getChildFile("bin/TS Reborn.exe")), juce::File(), false));
+    CHECK(is(findRomFolder({}, plain.getChildFile("bin/TS Reborn.exe"), ens::ts::Model::Ts10), juce::File(), false));
     // only a bad stored folder: kept, so its problem is reported
     const auto bad = dir.getChildFile("bad");
     write(bad.getChildFile("os/ts10_310h.bin"), 0x40000);
-    CHECK(is(findRomFolder(bad, plain.getChildFile("bin/TS Reborn.exe")), bad, false));
+    CHECK(is(findRomFolder(bad, plain.getChildFile("bin/TS Reborn.exe"), ens::ts::Model::Ts10), bad, false));
     // beside beats the package
     dummyRoms(contents.getChildFile("x86_64-win/roms"));
-    CHECK(is(findRomFolder({}, plugin), contents.getChildFile("x86_64-win/roms"), true));
+    CHECK(is(findRomFolder({}, plugin, ens::ts::Model::Ts10), contents.getChildFile("x86_64-win/roms"), true));
 }
 
 // processor_aux_bus_off_mixes_into_main (A109): two processors get the same blocks. After the boot the
@@ -2098,6 +2140,9 @@ int main() {
     const auto dir =
         juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("tsr_app_tests", "", false);
     romFolder(dir.getChildFile("roms"));
+    romFolderPerModel(dir.getChildFile("roms-per-model"));
+    settingsModel(dir.getChildFile("settings-model"));
+    settingsMemoryPerModel(dir.getChildFile("settings-memory"));
     memoryFile(dir);
     processor(dir.getChildFile("proc"));
     parameters(dir.getChildFile("params"));
