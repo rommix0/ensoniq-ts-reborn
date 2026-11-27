@@ -6,7 +6,8 @@ include(FetchContent)
 FetchContent_Declare(juce
   GIT_REPOSITORY https://github.com/juce-framework/JUCE
   GIT_TAG 8.0.16-security  # as KS-32 Reborn: the security release of 8.0.15
-  GIT_SHALLOW TRUE)
+  GIT_SHALLOW TRUE
+  GIT_CONFIG core.longpaths=true)  # JUCE's iOS demo images pass Windows' 260-character limit in a deep folder
 FetchContent_MakeAvailable(juce)
 
 juce_add_plugin(TSReborn

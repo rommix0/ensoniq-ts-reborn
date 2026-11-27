@@ -36,8 +36,8 @@ are made with.
    cd ensoniq-ts-reborn
    ```
 
-   A short path like `C:\src` matters: Windows builds can fail in deep folders, because some file paths
-   become too long.
+   A short path like `C:\src` is the safest choice: some file paths in the build are long, and Windows limits
+   how long a path can be.
 
 ### 4. Build
 
@@ -47,8 +47,8 @@ Still in the same window, in the `ensoniq-ts-reborn` folder, run:
 powershell -ExecutionPolicy Bypass -File tools\dist.ps1
 ```
 
-- The first run downloads JUCE (about 150 MB) and then compiles. It takes about 5 to 15 minutes, and prints a
-  lot of text. Warnings in that text are normal.
+- The first run downloads JUCE (about 150 MB) and then compiles. It takes a few minutes (up to about 15 on a
+  slow PC), and prints a lot of text. Warnings in that text are normal.
 - It is finished when the last line reads `dist: C:\src\ensoniq-ts-reborn\dist\TS Reborn-1.0.0`.
 
 ### 5. Run it
@@ -79,12 +79,12 @@ Later builds are faster: JUCE is already downloaded and only changed files are c
 | What you see | What to do |
 |---|---|
 | `cmake : The term 'cmake' is not recognized` | You are in a plain PowerShell window. Open **Developer PowerShell for VS** (step 3). If that also fails, add "C++ CMake tools for Windows" in the Visual Studio Installer. |
-| `could not find any instance of Visual Studio` | The C++ workload is missing. Add **Desktop development with C++** (step 1). |
+| `No Visual Studio with C++ found` | The C++ workload is missing. Add **Desktop development with C++** (step 1). |
 | `git` is not recognized, or the configure stops with an error naming git | Install Git (step 2), then close and reopen Developer PowerShell. |
 | `running scripts is disabled on this system` | Type the whole command from step 4, including `powershell -ExecutionPolicy Bypass -File`. |
 | `ROM missing: ...` | The `roms` folder is incomplete. Download the code again with `git clone` (step 3). |
 | A build that worked before fails after `git pull` | Delete the `build-dist` folder inside `ensoniq-ts-reborn` and run step 4 again. |
-| Errors about paths that are too long | Move the folder to a short path such as `C:\src` (step 3), or delete `build-dist` and build again from there. |
+| `Filename too long`, or other errors about long paths | Move the folder to a short path such as `C:\src` (step 3), or delete `build-dist` and build again from there. |
 
 ### Why "Open Folder" in Visual Studio is not enough
 
