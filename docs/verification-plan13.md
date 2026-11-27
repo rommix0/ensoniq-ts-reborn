@@ -36,6 +36,8 @@ New tests and checks, each seen failing without its change: `ts_general_midi_nam
 
 ## User to run
 
+Done by the user on 2026-11-27 and approved.
+
 - Enter General MIDI mode (MIDI Control, GMIDI, Up, *YES*) and step GM-PROG: the names read as the manual's map.
 - On a TS-12: click around the panel (System, MIDI Control, the soft buttons, Tuning): each opens its own page.
 - Load a sampled sound in the Standalone, close it, move the image away, start it: the sound plays with no prompt.
