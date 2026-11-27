@@ -32,12 +32,13 @@ struct BusEvent {
     Device dev;
 };
 
-// The analog mux inputs (U69 Y0-Y7 without the unconnected Y1); resting values in kAnalogRest (T8).
-enum class Analog : uint8_t { PitchWheel, ModWheel, Volume, CvPedal, DataEntry, Battery, Reference };
-constexpr int kAnalogCount = 7;
+// The analog mux inputs (U69 Y0-Y7); resting values in kAnalogRest (T8). Pressure is Y1: the TS-12's keyboard
+// pressure, not connected on the TS-10 (T31).
+enum class Analog : uint8_t { PitchWheel, ModWheel, Volume, CvPedal, DataEntry, Battery, Reference, Pressure };
+constexpr int kAnalogCount = 8;
 // DECISION T8: the raw 10-bit value each input holds from power-on, in Analog order (docs/ts-hardware-interface.md,
-// "Analog inputs").
-constexpr uint16_t kAnalogRest[kAnalogCount] = {0x200, 0x000, 0x3FF, 0x3FF, 0x14E, 0x000, 0x324};
+// "Analog inputs"). Pressure rests at 0, no pressure.
+constexpr uint16_t kAnalogRest[kAnalogCount] = {0x200, 0x000, 0x3FF, 0x3FF, 0x14E, 0x000, 0x324, 0x000};
 
 constexpr uint32_t kCpuHz = 15'238'090, kDuartHz = 4'000'000;  // DECISION T1
 constexpr uint32_t kBootMs = 5'300;                            // firmware tests: boot end (3491 ms) + 50 %
@@ -53,8 +54,10 @@ public:
     // unless sqx70: the SQX-70 sequence expander's 256 KB (SEQEXP) fitted. DECISION T25: scsi fits the SP-4 board
     // (a WD33C93 at I/O1 n = 1) with a CD-ROM drive at SCSI ID 4; without it the block reads 0 (T12).
     // DECISION T4: simm8 fits the 4M x 8 SIMM pair (8 MB, BankSets S8 and S9) in place of the factory 2 MB.
+    // DECISION T31: model sets the keyboard (keyRange, no Poly-Key pressure on the TS-12); roms holds that model's OS.
     static std::unique_ptr<Machine> create(const RomSet& roms, std::string& err, bool sqx70 = false,
-                                           bool scsi = false, bool simm8 = false);
+                                           bool scsi = false, bool simm8 = false, Model model = Model::Ts10);
+    Model model() const { return model_; }
     Machine(const Machine&) = delete;  // cpu_ holds a Bus& to *this
     Machine& operator=(const Machine&) = delete;
     void runFrame(Audio& out);                              // one OTTO frame (ACTV + 1 slots)
@@ -165,6 +168,7 @@ private:
     std::vector<uint8_t> ram_ = std::vector<uint8_t>(kRamBytes, 0);
     bool overlay_ = true;  // reads of 0-7 come from the ROM until the first write there
     bool sqx70_ = false;   // SEQEXP fitted (T13)
+    Model model_ = Model::Ts10;
     std::array<uint16_t, 8> mux_{};  // the POT multiplexer's inputs by select (DUART OP2..OP0), T8
     uint8_t iexpDown_ = 0;           // IEXP D0-D3 held low (pressed), T9
     int ottoLevel_ = 1, duartLevel_ = 3;

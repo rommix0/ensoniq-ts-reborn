@@ -14,8 +14,15 @@
 namespace ens::ts {
 
 constexpr int kPanelRows = 2, kPanelCols = 40, kPanelLeds = 16;
-// The 61 Poly-Key keys, C2 to C7 (MIDI notes 36-96); key code = note - kLowestKey (DECISION T17).
-constexpr int kLowestKey = 36, kKeyCount = 61;
+// The instrument the OS and keyboard belong to (DECISION T31): the same boards, a different OS pair and keyboard.
+enum class Model : uint8_t { Ts10, Ts12 };
+
+// The keys of a model as MIDI notes; key code = note - lowest.
+struct KeyRange {
+    int lowest, count;
+};
+// DECISION T31: the TS-10's 61 Poly-Key keys, C2 to C7 (notes 36-96, T17); the TS-12's 76, E1 to G7 (28-103).
+constexpr KeyRange keyRange(Model m) { return m == Model::Ts12 ? KeyRange{28, 76} : KeyRange{36, 61}; }
 
 // Every front-panel button by the code the keyboard sends for it (DECISION T16). Names follow the
 // Musician's Manual and the service manual's self-test chart (p11); each code was matched by the page,
@@ -89,13 +96,16 @@ inline std::string rowText(const PanelState& p, int row) { return std::string(p.
 class Panel {
 public:
     Panel() { reset(); }
-    void reset();                // power-on: blank display, LEDs off, nothing queued
+    void reset();                // power-on: blank display, LEDs off, nothing queued; the model stays
+    void setModel(Model m) { model_ = m; }
+    Model model() const { return model_; }
     void fromCpu(uint8_t b);     // DUART B TX -> the display board (and the keyboard's commands)
     bool popToCpu(uint8_t& b);   // keyboard -> DUART B RX; nothing while KRES is high or SACK/ is high
     void setLines(bool kres, bool dres, bool sack);  // OP4, OP5, OP7 pin levels (true = high)
     void button(Button b, bool down);
-    void key(int note, bool down, int velocity);  // note 36-96; velocity = the raw strike value, clamped to 1-127
-    void pressure(int note, int amount);          // Poly-Key pressure of a key, clamped to 0-127
+    // A note in keyRange(model()); velocity = the raw strike (down) or release (up) value, clamped to 1-127.
+    void key(int note, bool down, int velocity);
+    void pressure(int note, int amount);  // Poly-Key pressure of a key, clamped to 0-127; none on the TS-12
     const PanelState& state() const { return s_; }
     std::size_t toCpuQueued() const { return toCpu_.size(); }
     uint32_t dropped() const { return dropped_; }  // events lost to a full ring since reset
@@ -117,6 +127,7 @@ private:
     uint8_t cmd_ = 0;     // command waiting for its parameter byte (0 = none)
     bool underlineMode_ = false, blinkMode_ = false, keepAttributes_ = true;
     bool kres_ = false, sack_ = false;
+    Model model_ = Model::Ts10;
 };
 
 }  // namespace ens::ts

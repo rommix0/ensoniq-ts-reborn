@@ -57,14 +57,15 @@ TEST(panel_layout_has_every_button) {
 TEST(panel_layout_has_every_led_and_key) {
     for (int led = 0; led < ens::ts::kPanelLeds; ++led) CHECK_EQ(count(ControlKind::Led, led), 1);
     CHECK_EQ(count(ControlKind::Led, kSeqLedId), 1);
-    for (int note = ens::ts::kLowestKey; note < ens::ts::kLowestKey + ens::ts::kKeyCount; ++note)
+    constexpr ens::ts::KeyRange kKeys = ens::ts::keyRange(ens::ts::Model::Ts10);
+    for (int note = kKeys.lowest; note < kKeys.lowest + kKeys.count; ++note)
         CHECK_EQ(count(ControlKind::Key, note), 1);
     int keys = 0, displays = 0;
     for (const Control& c : panelLayout()) {
         keys += c.kind == ControlKind::Key;
         displays += c.kind == ControlKind::Display;
     }
-    CHECK_EQ(keys, ens::ts::kKeyCount);
+    CHECK_EQ(keys, kKeys.count);
     CHECK_EQ(displays, 1);
     CHECK_EQ(count(ControlKind::Patch, 0), 1);
     CHECK_EQ(count(ControlKind::Patch, 1), 1);

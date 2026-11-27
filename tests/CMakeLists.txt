@@ -25,6 +25,7 @@ set(ENS_TEST_SOURCES
   test_ts_machine.cpp
   test_ts_firmware.cpp
   test_ts_panel.cpp
+  test_ts12.cpp
   test_ts_disk.cpp
   test_ts_fdc.cpp
   test_ts_floppy.cpp

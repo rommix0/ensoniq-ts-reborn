@@ -12,8 +12,9 @@
 #include "ts/machine.h"
 #include "ts_render.h"  // runMs
 
-// The TS-10 OS v3.10 and wave ROM files from ENS_ROM_DIR, unchecked; false when a file is missing.
-inline bool readTsRoms(ens::ts::RomSet& r) {
+// The OS v3.10 of the model (TS-10 or TS-12, T31) and the wave ROM files from ENS_ROM_DIR, unchecked; false when
+// a file is missing.
+inline bool readTsRoms(ens::ts::RomSet& r, ens::ts::Model model = ens::ts::Model::Ts10) {
     const std::string dir = ENS_ROM_DIR;
     const auto read = [](const std::string& path, std::vector<uint8_t>& out) {
         std::ifstream f(path, std::ios::binary);
@@ -21,22 +22,24 @@ inline bool readTsRoms(ens::ts::RomSet& r) {
         out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
         return true;
     };
-    return read(dir + "/os/ts10_310h.bin", r.osHigh) && read(dir + "/os/ts10_310l.bin", r.osLow) &&
+    const std::string os = dir + (model == ens::ts::Model::Ts12 ? "/os/ts12_310" : "/os/ts10_310");
+    return read(os + "h.bin", r.osHigh) && read(os + "l.bin", r.osLow) &&
            read(dir + "/waves/901401_u41.bin", r.u41) && read(dir + "/waves/901301_u43.bin", r.u43) &&
            read(dir + "/waves/901402_u45.bin", r.u45) && read(dir + "/waves/901302_u46.bin", r.u46);
 }
 
 // A fresh machine on the ROMs from ENS_ROM_DIR (a stock TS-10, or with the SQX-70 fitted: T13, or the SP-4 SCSI
-// board: T25, or 8 MB of sample RAM: T4); nullptr when a file is missing (prints the skip). Files that exist but are
+// board: T25, or 8 MB of sample RAM: T4; a TS-12 on its own OS: T31); nullptr when a file is missing (prints the skip). Files that exist but are
 // rejected fail the running test, so a bad ROM set never passes as a skip.
-inline std::unique_ptr<ens::ts::Machine> loadTs(bool sqx70 = false, bool scsi = false, bool simm8 = false) {
+inline std::unique_ptr<ens::ts::Machine> loadTs(bool sqx70 = false, bool scsi = false, bool simm8 = false,
+                                                ens::ts::Model model = ens::ts::Model::Ts10) {
     ens::ts::RomSet r;
-    if (!readTsRoms(r)) {
+    if (!readTsRoms(r, model)) {
         std::printf("  skip: ROMs not found\n");
         return nullptr;
     }
     std::string err;
-    auto m = ens::ts::Machine::create(r, err, sqx70, scsi, simm8);
+    auto m = ens::ts::Machine::create(r, err, sqx70, scsi, simm8, model);
     if (!m) {
         std::printf("  FAIL: ROMs present but rejected: %s\n", err.c_str());
         ++ens_test::failures();

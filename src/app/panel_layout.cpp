@@ -160,13 +160,14 @@ std::vector<Control> build() {
     t.push_back({K::Label, -1, {222, 890, 42, 14}, "Mod"});
 
     // Keys: whites first, so the blacks draw over them. The names outlive the table (static).
-    static char names[ts::kKeyCount][5];
+    constexpr ts::KeyRange kKeys = ts::keyRange(ts::Model::Ts10);
+    static char names[kKeys.count][5];
     const double ww = kKeysW / 36.0, bw = ww * 0.6;
     const int bh = static_cast<int>(std::lround(kKeysH * 0.62));
     std::vector<Control> blacks;
     int wi = 0;
-    for (int note = ts::kLowestKey; note < ts::kLowestKey + ts::kKeyCount; ++note) {
-        char* name = names[note - ts::kLowestKey];
+    for (int note = kKeys.lowest; note < kKeys.lowest + kKeys.count; ++note) {
+        char* name = names[note - kKeys.lowest];
         const char* n = kNoteNames[note % 12];
         int len = 0;
         while (*n) name[len++] = *n++;
