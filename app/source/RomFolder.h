@@ -1,5 +1,6 @@
 #pragma once
-// The ROM folder: the repo's roms/ layout, os/ and waves/, the model's six files (four wave ROMs, its OS pair) checked for presence and size.
+// The ROM folder: the repo's roms/ layout, os/ and waves/, the model's six files (four wave ROMs, its OS pair)
+// checked for presence and size.
 #include <juce_core/juce_core.h>
 
 #include <vector>

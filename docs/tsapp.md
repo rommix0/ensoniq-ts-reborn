@@ -37,7 +37,7 @@ cmake --build build-mac-app --target TSReborn_Standalone
 
 **The release folder** (Plan 6, A126). `powershell -ExecutionPolicy Bypass -File tools\dist.ps1` (Linux, in WSL: `tools/dist.sh`) builds the Standalone and the VST3 in Release in `build-dist` (`build-dist-linux`), with the C++ runtime linked in, and writes `dist\TS Reborn-1.0.0` (`dist/TS Reborn-1.0.0-linux`):
 
-- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the six files above and the TS-12 OS pair (`os\ts12_310h.bin`, `os\ts12_310l.bin`), so the Standalone starts on either model.
+- `TS Reborn.exe` (Linux: `TS Reborn`) and `roms\` with the eight files above, so the Standalone starts on either model.
 - `TS Reborn.vst3`, the VST3 package, with the same eight files in `Contents\Resources\roms`. Copy the whole package to `C:\Program Files\Common Files\VST3` (Linux: `~/.vst3`): it finds those ROMs there (A125) without any setup.
 - `README.md` with its picture `panel.png`, `LICENSE`, and this guide as `APP-GUIDE.md`.
 
@@ -47,18 +47,19 @@ The scripts check the eight ROMs (presence and size) before building anything, a
 
 ## Model
 
-The settings page has a **Model** row above the ROM folder: TS-10 or TS-12 (A137). A change is stored, the machine restarts on that model's OS and memory file, and the panel redraws at once with the TS-12's 76 keys (E1 to G7) or the TS-10's 61 (C2 to C7); the window keeps its size. The ROM list under it shows the selected model's files.
+The settings page has a **Model** row above the ROM folder: TS-10 or TS-12 (A137). A change is stored, the machine restarts on that model's OS and memory file, and the panel redraws at once with the TS-12's 76 keys (E1 to G7) or the TS-10's 61 (C2 to C7); the window keeps its size. The ROM list under it shows the selected model's files. A model whose ROMs are missing still takes effect: the display area reads `ROM missing:` and the file's name (for example `os/ts12_310h.bin`), and the disk and CD you had loaded are held until the ROMs are there.
 
 ## First start and the ROMs
 
-The app needs six files in one folder, laid out as the repository's `roms` folder is:
+The app needs six files per model in one folder (the four wave ROMs and the model's OS pair), laid out as the repository's `roms` folder is:
 
 | File | What it is |
 |---|---|
-| `os/ts10_310h.bin` (256 KB), `os/ts10_310l.bin` (512 KB; 256 KB is accepted) | OS v3.10 |
+| `os/ts10_310h.bin` (256 KB), `os/ts10_310l.bin` (512 KB; 256 KB is accepted) | TS-10 OS v3.10 |
+| `os/ts12_310h.bin` (256 KB), `os/ts12_310l.bin` (512 KB; 256 KB is accepted) | TS-12 OS v3.10 |
 | `waves/901401_u41.bin`, `waves/901402_u45.bin` (2 MB each), `waves/901301_u43.bin`, `waves/901302_u46.bin` (1 MB each) | The wave ROMs |
 
-At start the app takes the first of these that holds the six files (A125):
+At start the app takes the first of these that holds the model's six files (A125):
 
 1. The folder stored in the settings (chosen in Settings, or stored by 2).
 2. A folder named `roms` beside the program. It is stored in the settings, so the other format finds it too.
@@ -66,13 +67,13 @@ At start the app takes the first of these that holds the six files (A125):
 
 So a stored folder that has been moved or deleted no longer stops the app when a `roms` folder sits beside it. A folder chosen in Settings still wins.
 
-Otherwise the first start shows a message in place of the display. Click the gear at the top right of the panel, then **Choose folder...** in ROMS. The list marks each file found, missing or the wrong size. When all six are good the machine starts. The firmware boots in real time, as the instrument does (next section). If a file is missing or the wrong size, the display area names it (for example `ROM missing:` / `os/ts10_310h.bin`). With the ROMs good but no audio device open, it reads `No audio device`. Choosing another good folder later restarts the machine and keeps its memory.
+Otherwise the first start shows a message in place of the display. Click the gear at the top right of the panel, then **Choose folder...** in ROMS. The list marks each file found, missing or the wrong size. When the model's six are good the machine starts. The firmware boots in real time, as the instrument does (next section). If a file is missing or the wrong size, the display area names it (for example `ROM missing:` / `os/ts10_310h.bin`). With the ROMs good but no audio device open, it reads `No audio device`. Choosing another good folder later restarts the machine and keeps its memory.
 
 ## Where the settings and the memory live
 
 The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`. On macOS it is `~/Library/Application Support/TS Reborn`.
 
-- **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder and the memory file. Each change is saved at once. The Standalone and the VST3 share it.
+- **`%APPDATA%\TS Reborn\settings.xml`**: the ROM folder, the memory file and the model (A137). Each change is saved at once. The Standalone and the VST3 share it.
 - **`%APPDATA%\TS Reborn\ts-memory.bin`** (the default; **Change...** on the settings page picks another file): the battery memory, 512 KB (the OS RAM and the sequencer expansion RAM, `Machine::ramImage`, T13), so the firmware's settings, edited sounds and sequences survive a restart. It is loaded at start. A file of the wrong size is reported on the settings page and ignored, the machine starts cold, and the first save (on close or after 60 s, once booted) replaces it with the running memory. It is saved on close and every 60 s, but only once the machine has booted (A116). Each save writes `<file>.tmp` and then replaces the file, so a crash in the middle of a save keeps the old image. **Change...** refuses a file in the ROM folder (`ts10_310l.bin` is 512 KB too) and one that cannot be written. A save that fails is reported on the settings page. The TS-12 has its own memory file, `ts12-memory.bin` beside it by default (A116, A137): each file is used, loaded and saved only while its model runs, and a switch of model saves the memory of the model left first.
 - **Erase memory...** asks first, then writes 512 KB of zeros to the memory file and restarts the machine from it. If the file cannot be written, nothing is erased and the settings page says so.
 - **The Standalone's own audio-device file** is JUCE's, not ours: `%APPDATA%\TS Reborn\TS Reborn.settings` on Windows (Linux `~/.config/TS Reborn.settings`, macOS `~/Library/Application Support/TS Reborn.settings`), with the audio device, buffer size and MIDI inputs. JUCE also writes the wrapper's plugin state there (the sound and the controls); the Standalone ignores it, and the Options menu's "Load a saved state..." too (A121). `TSR_SETTINGS_DIR` does not move it.

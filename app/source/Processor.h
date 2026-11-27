@@ -60,7 +60,7 @@ public:
     uint32_t engineGeneration() const { return engineGen_.load(); }
 
     // Message thread. Each suspends processing around the engine swap itself.
-    // Stores dir (unless `store` is false: a VST3 package's own ROMs, A125) and, when all six ROMs are
+    // Stores dir (unless `store` is false: a VST3 package's own ROMs, A125) and, when the model's six ROMs are
     // good, re-creates the machine keeping its memory.
     bool setRomFolder(const juce::File& dir, juce::String& err, bool store = true);
     // DECISION A125: the ROM folder in use (what the settings page shows and the memory guard checks), and
