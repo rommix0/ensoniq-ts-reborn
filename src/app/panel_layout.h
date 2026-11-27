@@ -34,6 +34,10 @@ struct Control {
 };
 
 constexpr int kSettingsId = -4;  // the gear button that opens the settings page
+constexpr int kKeyboardId = -5;  // DECISION A139: the button that slides the keyboard strip out and in
+
+// DECISION A139: the top panel is y 0 to kTopH; the strip below it (keys, wheels, patch buttons) slides out.
+constexpr int kTopH = 430;
 constexpr int kSeqLedId = 16;    // the Seqs/Songs LED (DUART OP3, not on the display link)
 
 // Where the 2 x 40 character cells go, inside the display window.

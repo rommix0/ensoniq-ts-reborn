@@ -126,6 +126,17 @@ void settingsModel(const juce::File& dir) {
     CHECK(AppSettings().model() == ens::ts::Model::Ts10);
 }
 
+// settings_keyboard (A139): shown by default; "hidden" is stored and read back by a new AppSettings.
+void settingsKeyboard(const juce::File& dir) {
+    setSettingsDir(dir);
+    CHECK(AppSettings().keyboardShown());
+    AppSettings().setKeyboardShown(false);
+    CHECK(!AppSettings().keyboardShown());
+    CHECK(AppSettings::folder().getChildFile("settings.xml").loadFileAsString().contains("hidden"));
+    AppSettings().setKeyboardShown(true);
+    CHECK(AppSettings().keyboardShown());
+}
+
 // settings_memory_file_per_model (A116): two defaults; setting one leaves the other as it was.
 void settingsMemoryPerModel(const juce::File& dir) {
     using M = ens::ts::Model;
@@ -2626,6 +2637,7 @@ int main() {
     romFolderPerModel(dir.getChildFile("roms-per-model"));
     settingsModel(dir.getChildFile("settings-model"));
     settingsMemoryPerModel(dir.getChildFile("settings-memory"));
+    settingsKeyboard(dir.getChildFile("settings-keyboard"));
     memoryFile(dir);
     processor(dir.getChildFile("proc"));
     parameters(dir.getChildFile("params"));

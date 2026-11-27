@@ -131,7 +131,7 @@ protected:
 class ButtonPart : public Part {
 public:
     ButtonPart(PanelEditor& ed, const Control& c)
-        : Part(ed, c), gear_(c.id == ens::app::kSettingsId),
+        : Part(ed, c), gear_(c.id == ens::app::kSettingsId), local_(c.kind == ControlKind::Button && c.id < 0),
           kind_(c.kind == ControlKind::Patch ? ens::app::Event::Kind::PatchSelect : ens::app::Event::Kind::Button) {
         setWantsKeyboardFocus(true);
         setBounds(rect(c.r));
@@ -140,7 +140,7 @@ public:
     // DECISION A114: a right-click or Shift-click latches the button down until it is clicked again; a
     // plain press is sent on mouse-down and its release on mouse-up, wherever the mouse is (as KS-32 A9).
     void mouseDown(const juce::MouseEvent& e) override {
-        if (gear_) return;
+        if (local_) return;
         if (latched_) {
             latched_ = false;
             set(false);
@@ -153,8 +153,8 @@ public:
         }
     }
     void mouseUp(const juce::MouseEvent& e) override {
-        if (gear_) {
-            if (getLocalBounds().contains(e.getPosition())) ed_.openSettings();
+        if (local_) {
+            if (getLocalBounds().contains(e.getPosition())) act();
         } else if (byMouse_) {
             byMouse_ = false;
             if (!latched_) set(false);
@@ -163,8 +163,8 @@ public:
     // Space presses the focused button while it is held.
     bool keyPressed(const juce::KeyPress& k) override {
         if (k != juce::KeyPress::spaceKey) return false;
-        if (gear_) {
-            ed_.openSettings();
+        if (local_) {
+            act();
         } else if (!want_) {
             byKey_ = true;
             set(true);
@@ -191,7 +191,7 @@ public:
     // Sends the wanted state until the engine takes it: a full queue (A102) delays a press or a
     // release (the timer retries), never loses it.
     void sync() {
-        if (gear_ || want_ == down_ || !ed_.post({kind_, static_cast<uint8_t>(c_.id), want_, 0})) return;
+        if (local_ || want_ == down_ || !ed_.post({kind_, static_cast<uint8_t>(c_.id), want_, 0})) return;
         down_ = want_;
         repaint();
     }
@@ -215,8 +215,8 @@ public:
 private:
     juce::AccessibilityActions actions() override {
         return juce::AccessibilityActions().addAction(juce::AccessibilityActionType::press, [this] {
-            if (gear_) {
-                ed_.openSettings();
+            if (local_) {
+                act();
             } else if (!want_) {
                 set(true);
                 set(false);
@@ -227,8 +227,12 @@ private:
         want_ = down;
         sync();
     }
+    // The gear and the keyboard toggle (A139) act in the editor; they are never posted to the engine.
+    void act() {
+        if (gear_) ed_.openSettings();
+    }
 
-    const bool gear_;
+    const bool gear_, local_;
     const ens::app::Event::Kind kind_;
     // want_: what the mouse and keys ask for; down_: what the engine has been sent.
     bool want_ = false, down_ = false, latched_ = false, byMouse_ = false, byKey_ = false;

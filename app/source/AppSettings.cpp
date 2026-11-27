@@ -34,6 +34,11 @@ ens::ts::Model AppSettings::model() const {
 
 void AppSettings::setModel(ens::ts::Model m) { props_.setValue("model", m == ens::ts::Model::Ts12 ? "ts12" : "ts10"); }
 
+// DECISION A139: the keyboard strip's last state, shared by the Standalone and every plugin; anything but "hidden" shows.
+bool AppSettings::keyboardShown() const { return props_.getValue("keyboard") != "hidden"; }
+
+void AppSettings::setKeyboardShown(bool shown) { props_.setValue("keyboard", shown ? "shown" : "hidden"); }
+
 // DECISION A116: one memory file per model; the TS-10's key and default name are the old ones.
 juce::File AppSettings::memoryFile(ens::ts::Model m) const {
     const bool t12 = m == ens::ts::Model::Ts12;

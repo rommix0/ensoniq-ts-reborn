@@ -50,6 +50,7 @@ std::vector<Control> build(ts::Model m) {
         {K::Label, -1, {2052, 261, 330, 21}, "Performance/Composition Synthesizer", Ink::Decal},
         {K::Label, -1, {2307, 330, 162, 30}, "ensoniq", Ink::Decal},
         {K::Button, kSettingsId, {2330, 80, 30, 30}, "Settings"},
+        {K::Button, kKeyboardId, {2290, 80, 30, 30}, "Keyboard"},  // DECISION A139: beside the gear
 
         // Sliders (the rect is the track), Up / Down.
         {K::Slider, A(Analog::Volume), {478, 145, 62, 158}, "Volume"},
