@@ -39,7 +39,7 @@ the confidence and the decision entry in `docs/decisions.md`.
 | 0x300000–0x37FFFF | OTTO (odd bytes, HA5..HA0 = A6..A1) |
 | 0x380000–0x3FFFFF | ESP (odd bytes, host register = A8..A1) |
 | 0x400000–0xBFFFFF | Sample RAM host window: OTTO bank 3 at 0x400000–0x7FFFFF (BankSet S8), bank 2 at 0x800000–0xBFFFFF (S9), word A21..A1 |
-| 0xC00000–0xC7FFFF | OS ROM, 512 KB (T2); modelled mirrored to 0xCFFFFF |
+| 0xC00000–0xCFFFFF | OS ROM (T2): h on even bytes, l on odd bytes. 0xC00000–0xC7FFFF is the code; 0xC80000–0xCFFFFF is l's upper half (the General MIDI sounds, issue #9) beside h mirrored |
 
 The devices are decoded over their whole block (a DUART register is A4..A1 anywhere in
 0x200000–0x23FFFF). Nothing else is touched in the boot: 0 unmapped accesses.
@@ -83,7 +83,7 @@ The devices are decoded over their whole block (a DUART register is A4..A1 anywh
 | 256 KB: 0–0x37FFF plus the 0xFC0000 alias (SEQEXP split off in Task 8) | Chosen: boots, see "Where SEQEXP is" |
 | 128 KB at 0 (0x20000–0x3FFFF empty) | Also boots (event kinds and order identical, timing differs by a few µs). Its unmapped 0x038000 is what a stock TS does, but the alias is then not the same RAM (Task 4 view, superseded by Task 8) |
 | 0xFC0000–0xFFFFFF a separate 256 KB | Also boots, with an identical event sequence. Rejected because the stack (0xFF80A0) and the vectors (0) must both be in RAM every TS has: U1/U2 (SEQEXP) are fitted only by the SQX-70 kit (service manual p59), so both windows are OSRAM |
-| ROM only at 0xC00000–0xC7FFFF (no mirror) | Boots the same; the mirror is unobserved |
+| ROM only at 0xC00000–0xC7FFFF (no mirror), or mirrored to 0xCFFFFF | Boots the same; but General MIDI mode reads its sound names at 0xC80000 and shows garbage unless l's upper half is there (T2, 2026-11-27) |
 | Sample RAM: none, 2 MB, 2 MB aliased over the whole window, empty sockets reading 0xFFFF | All four boot with an identical event sequence; no "WRONG SOCKETS" text. The probe's result is not visible in the boot |
 
 **Where SEQEXP is (Task 8).** At 0x038000–0x077FFF, found by running the sequencer. A scratch build

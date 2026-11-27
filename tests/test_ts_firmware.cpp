@@ -226,6 +226,19 @@ TEST(ts_button_changes_page) {
     CHECK_EQ(m->panel().unknown, 0u);
 }
 
+// General MIDI mode names its sounds from the l ROM's upper half at 0xC80000 (T2, issue #9): with that half
+// unmapped the name was "( -" and a control code.
+TEST(ts_general_midi_names_its_sounds) {
+    auto m = bootFresh();
+    if (!m) return;
+    tap(*m, Button::MidiControl);
+    tap(*m, Button::Soft2);  // GMIDI
+    tap(*m, Button::Up);     // ENTER GENERAL MIDI MODE ?
+    tap(*m, Button::Soft3);  // *YES*
+    std::printf("  |%s|\n  |%s|\n", rowText(m->panel(), 0).c_str(), rowText(m->panel(), 1).c_str());
+    CHECK(shows(m->panel(), "GM-PROG=001 GRAND-PIANO"));
+}
+
 // A key sounds and goes out on MIDI as note 60 (T17), with the volume slider at rest (up, T8).
 TEST(ts_key_sounds) {
     auto m = bootFresh();

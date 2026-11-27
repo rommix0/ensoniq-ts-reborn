@@ -162,7 +162,7 @@ private:
     Wd33c93 wd_;
     Panel panel_;
     m68k::Cpu cpu_{*this};
-    std::vector<uint16_t> os_;  // 256K words, T2
+    std::vector<uint16_t> os_;  // 512K words, the 1 MB window, T2
     static constexpr uint32_t kOsRamBytes = 0x40000;              // DECISION T13: OSRAM (U3/U4) 256 KB
     static constexpr uint32_t kRamBytes = 2 * kOsRamBytes;        // then SEQEXP (U1/U2, the SQX-70) 256 KB
     std::vector<uint8_t> ram_ = std::vector<uint8_t>(kRamBytes, 0);

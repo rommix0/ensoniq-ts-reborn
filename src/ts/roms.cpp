@@ -11,9 +11,11 @@ static bool checkSize(const char* name, const std::vector<uint8_t>& v, size_t wa
 bool buildOsImage(const RomSet& r, std::vector<uint16_t>& words, std::string& err) {
     if (!checkSize("osHigh", r.osHigh, 0x40000, err)) return false;
     if (r.osLow.size() != 0x40000 && !checkSize("osLow", r.osLow, 0x80000, err)) return false;
-    // DECISION T2: h = even bytes, l = odd bytes from the first 256 KB of l (a 512 KB dump's upper half is unused).
-    words.resize(0x40000);
-    for (size_t i = 0; i < words.size(); ++i) words[i] = static_cast<uint16_t>(r.osHigh[i] << 8 | r.osLow[i]);
+    // DECISION T2: h = even bytes, l = odd bytes over the 1 MB window: the l file's upper half (the General MIDI
+    // sound data) at 0xC80000 with h mirrored beside it; a 256 KB l is mirrored too.
+    words.resize(0x80000);
+    for (size_t i = 0; i < words.size(); ++i)
+        words[i] = static_cast<uint16_t>(r.osHigh[i & 0x3FFFF] << 8 | r.osLow[i & (r.osLow.size() - 1)]);
     return true;
 }
 

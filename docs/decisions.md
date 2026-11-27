@@ -683,11 +683,11 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 ## TS machine
 
 ## T2: OS ROM image
-- Options: (a) even bytes from h, odd bytes from the first 256 KB of l, a 512 KB image; (b) treat the l upper half as mapped (A18 tied high, as the schematic shows).
-- Choice: (a). A 256 KB l file (v1.20, v2.02) is used whole.
-- Evidence: in every 512 KB l dump the reset vector (SSP 0xFF80A0, PC 0xC0073E) and all version differences are in the lower half; the upper half is identical in TS-10 3.05/3.10 and TS-12 3.05/3.10 and 69 % 0xFF. The dumps win over the schematic.
-- Confidence: Medium-high.
-- Status: Implemented in `ens::ts::buildOsImage` (Plan 3 Task 1). Tests: ts_os_image_interleaves_lower_half, ts_roms_wrong_size_named.
+- Options: (a) even bytes from h, odd bytes from the first 256 KB of l, a 512 KB image; (b) treat the l upper half as mapped (A18 tied high, as the schematic shows); (c) the 1 MB window 0xC00000-0xCFFFFF: odd bytes from all of l (its upper half at 0xC80000), even bytes from h mirrored.
+- Choice: (c), since 2026-11-27 (issue #9; (a) before). A 256 KB l file (v1.20, v2.02) is mirrored like h.
+- Evidence: in every 512 KB l dump the reset vector (SSP 0xFF80A0, PC 0xC0073E) and all version differences are in the lower half; the upper half is identical in TS-10 3.05/3.10 and TS-12 3.05/3.10 and 69 % 0xFF. Its non-0xFF bytes are byte-wide sound records named like the General MIDI Sound Map (Musician's Manual section 12: VIBRAPHONE, BAGPIPE, OCARINA ...). With (a) General MIDI mode (MIDI Control, GMIDI, Up, *YES*) showed `GM-PROG=001 ( -` and a control code; with (c) it shows `GM-PROG=001 GRAND-PIANO`, the manual's first GM sound. The boot trace and the three render hashes are unchanged.
+- Confidence: High for the odd bytes at 0xC80000; Low for the even bytes there (h mirrored is a guess no read has shown).
+- Status: Implemented in `ens::ts::buildOsImage` (Plan 3 Task 1; the 1 MB window 2026-11-27) and `kRomBytes` in `src/ts/machine.cpp`. Tests: ts_os_image_interleaves_lower_half, ts_roms_wrong_size_named, ts_general_midi_names_its_sounds.
 
 ## T3: Wave memory layout
 - Options: bank 0 and bank 1 layouts from the schematic; word byte order of U45/U46 either way.

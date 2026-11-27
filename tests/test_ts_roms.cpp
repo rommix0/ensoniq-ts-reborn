@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -25,14 +26,18 @@ TEST(ts_os_image_interleaves_lower_half) {
     r.osLow[1] = 0xA2;
     std::vector<uint16_t> w;
     std::string err;
+    r.osLow[0x40000] = 0xB1;
     CHECK(buildOsImage(r, w, err));
-    CHECK_EQ(w.size(), 0x40000u);
+    CHECK_EQ(w.size(), 0x80000u);
     CHECK_EQ(w[0], 0x11A1);
     CHECK_EQ(w[1], 0x22A2);
-    r.osLow.resize(0x40000);
+    CHECK_EQ(w[0x40000], 0x11B1);  // l's upper half at 0xC80000, h mirrored beside it (T2)
+    CHECK_EQ(w[0x40001], 0x22FF);
+    r.osLow.resize(0x40000);  // a 256 KB l is mirrored
     std::vector<uint16_t> w2;
     CHECK(buildOsImage(r, w2, err));
-    CHECK(w == w2);
+    CHECK_EQ(w2[0x40000], 0x11A1);
+    CHECK(std::equal(w2.begin(), w2.begin() + 0x40000, w.begin()));
 }
 
 TEST(ts_bank0_builds_12_bit_samples) {
