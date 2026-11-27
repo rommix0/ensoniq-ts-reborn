@@ -5,9 +5,11 @@
 
 ## What changed
 
-- A button beside the gear slides the lower strip (keys, pitch and mod wheels, patch buttons) out and in. Hiding
-  releases what the strip holds, slides it out in about 250 ms, then shrinks the window to the top panel (1546 x 258
-  at the default width); showing grows the window, then slides the strip in. The choice is stored in `settings.xml`
+- A button beside the gear slides the lower strip (keys, pitch and mod wheels, patch buttons) up under the top panel
+  and back. Hiding releases what the strip holds, slides it under in about 250 ms, then shrinks the window to the top
+  panel (1546 x 234 at the default width, cut just under the lowest label); showing grows the window, then slides the
+  strip down. The user's first check found it sliding down out of the window and an empty band under the hidden
+  panel; both changed (strip in its own clipped layer, `kTopH` 430 to 390). The choice is stored in `settings.xml`
   (`keyboard`) and a new editor opens in it.
 - `settings.xml` is read again before each change, which closes A137's "last writer wins" limit (a processor's
   settings no longer put back another instance's newer values).
@@ -25,7 +27,8 @@
 | Linux GCC x64 (WSL) | 441 passed | 8 passed | all passed |
 
 Reference hashes unchanged: boot trace `ba7e34a4cf23d1e0`, render `23b6485893beb761`. The offscreen snapshot
-`panel-keyboard-hidden.png` (`TSR_SNAPSHOT_DIR`) shows the top panel only, with the toggle beside the gear.
+`panel-keyboard-hidden.png` (`TSR_SNAPSHOT_DIR`) shows the top panel only, with the toggle beside the gear;
+`panel-keyboard-sliding.png` shows the strip 100 ms into a hide, part-way under the panel.
 
 New checks, each seen failing first: `panel_layout_strip_below_top` (core), `settings_keyboard` (including an
 `AppSettings` made before the toggle), `editor_keyboard_slide` (including one resize per show and the fit by height),
@@ -36,10 +39,7 @@ New checks, each seen failing first: `panel_layout_strip_below_top` (core), `set
 - After a settings change, a processor's later reads of the ROM folder and memory file see another instance's newer
   values (the reload). Arguably better for the shared memory; not yet written into A137.
 - Tab, Space or accessibility can still reach a strip button during the 250 ms slide (the mouse cannot).
-- `Board::setStripOffset` places parts at their table rect; an LED (drawn 4 units larger) moved into the strip later
-  would need its own offset.
 - The shown minimum height is 367 (integer division), was 368.
-- A misplaced comment on the Board's `offset_` member.
 
 ## User to run
 

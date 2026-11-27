@@ -597,32 +597,38 @@ public:
                 }
                 case ControlKind::Label: painted_.push_back(&c); continue;
             }
-            addAndMakeVisible(*p);
-            if (c.r.y >= ens::app::kTopH) strip_.push_back({p.get(), &c});
+            if (c.r.y >= ens::app::kTopH) {  // A139: the strip's parts live in its layer, in its coordinates
+                p->setTopLeftPosition(p->getX(), p->getY() - ens::app::kTopH);
+                layer_.addAndMakeVisible(*p);
+            } else {
+                addAndMakeVisible(*p);
+            }
             parts_.push_back(std::move(p));
         }
+        // DECISION A139: the strip is a layer inside a window (clip_) that starts at kTopH: moving the layer up slides
+        // the strip under the top panel, which clip_'s top edge cuts it at.
+        clip_.setBounds(0, ens::app::kTopH, ens::app::kDesignW, ens::app::kDesignH - ens::app::kTopH);
+        layer_.setBounds(clip_.getLocalBounds());
+        clip_.setInterceptsMouseClicks(false, true);
+        clip_.addAndMakeVisible(layer_);
+        addAndMakeVisible(clip_);
     }
 
-    // DECISION A139: the strip (everything at y >= kTopH) moved down by dy design units: 0 in place, kDesignH - kTopH
-    // out of the board, where its parts are hidden. Only a strip in place takes the mouse.
+    // DECISION A139: the strip (everything at y >= kTopH) moved up by dy design units, under the top panel: 0 in place,
+    // kDesignH - kTopH all the way under, where it is hidden. Only a strip in place takes the mouse.
     void setStripOffset(int dy) {
-        if (dy == offset_) return;
-        offset_ = dy;
-        for (auto& [part, c] : strip_) {
-            part->setTopLeftPosition(c->r.x, c->r.y + dy);
-            part->setVisible(dy < ens::app::kDesignH - ens::app::kTopH);
-            part->setInterceptsMouseClicks(dy == 0, dy == 0);
-        }
-        repaint(0, ens::app::kTopH, ens::app::kDesignW, ens::app::kDesignH - ens::app::kTopH);
+        layer_.setTopLeftPosition(0, -dy);
+        clip_.setVisible(dy < ens::app::kDesignH - ens::app::kTopH);
+        clip_.setInterceptsMouseClicks(false, dy == 0);
     }
     // Before the strip goes: its key, its patch buttons (latched too) and its wheels released; the pitch wheel springs
     // back, the mod wheel keeps its value (AnalogPart::release).
     void releaseStrip() {
         keyUp();
         for (auto* b : buttons_)
-            if (b->getY() >= ens::app::kTopH) b->release(true);
+            if (b->getParentComponent() == &layer_) b->release(true);
         for (auto* a : analogs_)
-            if (a->getY() >= ens::app::kTopH) a->release();
+            if (a->getParentComponent() == &layer_) a->release();
     }
 
     void release(bool latchedToo) {
@@ -658,7 +664,7 @@ public:
     }
     void keyMove(const juce::MouseEvent& e) {
         if (!keyDrag_) return;
-        const auto p = e.getEventRelativeTo(this).position;
+        const auto p = e.getEventRelativeTo(&layer_).position;  // the keys' parent (A139)
         KeyPart* k = nullptr;
         for (auto it = keys_.rbegin(); it != keys_.rend() && k == nullptr; ++it)  // blacks first: on top
             if ((*it)->getBounds().toFloat().contains(p)) k = *it;
@@ -678,19 +684,40 @@ public:
     }
 
     void paint(juce::Graphics& g) override {
-        // The body as the photo: the panel, the brushed strip's edge, the key bed and the wheel box.
+        g.fillAll(kPanel);  // the top panel; the strip's layer paints the rest (A139)
+        for (const Control* c : painted_)
+            if (c->r.y < ens::app::kTopH) paintLabel(g, c);
+
+        // The outline arrows printed above Up and below Down (the photo).
+        g.setColour(kText);
+        for (const Control* c : arrows_) {
+            const bool up = c->id == static_cast<int>(ens::ts::Button::Up);
+            const float x = c->r.x + c->r.w / 2.0f, y = up ? c->r.y - 9.0f : static_cast<float>(c->r.y + c->r.h + 9);
+            const float tip = up ? -4.0f : 4.0f;
+            juce::Path t;
+            t.addTriangle(x - 7, y - tip, x + 7, y - tip, x, y + tip);
+            g.strokePath(t, juce::PathStrokeType(1.5f));
+        }
+    }
+    // The strip's body as the photo, in board coordinates: the panel down to the brushed strip's edge, the key bed, the
+    // wheel box and the strip's labels (A139: drawn by the layer, which moves with it).
+    void paintStrip(juce::Graphics& g) {
         g.fillAll(kPanel);
         g.setColour(kEdge);
         g.fillRect(60, 395, 2470, 2);
         g.setColour(kBack);
-        g.fillRect(0, 540 + offset_, ens::app::kDesignW, ens::app::kDesignH - 540);  // A139: with the strip
-        box(g, {62.0f, 552.0f + static_cast<float>(offset_), 266.0f, 352.0f}, kPanel, kEdge, 6.0f);
+        g.fillRect(0, 540, ens::app::kDesignW, ens::app::kDesignH - 540);
+        box(g, {62.0f, 552.0f, 266.0f, 352.0f}, kPanel, kEdge, 6.0f);
         g.setColour(kGroove);
-        g.fillRect(330, 548 + offset_, 2150, 362);
+        g.fillRect(330, 548, 2150, 362);
+        for (const Control* c : painted_)
+            if (c->r.y >= ens::app::kTopH) paintLabel(g, c);
+    }
 
-        for (const Control* c : painted_) {
-            auto r = rect(c->r);
-            if (c->r.y >= ens::app::kTopH) r.translate(0, offset_);
+private:
+    void paintLabel(juce::Graphics& g, const Control* c) {
+        {
+            const auto r = rect(c->r);
             if (c->ink == Ink::Decal) {
                 // DECISION A122: the TS-10 logo and the Ensoniq badge are drawn from their SVGs, kept to
                 // their shapes; the line under the logo is text, tall and narrow, stretched or squeezed to
@@ -700,7 +727,7 @@ public:
                                                                               : nullptr;
                 if (art != nullptr) {
                     art->drawWithin(g, r.toFloat(), juce::RectanglePlacement::centred, 1.0f);
-                    continue;
+                    return;
                 }
                 auto font = labelFont(c->r.h * 1.3f, false).withExtraKerningFactor(0.08f);
                 const float w = juce::GlyphArrangement::getStringWidth(font, c->label);
@@ -708,7 +735,7 @@ public:
                 g.setColour(kDecal);
                 g.setFont(font);
                 g.drawText(c->label, r, juce::Justification::centred, false);
-                continue;
+                return;
             }
             // A box 20 or more high holds two lines (the photo's button labels), even when the text has
             // one, which is centred. Each line is squeezed, never wrapped.
@@ -736,20 +763,18 @@ public:
                            juce::Justification::centred, false);
             }
         }
-
-        // The outline arrows printed above Up and below Down (the photo).
-        g.setColour(kText);
-        for (const Control* c : arrows_) {
-            const bool up = c->id == static_cast<int>(ens::ts::Button::Up);
-            const float x = c->r.x + c->r.w / 2.0f, y = up ? c->r.y - 9.0f : static_cast<float>(c->r.y + c->r.h + 9);
-            const float tip = up ? -4.0f : 4.0f;
-            juce::Path t;
-            t.addTriangle(x - 7, y - tip, x + 7, y - tip, x, y + tip);
-            g.strokePath(t, juce::PathStrokeType(1.5f));
-        }
     }
 
-private:
+    // A139: the strip's layer: paints the strip's body in its own coordinates (kTopH below the board's).
+    struct Layer : juce::Component {
+        explicit Layer(Board& b) : board(b) {}
+        void paint(juce::Graphics& g) override {
+            g.setOrigin(0, -ens::app::kTopH);
+            board.paintStrip(g);
+        }
+        Board& board;
+    };
+
     std::vector<std::unique_ptr<Part>> parts_;
     std::vector<ButtonPart*> buttons_;
     std::vector<LedPart*> leds_;
@@ -760,9 +785,9 @@ private:
     DrivePart* drive_ = nullptr;
     std::unique_ptr<juce::Drawable> ts10_ = art(TsArt::ts10_logo_svg, TsArt::ts10_logo_svgSize);
     std::unique_ptr<juce::Drawable> ensoniq_ = art(TsArt::ensoniq_logo_svg, TsArt::ensoniq_logo_svgSize, kBadge);
-    std::vector<const Control*> painted_;
-    std::vector<std::pair<juce::Component*, const Control*>> strip_;  // A139: the parts below kTopH
-    int offset_ = 0;  // labels, drawn by the board
+    std::vector<const Control*> painted_;  // labels: the top's drawn by the board, the strip's by its layer
+    juce::Component clip_;  // A139: the strip's window, kTopH down; layer_ moves up inside it
+    Layer layer_{*this};
     std::vector<const Control*> arrows_;   // Up and Down
     juce::Component* display_ = nullptr;
 };
@@ -804,9 +829,10 @@ private:
 
 Board& board(juce::Component& c) { return static_cast<Board&>(c); }
 
-void KeyPart::mouseDown(const juce::MouseEvent& e) { board(*getParentComponent()).keyDown(e); }
-void KeyPart::mouseDrag(const juce::MouseEvent& e) { board(*getParentComponent()).keyMove(e); }
-void KeyPart::mouseUp(const juce::MouseEvent&) { board(*getParentComponent()).keyUp(); }
+// A139: a key's parent is the strip's layer; its board is further up.
+void KeyPart::mouseDown(const juce::MouseEvent& e) { findParentComponentOfClass<Board>()->keyDown(e); }
+void KeyPart::mouseDrag(const juce::MouseEvent& e) { findParentComponentOfClass<Board>()->keyMove(e); }
+void KeyPart::mouseUp(const juce::MouseEvent&) { findParentComponentOfClass<Board>()->keyUp(); }
 
 }  // namespace
 

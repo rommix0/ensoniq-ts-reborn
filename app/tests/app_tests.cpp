@@ -1419,8 +1419,8 @@ bool stripOut(juce::Component& ed) {
 }
 
 // editor_keyboard_slide (A139): shown at 1546 x 552; a held key, a bent pitch wheel, a moved mod wheel and a latched
-// patch button; the toggle releases them (the mod wheel keeps its value), slides the strip out and leaves 1546 x 258,
-// stored as hidden. Resizing keeps 2576:430; a model switch keeps the new board's strip out; a new editor opens
+// patch button; the toggle releases them (the mod wheel keeps its value), slides the strip out and leaves 1546 x 234,
+// stored as hidden. Resizing keeps 2576:390; a model switch keeps the new board's strip out; a new editor opens
 // hidden with no slide; toggling back gives 1546 x 552 with the keys in.
 void editorKeyboardSlide(const juce::File& dir) {
     using ens::app::ControlKind;
@@ -1475,17 +1475,17 @@ void editorKeyboardSlide(const juce::File& dir) {
     const bool keyOff = sent(200, false);
     settle(pe);
     std::printf("  hidden: %d x %d\n", ed->getWidth(), ed->getHeight());
-    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 258 && !pe.sliding() && stripOut(*ed) && !key.isVisible());
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 234 && !pe.sliding() && stripOut(*ed));
     CHECK(keyOff && feq(bend->getValue(), 0.5f) && feq(mod->getValue(), modBefore));
     CHECK(pe.lastPosted().kind == ens::app::Event::Kind::PatchSelect && !pe.lastPosted().down);
     CHECK(!AppSettings().keyboardShown());
     paintEditor(*ed, "panel-keyboard-hidden.png");
 
-    // Review Focus 3: a resize keeps 2576:430.
+    // Review Focus 3: a resize keeps 2576:390.
     pe.setBoundsConstrained({0, 0, 2000, 900});
     std::printf("  resized hidden: %d x %d\n", ed->getWidth(), ed->getHeight());
-    CHECK(std::abs(ed->getHeight() - static_cast<int>(std::lround(ed->getWidth() * 430.0 / 2576))) <= 1);
-    pe.setSize(1546, 258);
+    CHECK(std::abs(ed->getHeight() - static_cast<int>(std::lround(ed->getWidth() * 390.0 / 2576))) <= 1);
+    pe.setSize(1546, 234);
 
     // Review Focus 2: a model switch rebuilds the board with its strip out.
     p.setModel(ens::ts::Model::Ts12);
@@ -1493,7 +1493,7 @@ void editorKeyboardSlide(const juce::File& dir) {
         juce::Thread::sleep(40);
         juce::Timer::callPendingTimersSynchronously();
     }
-    CHECK(stripOut(*ed) && ed->getHeight() == 258);
+    CHECK(stripOut(*ed) && ed->getHeight() == 234);
     p.setModel(ens::ts::Model::Ts10);
     for (int i = 0; i < 10; ++i) {
         juce::Thread::sleep(40);
@@ -1503,7 +1503,7 @@ void editorKeyboardSlide(const juce::File& dir) {
     ed.reset();
     ed.reset(p.createEditor());
     auto& again = static_cast<PanelEditor&>(*ed);
-    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 258 && !again.sliding() && stripOut(*ed));
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 234 && !again.sliding() && stripOut(*ed));
     // Showing resizes once, straight to 1546 x 552 (review fix: the new limits under the old aspect first went
     // through about 2205 x 368, a second host resize).
     struct Sizes : juce::ComponentListener {
@@ -1537,12 +1537,19 @@ void keyboardToggleMidSlide(const juce::File& dir) {
     {
         std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
         auto& pe = static_cast<PanelEditor&>(*ed);
+        auto& board = *ed->getChildComponent(0);
+        const auto& c60 = control(ens::app::ControlKind::Key, 60);
+        auto& key = part(*ed, c60);
         pe.toggleKeyboard();
         for (int i = 0; i < 10; ++i) {
             juce::Thread::sleep(10);
             juce::Timer::callPendingTimersSynchronously();
         }
-        CHECK(pe.sliding());
+        // The strip slides up, under the top panel (the user's check: it slid down, out of the window).
+        const int y = board.getLocalPoint(&key, juce::Point<int>()).y;
+        std::printf("  mid-slide: key at y %d (in place %d)\n", y, c60.r.y);
+        CHECK(pe.sliding() && y < c60.r.y);
+        paintEditor(*ed, "panel-keyboard-sliding.png");
         pe.toggleKeyboard();
         CHECK(pe.sliding() && pe.keyboardShown());
         settle(pe);
@@ -1551,7 +1558,7 @@ void keyboardToggleMidSlide(const juce::File& dir) {
     }
     CHECK(!AppSettings().keyboardShown());
     std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
-    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 258 && stripOut(*ed));
+    CHECK(ed->getWidth() == 1546 && ed->getHeight() == 234 && stripOut(*ed));
     AppSettings().setKeyboardShown(true);
 }
 
@@ -1758,8 +1765,12 @@ KeyCount keysOf(juce::Component& ed, Model m) {
     KeyCount k;
     for (const auto& c : ens::app::panelLayout(m)) {
         if (c.kind != ens::app::ControlKind::Key) continue;
-        auto* p = ed.getChildComponent(0)->getComponentAt(c.r.x + c.r.w / 2, c.r.y + c.r.h - 4);  // the front: on top
-        if (p != nullptr && p->getBounds() == juce::Rectangle<int>(c.r.x, c.r.y, c.r.w, c.r.h)) {
+        auto& board = *ed.getChildComponent(0);
+        auto* p = board.getComponentAt(c.r.x + c.r.w / 2, c.r.y + c.r.h - 4);  // the front: on top
+        // In board coordinates: a key's parent is the strip's layer (A139).
+        if (p != nullptr && p != &board &&
+            board.getLocalArea(p->getParentComponent(), p->getBounds()) ==
+                juce::Rectangle<int>(c.r.x, c.r.y, c.r.w, c.r.h)) {
             ++k.n;
             k.lo = std::min(k.lo, c.id);
             k.hi = std::max(k.hi, c.id);

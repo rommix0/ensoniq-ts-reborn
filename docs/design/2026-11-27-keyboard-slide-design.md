@@ -5,6 +5,9 @@ resolutions). The user's decisions: a button slides the keyboard in and out with
 lower strip goes (keys, pitch and mod wheels, patch buttons); approach A below. The square-variant mockup is set
 aside.
 
+Revised 2026-11-27 after the user's check of the first build: the strip slides up under the top panel (it slid down,
+out of the window), and the hidden panel is cut at y 390, just under its lowest label (430 left an empty band).
+
 ## Intent
 
 The panel is 2576 x 920 design units, 1546 x 552 pixels by default, aspect fixed (A112). On a laptop it is too tall.
