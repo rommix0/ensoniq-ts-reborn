@@ -46,6 +46,8 @@ private:
     bool sameEngine();  // false, after resetting the parts, when the engine was replaced
     void stepSlide();        // A139: the slide timer
     void fitSize(bool full);  // A139: the limits, aspect and height for the full panel or the top only
+    void setLimits(double aspect, int lowH, int highH);  // A139: the constrainer, without a resize
+    bool follows() const;     // A139: the window resizes with the slide (the Standalone)
 
     TsProcessor& proc_;
     ens::app::Engine* engine_ = nullptr;  // the engine the parts' state belongs to

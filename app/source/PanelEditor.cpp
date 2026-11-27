@@ -857,18 +857,26 @@ PanelEditor::~PanelEditor() { board(*board_).release(true); }
 // DECISION A139: the panel shown in full (kDesignH) or the top only (kTopH) fits the window, as A112's letterbox did:
 // a window wider than that shape (a host ignoring the aspect) is fitted by its height, not cut off (review fix).
 void PanelEditor::resized() {
-    const auto h = static_cast<float>(full_ ? ens::app::kDesignH : ens::app::kTopH);
+    const auto h = static_cast<float>(ens::app::kDesignH - offset_);  // the panel down to the strip's bottom
     board_->setTransform(juce::AffineTransform::scale(
         std::min(getWidth() / static_cast<float>(ens::app::kDesignW), getHeight() / h)));
 }
 
-// DECISION A139 (approach A): hiding releases the strip, slides it out, then shrinks the window; showing grows the
-// window, then slides it in. A click mid-slide reverses from where the strip is. The state is stored at once.
+// DECISION A139 (approach A): hiding releases the strip, slides it under the top panel, then shrinks the window;
+// showing grows the window, then slides it down. The Standalone (File mode: its own window, no host) instead resizes
+// with the slide, the window's bottom following the strip (the user's choice); a plugin keeps one host resize each
+// way. A click mid-slide reverses from where the strip is. The state is stored at once.
 void PanelEditor::toggleKeyboard() {
     shown_ = !shown_;
     AppSettings().setKeyboardShown(shown_);
     if (!shown_) board(*board_).releaseStrip();
-    if (shown_ && !full_) fitSize(true);
+    if (follows()) {
+        // Any height from the top panel's to the whole panel's at this width, while the slide sets it.
+        full_ = true;
+        setLimits(0, ens::app::kTopH, ens::app::kDesignH);
+    } else if (shown_ && !full_) {
+        fitSize(true);
+    }
     from_ = offset_;
     to_ = shown_ ? 0 : ens::app::kDesignH - ens::app::kTopH;
     startMs_ = juce::Time::getMillisecondCounterHiRes();
@@ -882,20 +890,32 @@ void PanelEditor::stepSlide() {
     const double t = std::min(1.0, (juce::Time::getMillisecondCounterHiRes() - startMs_) / ms);
     offset_ = from_ + (to_ - from_) * (1 - (1 - t) * (1 - t));
     board(*board_).setStripOffset(static_cast<int>(std::lround(offset_)));
+    if (follows())  // the window's bottom at the strip's
+        setSize(getWidth(), static_cast<int>(std::lround(getWidth() * (ens::app::kDesignH - offset_) / ens::app::kDesignW)));
     if (t < 1) return;
     slide_.stopTimer();
-    if (!shown_) fitSize(false);
+    if (follows() || !shown_) fitSize(shown_);
 }
 
-// The limits and aspect for the full panel or the top only; the width stays, the height follows. One resize: the new
-// aspect and size first, then the limits, which the bounds then already meet (setResizeLimits constrains the bounds
-// it finds: under the old aspect it went through about 2200 x 367 on a show, a second host resize; review fix).
+bool PanelEditor::follows() const { return proc_.memoryMode() == MemoryMode::File; }
+
+// The limits and aspect for the full panel or the top only; the width stays, the height follows. The constrainer is
+// set before the size and set directly: the Standalone's window, and Windows for every native resize
+// (juce_Windowing_windows.cpp, handlePositionChanging), check the new size against the editor's constrainer, so limits
+// set after it kept the window at the old minimum (2424 x 367 around a 1546 x 234 panel: the user's check); and
+// setResizeLimits would constrain the old bounds first, a second host resize (review fix).
 void PanelEditor::fitSize(bool full) {
     full_ = full;
     const int h = full ? ens::app::kDesignH : ens::app::kTopH, w = getWidth();
-    getConstrainer()->setFixedAspectRatio(static_cast<double>(ens::app::kDesignW) / h);
+    setLimits(static_cast<double>(ens::app::kDesignW) / h, h, h);
     setSize(w, static_cast<int>(std::lround(static_cast<double>(w) * h / ens::app::kDesignW)));
-    setResizeLimits(1030, 1030 * h / ens::app::kDesignW, 2 * ens::app::kDesignW, 2 * h);
+}
+
+// Widths 1030 to 2 x kDesignW, heights for design heights lowH to highH at those widths, and the aspect (0: free).
+void PanelEditor::setLimits(double aspect, int lowH, int highH) {
+    auto* c = getConstrainer();
+    c->setSizeLimits(1030, 1030 * lowH / ens::app::kDesignW, 2 * ens::app::kDesignW, 2 * highH);
+    c->setFixedAspectRatio(aspect);
 }
 
 juce::RangedAudioParameter* PanelEditor::param(const char* id) { return proc_.params().getParameter(id); }

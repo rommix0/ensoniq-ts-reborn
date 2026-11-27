@@ -6,7 +6,10 @@ lower strip goes (keys, pitch and mod wheels, patch buttons); approach A below. 
 aside.
 
 Revised 2026-11-27 after the user's check of the first build: the strip slides up under the top panel (it slid down,
-out of the window), and the hidden panel is cut at y 390, just under its lowest label (430 left an empty band).
+out of the window), and the hidden panel is cut at y 390, just under its lowest label (430 left an empty band). After
+the second check: the Standalone's window resizes with the slide (approach B there, where no host can stutter); the
+plugin keeps approach A; and the window no longer keeps a band around the hidden panel (the editor's limits are set
+before its size).
 
 ## Intent
 

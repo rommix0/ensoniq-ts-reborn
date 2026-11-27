@@ -1528,6 +1528,74 @@ void editorKeyboardSlide(const juce::File& dir) {
     ed.reset();
 }
 
+// The Standalone's window as JUCE builds it (juce_StandaloneFilterWindow.h: MainContentComponent follows the editor's
+// size, DecoratorConstrainer wraps the editor's constrainer) with what Windows adds: every move or resize of a native
+// window passes through that constrainer (juce_Windowing_windows.cpp, handlePositionChanging). Not on the desktop.
+struct StandaloneFrame : juce::Component, juce::ComponentListener {
+    struct Wrap : juce::BorderedComponentBoundsConstrainer {
+        juce::AudioProcessorEditor* ed = nullptr;
+        juce::ComponentBoundsConstrainer* getWrappedConstrainer() const override { return ed->getConstrainer(); }
+        juce::BorderSize<int> getAdditionalBorder() const override { return {}; }
+    } wrap;
+    juce::AudioProcessorEditor& ed;
+    bool following = false;
+    explicit StandaloneFrame(juce::AudioProcessorEditor& e) : ed(e) {
+        wrap.ed = &e;
+        addAndMakeVisible(ed);
+        setBounds(ed.getBounds());
+        ed.addComponentListener(this);
+    }
+    ~StandaloneFrame() override { ed.removeComponentListener(this); }
+    // The editor resized itself: the window asks for the editor's size, which the constrainer may change.
+    void componentMovedOrResized(juce::Component&, bool, bool resized) override {
+        if (!resized) return;
+        const juce::ScopedValueSetter<bool> s(following, true);
+        auto r = getBounds().withSize(ed.getWidth(), ed.getHeight());
+        wrap.checkBounds(r, getBounds(), {0, 0, 100000, 100000}, false, false, false, false);
+        setBounds(r);
+    }
+    // The window resized: the editor is fitted to it (MainContentComponent::handleResized), unless it is following.
+    void resized() override {
+        if (!following) ed.setBoundsConstrained(getLocalBounds());
+    }
+};
+
+// standalone_window_follows_keyboard (A139, the user's check): the window ends at the editor's size, with no band
+// around it (Windows' constrainer saw the shown limits when the editor shrank: 2424 x 367 around 1546 x 234). In the
+// Standalone (File mode) it shrinks and grows with the slide; a plugin's host window takes one resize each way.
+void standaloneWindowFollowsKeyboard(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    for (const auto mode : {MemoryMode::File, MemoryMode::Project}) {
+        const bool standalone = mode == MemoryMode::File;
+        TsProcessor p(mode);
+        if (!p.engine()) return;
+        std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
+        auto& pe = static_cast<PanelEditor&>(*ed);
+        StandaloneFrame frame(*ed);
+        struct Heights : juce::ComponentListener {
+            std::vector<int> seen;
+            void componentMovedOrResized(juce::Component& c, bool, bool resized) override {
+                if (resized) seen.push_back(c.getHeight());
+            }
+        } heights;
+        frame.addComponentListener(&heights);
+        for (const bool show : {false, true}) {
+            heights.seen.clear();
+            pe.toggleKeyboard();
+            settle(pe);
+            std::printf("  %s %s: frame %d x %d, editor %d x %d, %d resizes\n", standalone ? "standalone" : "plugin",
+                        show ? "shown" : "hidden", frame.getWidth(), frame.getHeight(), ed->getWidth(),
+                        ed->getHeight(), static_cast<int>(heights.seen.size()));
+            CHECK(frame.getBounds() == ed->getBounds() && ed->getWidth() == 1546 &&
+                  ed->getHeight() == (show ? 552 : 234));
+            CHECK(standalone ? heights.seen.size() > 3 : heights.seen.size() == 1);
+        }
+        frame.removeComponentListener(&heights);
+        frame.removeChildComponent(ed.get());
+    }
+    AppSettings().setKeyboardShown(true);
+}
+
 // keyboard_toggle_mid_slide (A139, Review Focus 1 and 5): a second click 100 ms into the slide reverses it, ending
 // shown at full size; an editor closed mid-slide leaves the setting hidden and a new one opens hidden.
 void keyboardToggleMidSlide(const juce::File& dir) {
@@ -2847,6 +2915,7 @@ int main() {
     editor(dir.getChildFile("editor"));
     editorKeyboardSlide(dir.getChildFile("ed-keyboard"));
     keyboardToggleMidSlide(dir.getChildFile("ed-keyboard-mid"));
+    standaloneWindowFollowsKeyboard(dir.getChildFile("ed-keyboard-standalone"));
     editorTs12HasKeys(dir.getChildFile("ed-ts12"));
     editorFollowsModelSwitch(dir.getChildFile("ed-switch"));
     editorTs12StrikeRange(dir.getChildFile("ed-strike"));
