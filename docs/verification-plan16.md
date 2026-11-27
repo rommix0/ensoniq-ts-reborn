@@ -10,8 +10,12 @@
   cell's width, its ink centred in the row. The cursor is a rounded bar under the glyph, where the font's Cursor
   weight draws it. Codes outside 0x20-0x7E, the hex overlay and the blink are unchanged (A113).
 - The font (`app/resources/fonts/EnsoniqVFD.otf`, 114 KB, unchanged) is compiled in. Its SIL OFL 1.1 text is beside
-  it, goes into each release folder as `OFL-EnsoniqVFD.txt` (`tools/dist.ps1`, `tools/dist.sh`), and the README
-  credits it.
+  it, goes into each release folder and the VST3 package's `Contents/Resources` as `OFL-EnsoniqVFD.txt`
+  (`tools/dist.ps1`, `tools/dist.sh`), and the README credits it and LCD14 (OFL 1.1, Fredrick Brennan), the set its
+  characters beyond the hardware-checked ones follow.
+- A whole-branch review (fresh reviewer) found no critical or important issues. Re-graded and fixed: the OFL went
+  only into the release folder, not into the VST3 package that is installed on its own; LCD14 was not credited; the
+  cursor bar's place inside its row was not checked (and a comment overstated its margin).
 
 ## Toolchains
 
@@ -27,12 +31,16 @@ layered sound's name), `panel-ts12.png`, `panel-noroms.png` ("ROM missing:" and 
 
 New check, seen failing first (link error, `vfdFont` not defined): `vfdFontCheck` (the typeface is "Ensoniq VFD";
 A, W, 0 and _ one cell wide within 1 % for cells of 8.48, 14.125 and 28.25; the cursor bar 101.04, 51.69,
-8.95 x 1.53 for a cell of 14.125 at baseline 100, 50).
+8.95 x 1.53 for a cell of 14.125 at baseline 100, 50; on the panel's 14.125 x 29 cell the bar ends at y 26.31, inside
+the row).
 
 ## Open
 
+- Deferred minors from the review: `vfdFont` falls back only when the typeface is null, not when it loads but
+  measures no width (an infinite height; not reachable with the font compiled in unchanged); spaces are shaped and
+  drawn like other characters (80 cells per repaint, as the old `drawText`).
 - The release scripts were syntax-checked, not run end to end; the next release run should show
-  `OFL-EnsoniqVFD.txt` in the folder.
+  `OFL-EnsoniqVFD.txt` in the folder and in the VST3 package's `Contents/Resources`.
 - The app's own messages (no ROMs, no audio device) have lowercase letters, which the font draws from its LCD14-based
   set (the hardware shows capitals only): "ts10" reads a little like "+s10".
 

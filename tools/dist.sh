@@ -56,7 +56,9 @@ mkdir -p "$out"
 cp "$art/Standalone/TS Reborn" "$out/"
 cp -r "$art/VST3/TS Reborn.vst3" "$out/"
 cp README.md panel.png LICENSE "$out/"
-cp app/resources/fonts/OFL.txt "$out/OFL-EnsoniqVFD.txt"  # the display's font (A141)
+# The display's font (A141) is inside both programs; its license goes with each, the VST3 being installed alone.
+cp app/resources/fonts/OFL.txt "$out/OFL-EnsoniqVFD.txt"
+cp app/resources/fonts/OFL.txt "$out/TS Reborn.vst3/Contents/Resources/OFL-EnsoniqVFD.txt"
 cp docs/tsapp.md "$out/APP-GUIDE.md"
 for dest in "$out/roms" "$out/TS Reborn.vst3/Contents/Resources/roms"; do
     for entry in "${roms[@]}"; do

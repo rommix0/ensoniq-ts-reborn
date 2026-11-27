@@ -58,7 +58,9 @@ New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item -LiteralPath "$art\Standalone\TS Reborn.exe" $out
 Copy-Item -LiteralPath "$art\VST3\TS Reborn.vst3" $out -Recurse
 Copy-Item -LiteralPath README.md, panel.png, LICENSE $out
-Copy-Item -LiteralPath app\resources\fonts\OFL.txt "$out\OFL-EnsoniqVFD.txt"  # the display's font (A141)
+# The display's font (A141) is inside both programs; its license goes with each, the VST3 being installed alone.
+Copy-Item -LiteralPath app\resources\fonts\OFL.txt "$out\OFL-EnsoniqVFD.txt"
+Copy-Item -LiteralPath app\resources\fonts\OFL.txt "$out\TS Reborn.vst3\Contents\Resources\OFL-EnsoniqVFD.txt"
 Copy-Item -LiteralPath docs\tsapp.md "$out\APP-GUIDE.md"
 foreach ($dest in "$out\roms", "$out\TS Reborn.vst3\Contents\Resources\roms") {
     foreach ($f in $roms.Keys) {

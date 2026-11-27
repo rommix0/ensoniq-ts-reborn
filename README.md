@@ -60,4 +60,4 @@ This program is free software: you can redistribute it and/or modify it under th
 
 Ensoniq, TS-10 and TS-12 are trademarks of their respective owners. This project is not affiliated with or endorsed by them. The ROMs are not covered by this license.
 
-The display uses the Ensoniq VFD font by tymcode ([ensoniq-vfd-font](https://github.com/tymcode/ensoniq-vfd-font)), under the SIL Open Font License 1.1: [app/resources/fonts/OFL.txt](app/resources/fonts/OFL.txt), `OFL-EnsoniqVFD.txt` in a release folder.
+The display uses the Ensoniq VFD font by tymcode ([ensoniq-vfd-font](https://github.com/tymcode/ensoniq-vfd-font)), under the SIL Open Font License 1.1: [app/resources/fonts/OFL.txt](app/resources/fonts/OFL.txt), `OFL-EnsoniqVFD.txt` in a release folder and in the VST3 package's `Contents/Resources`. As the font's README says, its characters beyond those checked against the hardware (lowercase among them) follow the one-cell 14-segment set of [LCD14](https://github.com/ctrlcctrlv/lcd-font), SIL Open Font License 1.1, Copyright 2015 Fredrick Brennan.
