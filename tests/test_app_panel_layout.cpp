@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 #include "app/analog_map.h"
 #include "app/panel_layout.h"
@@ -26,6 +28,12 @@ const Control* find(ControlKind kind, int id) {
     for (const Control& c : panelLayout())
         if (c.kind == kind && c.id == id) return &c;
     return nullptr;
+}
+
+int countIn(const std::vector<Control>& t, ControlKind kind, int id) {
+    int n = 0;
+    for (const Control& c : t) n += c.kind == kind && c.id == id;
+    return n;
 }
 
 bool overlap(const Rect& a, const Rect& b) {
@@ -73,6 +81,42 @@ TEST(panel_layout_has_every_led_and_key) {
     CHECK_EQ(count(ControlKind::Slider, static_cast<int>(Analog::DataEntry)), 1);
     CHECK_EQ(count(ControlKind::Wheel, static_cast<int>(Analog::PitchWheel)), 1);
     CHECK_EQ(count(ControlKind::Wheel, static_cast<int>(Analog::ModWheel)), 1);
+}
+
+TEST(panel_layout_ts12_keys) {
+    using ens::ts::Model;
+    const auto& t10 = panelLayout(Model::Ts10);
+    const auto& t12 = panelLayout(Model::Ts12);
+    int x0 = 1 << 30, y0 = 1 << 30, x1 = 0, y1 = 0;
+    for (const Control& c : t10) {
+        if (c.kind != ControlKind::Key) continue;
+        x0 = std::min(x0, c.r.x), y0 = std::min(y0, c.r.y);
+        x1 = std::max(x1, c.r.x + c.r.w), y1 = std::max(y1, c.r.y + c.r.h);
+    }
+    int keys = 0, whites = 0;
+    std::vector<const Control*> rest12, rest10;
+    for (const Control& c : t12) {
+        if (c.kind != ControlKind::Key) {
+            rest12.push_back(&c);
+            continue;
+        }
+        ++keys;
+        whites += !isBlack(c.id);
+        CHECK(c.id >= 28 && c.id <= 103);
+        CHECK(c.r.x >= x0 && c.r.y >= y0 && c.r.x + c.r.w <= x1 && c.r.y + c.r.h <= y1);
+    }
+    CHECK_EQ(keys, 76);
+    CHECK_EQ(whites, 45);
+    for (int note = 28; note <= 103; ++note) CHECK_EQ(countIn(t12, ControlKind::Key, note), 1);
+    for (const Control& c : t10)
+        if (c.kind != ControlKind::Key) rest10.push_back(&c);
+    CHECK_EQ(rest12.size(), rest10.size());
+    for (size_t i = 0; i < rest10.size() && i < rest12.size(); ++i) {
+        const Control &a = *rest10[i], &b = *rest12[i];
+        CHECK(a.kind == b.kind && a.id == b.id && a.ink == b.ink);
+        CHECK(a.r.x == b.r.x && a.r.y == b.r.y && a.r.w == b.r.w && a.r.h == b.r.h);
+        CHECK(std::string(a.label) == std::string(b.label));
+    }
 }
 
 TEST(panel_layout_fits_and_does_not_overlap) {

@@ -40,7 +40,7 @@ void block(std::vector<Control>& t, int x0, int pitch, int cols, const char* con
         }
 }
 
-std::vector<Control> build() {
+std::vector<Control> build(ts::Model m) {
     std::vector<Control> t = {
         // Decor: the disk drive (the drive's control, A119).
         // DECISION A122: the decals: the TS-10 logo (the service manual's cover logo, kept to its shape), its
@@ -160,14 +160,17 @@ std::vector<Control> build() {
     t.push_back({K::Label, -1, {222, 890, 42, 14}, "Mod"});
 
     // Keys: whites first, so the blacks draw over them. The names outlive the table (static).
-    constexpr ts::KeyRange kKeys = ts::keyRange(ts::Model::Ts10);
-    static char names[kKeys.count][5];
-    const double ww = kKeysW / 36.0, bw = ww * 0.6;
+    // DECISION A137: both models draw their keys in the same kKeysW; the TS-12's 76 keys (45 white) are narrower.
+    const ts::KeyRange kKeys = ts::keyRange(m);
+    static char names[2][76][5];
+    int whites = 0;
+    for (int note = kKeys.lowest; note < kKeys.lowest + kKeys.count; ++note) whites += !isBlack(note);
+    const double ww = static_cast<double>(kKeysW) / whites, bw = ww * 0.6;
     const int bh = static_cast<int>(std::lround(kKeysH * 0.62));
     std::vector<Control> blacks;
     int wi = 0;
     for (int note = kKeys.lowest; note < kKeys.lowest + kKeys.count; ++note) {
-        char* name = names[note - kKeys.lowest];
+        char* name = names[static_cast<int>(m)][note - kKeys.lowest];
         const char* n = kNoteNames[note % 12];
         int len = 0;
         while (*n) name[len++] = *n++;
@@ -188,9 +191,9 @@ std::vector<Control> build() {
 
 }  // namespace
 
-const std::vector<Control>& panelLayout() {
-    static const std::vector<Control> t = build();
-    return t;
+const std::vector<Control>& panelLayout(ts::Model m) {
+    static const std::vector<Control> tables[2] = {build(ts::Model::Ts10), build(ts::Model::Ts12)};
+    return tables[static_cast<int>(m)];
 }
 
 }  // namespace ens::app

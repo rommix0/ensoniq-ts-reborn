@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "ts/panel.h"
+
 namespace ens::app {
 
 // DECISION A112: the photo scaled to 2576 x 920 design units (default window 1546 x 552, minimum 1030 x 368,
@@ -36,6 +38,7 @@ constexpr int kSeqLedId = 16;    // the Seqs/Songs LED (DUART OP3, not on the di
 // Where the 2 x 40 character cells go, inside the display window.
 constexpr Rect kDisplayText = {820, 170, 565, 58};
 
-const std::vector<Control>& panelLayout();  // built once, on first call (message thread)
+// Two tables (TS-10, TS-12), each built once, on first call (message thread).
+const std::vector<Control>& panelLayout(ts::Model m = ts::Model::Ts10);
 
 }  // namespace ens::app
