@@ -46,7 +46,8 @@ std::vector<Control> build(ts::Model m) {
         // DECISION A122: the decals: the TS-10 logo (the service manual's cover logo, kept to its shape), its
         // line and the Ensoniq badge, at the photo's places.
         {K::Decor, -1, {108, 112, 310, 233}, "Disk drive"},
-        {K::Label, -1, {2010, 152, 377, 106}, "TS-10", Ink::Decal},
+        // DECISION A140: each model's own logo, in the same place.
+        {K::Label, -1, {2010, 152, 377, 106}, m == ts::Model::Ts12 ? "TS-12" : "TS-10", Ink::Decal},
         {K::Label, -1, {2052, 261, 330, 21}, "Performance/Composition Synthesizer", Ink::Decal},
         {K::Label, -1, {2307, 330, 162, 30}, "ensoniq", Ink::Decal},
         {K::Button, kSettingsId, {2330, 80, 30, 30}, "Settings"},

@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "app/analog_map.h"
@@ -115,7 +117,8 @@ TEST(panel_layout_ts12_keys) {
         const Control &a = *rest10[i], &b = *rest12[i];
         CHECK(a.kind == b.kind && a.id == b.id && a.ink == b.ink);
         CHECK(a.r.x == b.r.x && a.r.y == b.r.y && a.r.w == b.r.w && a.r.h == b.r.h);
-        CHECK(std::string(a.label) == std::string(b.label));
+        const bool logo = a.ink == Ink::Decal && std::string(a.label) == "TS-10";  // A140: each model's own logo
+        CHECK(logo ? std::string(b.label) == "TS-12" : std::string(a.label) == std::string(b.label));
     }
 }
 
@@ -142,19 +145,34 @@ TEST(panel_layout_fits_and_does_not_overlap) {
     }
 }
 
-// The decals (A122) sit on bare panel: no control under the logo, its line or the badge.
+// The decals (A122) sit on bare panel: no control under the logo, its line or the badge, on both models (A140).
 TEST(panel_layout_decals_are_clear) {
-    int decals = 0;
-    for (const Control& d : panelLayout()) {
-        if (d.ink != Ink::Decal) continue;
-        ++decals;
-        for (const Control& c : panelLayout())
-            if (c.kind != ControlKind::Label && overlap(d.r, c.r)) {
-                std::printf("    %s under %s\n", c.label, d.label);
-                CHECK(false);
-            }
+    for (auto m : {ens::ts::Model::Ts10, ens::ts::Model::Ts12}) {
+        int decals = 0;
+        for (const Control& d : panelLayout(m)) {
+            if (d.ink != Ink::Decal) continue;
+            ++decals;
+            for (const Control& c : panelLayout(m))
+                if (c.kind != ControlKind::Label && overlap(d.r, c.r)) {
+                    std::printf("    %s under %s\n", c.label, d.label);
+                    CHECK(false);
+                }
+        }
+        CHECK_EQ(decals, 3);
     }
-    CHECK_EQ(decals, 3);
+}
+
+// DECISION A140: each model's logo decal, in the same place.
+TEST(panel_layout_logo_follows_model) {
+    for (auto [m, name] : {std::pair{ens::ts::Model::Ts10, "TS-10"}, std::pair{ens::ts::Model::Ts12, "TS-12"}}) {
+        int logos = 0;
+        for (const Control& c : panelLayout(m))
+            if (c.ink == Ink::Decal && std::strcmp(c.label, name) == 0) {
+                ++logos;
+                CHECK(c.r.x == 2010 && c.r.y == 152 && c.r.w == 377 && c.r.h == 106);
+            }
+        CHECK_EQ(logos, 1);
+    }
 }
 
 TEST(panel_layout_led_matches_button) {
