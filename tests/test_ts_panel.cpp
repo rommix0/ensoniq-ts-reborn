@@ -185,6 +185,17 @@ TEST(ts_panel_commands) {
 }
 
 // What the keyboard sends: buttons, keys and Poly-Key pressure (T16, T17).
+// DECISION T32: the TS-12 OS reads every button two codes up, 0x02-0x41.
+TEST(ts_panel_ts12_button_codes) {
+    Panel p;
+    p.setModel(Model::Ts12);
+    p.button(Button::FootSwitch1Right, true);
+    p.button(Button::System, true);
+    p.button(Button::Tuning, true);
+    p.button(Button::Tuning, false);
+    CHECK(toCpu(p) == (std::vector<uint8_t>{0x82, 0x00, 0x8C, 0x00, 0xC1, 0x00, 0x41, 0x00}));
+}
+
 TEST(ts_panel_button_bytes) {
     Panel p;
     p.button(Button::System, true);

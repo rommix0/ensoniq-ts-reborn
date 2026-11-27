@@ -7,7 +7,7 @@ namespace ens::ts {
 namespace {
 constexpr uint32_t kMask24 = 0xFFFFFF;
 // DECISION T13: the map found by running the OS (docs/ts-hardware-interface.md, "Memory map").
-constexpr uint32_t kRomBase = 0xC00000, kRomWindow = 0x100000, kRomBytes = 0x80000;  // mirror unobserved
+constexpr uint32_t kRomBase = 0xC00000, kRomWindow = 0x100000, kRomBytes = 0x100000;  // T2: l's upper half at 0xC80000
 // OSRAM at 0-0x37FFF and its top 32 KB again at 0xFF8000 (the window 0xFC0000-0xFFFFFF aliases all of it);
 // SEQEXP at 0x38000-0x77FFF, where the OS probes for the SQX-70.
 constexpr uint32_t kSeqExpBase = 0x038000, kSeqExpTop = 0x078000, kRamHighBase = 0xFC0000;

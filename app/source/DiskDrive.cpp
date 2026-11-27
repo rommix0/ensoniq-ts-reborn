@@ -235,7 +235,7 @@ void DiskDrive::poll() {
     // DECISION A129: on the first tick after the OS read new blocks (or another disk went in), a copy for the record.
     // While the restore runs the stand-ins own the drive and the copy slot waits (A131): nothing is asked.
     // The gap: a block the OS writes between its read and the copy is kept as written.
-    if (!copyAsked_ && proc_.memoryMode() == MemoryMode::Project) {
+    if (!copyAsked_) {  // DECISION A138: in both modes
         const auto s = e->snapshot();
         if (!s.restoring && s.diskIn && (s.diskReads != readsSeen_ || s.diskSwaps != swapsSeen_) && askCopy(e)) {
             readsSeen_ = s.diskReads;

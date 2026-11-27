@@ -77,6 +77,24 @@ TEST(ts12_keys_span_e1_to_g7) {
     CHECK(above.empty());
 }
 
+// The panel buttons open the pages the TS-10's do, two codes up (T32), and General MIDI names its sounds from the l
+// ROM's upper half as on the TS-10 (T2, issue #9).
+TEST(ts12_buttons_open_their_pages) {
+    auto m = loadTs(false, false, false, Model::Ts12);
+    if (!m) return;
+    runMs(*m, kBootMs);
+    tap(*m, Button::System);
+    CHECK(rowText(m->panel(), 0).compare(0, 12, "SYSTEM  TUNE") == 0);
+    tap(*m, Button::Tuning);  // the last code, 0x41
+    CHECK(rowText(m->panel(), 0).compare(0, 4, "XPOS") == 0);
+    tap(*m, Button::MidiControl);
+    tap(*m, Button::Soft2);  // GMIDI
+    tap(*m, Button::Up);     // ENTER GENERAL MIDI MODE ?
+    tap(*m, Button::Soft3);  // *YES*
+    std::printf("  |%s|\n", rowText(m->panel(), 1).c_str());
+    CHECK(shows(m->panel(), "GM-PROG=001 GRAND-PIANO"));
+}
+
 // The TS-12 OS turns the key-up byte into the note-off velocity (T31; the TS-10 sends 64, T17).
 TEST(ts12_release_byte_sets_note_off_velocity) {
     auto m = boot(Model::Ts12);

@@ -1032,9 +1032,9 @@ void zeroAndBypassedBlocks(const juce::File& dir) {
     std::printf("  zero-length and bypassed blocks: note 60 held %d\n", static_cast<int>(held()));
 }
 
-// standalone_ignores_state (A121): a File processor given a Project state (R2-2, TUNE=+02) before its first
-// block ignores it: no sound to replay, so it boots on U0-0 with `sound` 0, its memory still the file's
-// (none here: cold, so TUNE=+00).
+// standalone_restores_state (A138, superseding A121's standalone_ignores_state): a File processor given a Project
+// state (R2-2, TUNE=+02) before its first block restores the sound and `sound`, but not the state's RAM: its memory
+// is the file's (none here: cold, so TUNE=+00).
 void standaloneStateBeforeBoot(const juce::File& dir, const juce::MemoryBlock& s) {
     if (s.isEmpty() || !realRoms(dir)) return;
     TsProcessor p(MemoryMode::File);
@@ -1042,9 +1042,7 @@ void standaloneStateBeforeBoot(const juce::File& dir, const juce::MemoryBlock& s
     p.prepareToPlay(48000, 480);
     p.setStateInformation(s.getData(), static_cast<int>(s.getSize()));
     run(p, kRestored);
-    CHECK(rowStarts(p, 0, "U0-0") && p.engine()->snapshot().programsSent == 0);
-    CHECK(p.getParameters()[0] != nullptr);
-    for (auto* prm : p.getParameters()) CHECK(std::abs(prm->getValue() - prm->getDefaultValue()) < 1e-6f);
+    CHECK(rowStarts(p, 0, "R2-2") && soundOf(p) == 14);
     press(p, ens::ts::Button::System);
     CHECK(rowStarts(p, 0, "SYSTEM  TUNE=+00"));
 }
@@ -1823,8 +1821,7 @@ void cdDriveLoads(const juce::File& dir) {
 }
 
 // cd_drive_missing_file (Review Focus 1): a small synthetic .iso, mounted, then deleted before *LOAD* reads it: the
-// reader answers failure, the machine keeps running and the display shows the OS's error, not the Load page. In
-// File mode (the Standalone) nothing is recorded (A121).
+// reader answers failure, the machine keeps running and the display shows the OS's error, not the Load page.
 void cdDriveMissingFile(const juce::File& dir) {
     if (!realRoms(dir)) return;
     // 64 zero sectors with an Ensoniq Device ID block (512-byte block 1, in sector 0): 0xFF at 30, the label at
@@ -1858,7 +1855,6 @@ void cdDriveMissingFile(const juce::File& dir) {
     pressCd(p, ens::ts::Button::Up);
     printRows(p);
     CHECK(!shows(p, "NOT RESPONDING") && shows(p, "STATUS=INVALID"));
-    CHECK(p.record().media().empty());
 }
 
 // drop_goes_to_cd: a .cue dropped on the panel goes in the CD drive (here a synthetic one whose FILE names another
@@ -2306,21 +2302,79 @@ void mediaStateBadBlobs(const juce::File& dir) {
     CHECK(runRestore(p) > 0);
 }
 
-// standalone_has_no_media (A121): a File processor that loaded FLUTE 1 records nothing and its state has no <Media>.
-void standaloneHasNoMedia(const juce::File& dir) {
+// standalone_restores_media (A138): a File processor loads FLUTE 1 from ED-001; its state (as JUCE's wrapper saves it
+// on close) has <Media> and no <RAM>. A new File processor on the same memory file, given that state before its first
+// block with no disk in the drive, restores FLUTE 1 with no prompt and plays it. The same state into a File processor
+// of the other model restores no media. Power cycle then: the OS asks the auto-load question, the record is empty and
+// a state taken then has no <Media>.
+void standaloneRestoresMedia(const juce::File& dir) {
+    using ens::ts::Button;
     const auto ed = ed001();
     if (ed == juce::File() || !realRoms(dir)) return;
-    TsProcessor p(MemoryMode::File);
-    if (!p.engine()) return;
-    p.prepareToPlay(48000, 480);
+    CHECK(eraseMemoryFile(AppSettings().memoryFile(ens::ts::Model::Ts10)));
+    juce::MemoryBlock s;
+    {
+        TsProcessor a(MemoryMode::File);
+        if (!a.engine()) return;
+        a.prepareToPlay(48000, 480);
+        juce::String err;
+        CHECK(a.drive().open(ed, err));
+        runCd(a, kBoot);
+        CHECK(loadFromFloppy(a, "FLUTE 1", Button::Bank0));
+        runCd(a, 200);
+        s = stateOf(a);
+        CHECK(a.drive().eject());
+        runCd(a, 100);
+    }  // saves the memory file: it names FLUTE 1
+    const auto xml = xmlOf(s);
+    CHECK(xml != nullptr && xml->getChildByName("RAM") == nullptr);
+    const auto saved = mediaOf(xml.get());
+    CHECK(saved.media.size() == 1 && saved.media[0].startsWith("floppy-dd ED-001 "));
+
+    TsProcessor b(MemoryMode::File);
+    if (!b.engine()) return;
+    restoreFrom(b, s);
+    CHECK(runRestore(b) > 0);
+    CHECK(b.engine()->snapshot().restoreClean && !b.engine()->snapshot().diskIn);
+    openS8(b, Button::Bank0);
+    CHECK(shows(b, "FLUTE 1"));
+    CHECK(playChord(b) > 0.01f);
+    runCd(b, 200);
+    CHECK(mediaOf(xmlOf(stateOf(b)).get()).media.size() == 1);
+
+    b.powerCycle();
+    runCd(b, kBoot);
+    CHECK(shows(b, "AUTO-LOAD ALL SAMPLED-SOUNDS"));
+    CHECK(b.record().media().empty());
+    const auto cleared = xmlOf(stateOf(b));
+    CHECK(cleared != nullptr && cleared->getChildByName("Media") == nullptr);
+
+    // A TS-10 state's media never restore into a TS-12 Standalone.
+    AppSettings().setModel(ens::ts::Model::Ts12);
+    TsProcessor c(MemoryMode::File);
+    AppSettings().setModel(ens::ts::Model::Ts10);
+    if (!c.engine()) return;
+    restoreFrom(c, s);
+    runCd(c, kBoot);
+    CHECK(!c.engine()->snapshot().restoring && c.record().media().empty());
+
+    // The state given with no ROMs, then Erase, then the ROMs: the erased memory boots, with no restore and no
+    // AUTO-LOAD question (the memory before Erase names FLUTE 1, so either would show it booted). Review fix: the
+    // restore's cached start image, that memory, used to boot and be saved over the erased file.
+    const auto none = dir.getChildFile("no-roms");
+    CHECK(none.createDirectory());
+    AppSettings().setRomFolder(none);
+    TsProcessor d(MemoryMode::File);
+    CHECK(d.engine() == nullptr);
+    restoreFrom(d, s);
+    d.eraseMemory();
     juce::String err;
-    CHECK(p.drive().open(ed, err));
-    runCd(p, kBoot);
-    CHECK(loadFromFloppy(p, "FLUTE 1", ens::ts::Button::Bank0));
-    runCd(p, 200);
-    CHECK(p.record().media().empty());
-    const auto xml = xmlOf(stateOf(p));
-    CHECK(xml != nullptr && xml->getChildByName("Media") == nullptr);
+    CHECK(d.setRomFolder(juce::File(TSR_ROM_DIR), err) && d.engine() != nullptr);
+    if (!d.engine()) return;
+    runCd(d, kBoot);
+    printRows(d);
+    CHECK(!d.engine()->snapshot().restoring && !shows(d, "AUTO-LOAD"));
+    CHECK(d.record().media().empty());
 }
 
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file
@@ -2621,7 +2675,7 @@ int main() {
     mediaStateDuringRestore(dir.getChildFile("media-during"));
     mediaStateBadBlobs(dir.getChildFile("media-bad"));
     modelSwitchKeepsMedia(dir.getChildFile("model-media"));
-    standaloneHasNoMedia(dir.getChildFile("media-standalone"));
+    standaloneRestoresMedia(dir.getChildFile("media-standalone"));
     const auto media = mediaStateRoundTrip(dir.getChildFile("media-round-trip"));
     mediaStateKeepsUnrestored(dir.getChildFile("media-keep"), media);
     mediaStateTwiceWithoutTick(dir.getChildFile("media-twice"), media);

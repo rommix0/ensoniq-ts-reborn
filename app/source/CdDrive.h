@@ -32,7 +32,7 @@ public:
     bool insert(const juce::File& f, juce::String& err);
     bool eject();          // false when the drive is busy
     juce::String name() const { return file_.getFileName(); }  // the file name, empty when none
-    // TsProcessor::tick: hands the sectors served since the last poll to the record (Project mode only, A121).
+    // TsProcessor::tick: hands the sectors served since the last poll to the record (both modes, A138).
     void poll();
     // After every restart: the engine whose port the reader answers (null with none).
     void setEngine(ens::app::Engine* e);

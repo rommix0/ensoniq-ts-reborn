@@ -13,7 +13,8 @@ struct RomSet {                               // file images, unmodified
     std::vector<uint8_t> u41, u43, u45, u46;  // 2 MB, 1 MB, 2 MB, 1 MB
 };
 
-// 256K words, word i = osHigh[i] << 8 | osLow[i] (T2). err names the offending file.
+// 512K words (the 1 MB ROM window), word i = osHigh[i mod 256K] << 8 | osLow[i mod osLow size] (T2). err names the
+// offending file.
 bool buildOsImage(const RomSet&, std::vector<uint16_t>& words, std::string& err);
 
 class WaveMemory : public OttoMemory {  // T3, T4
