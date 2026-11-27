@@ -166,7 +166,7 @@ Environment variables read when the app starts. Neither is needed for normal use
 ## Open items
 
 - **SCSI** has a CD-ROM drive at ID 4 only; no SCSI hard disk. Disk images in `.efe` format and HFE v3 are not read.
-- **The TS-12** runs as a model (T31, A137). Not done: an on-screen control for channel pressure (the panel has none; MIDI channel pressure and `tsemu --analog PRESS=<raw>` reach it); the panel still shows the TS-10 logo on a TS-12; other TS-12 OS versions than v3.10. What is left for a person is in `docs/verification-plan12.md`.
+- **The TS-12** runs as a model (T31, A137). Not done: an on-screen control for channel pressure (the panel has none; MIDI channel pressure and `tsemu --analog PRESS=<raw>` reach it); other TS-12 OS versions than v3.10. What is left for a person is in `docs/verification-plan12.md`.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
 - **The small print the photo has** (jack labels, "Bypass", "Replace w/FX") is not drawn.
 - The person-only checks of Plans 4 and 5 were done by the user on 2026-11-15; what is left for a person is in `docs/verification-plan6.md`.

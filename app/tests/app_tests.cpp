@@ -1847,6 +1847,36 @@ KeyCount keysOf(juce::Component& ed, Model m) {
     return k;
 }
 
+// The model's logo (A140) in a painted editor: its triangle's pixels (blue over green, as `editor`) and the letter
+// pixels (green over red) in the rect's right quarter, where the last digit is: a 0 on the TS-10, a 2 on the TS-12.
+// The two digits cover about as many pixels, so they are told apart by shape (`digit`, the letter mask there).
+struct LogoPixels {
+    int triangle = 0, lastDigit = 0;
+    std::vector<bool> digit;
+};
+LogoPixels logoPixels(const juce::Image& img, Model m) {
+    ens::app::Rect r{};
+    for (const auto& c : ens::app::panelLayout(m))
+        if (c.ink == ens::app::Ink::Decal && std::strcmp(c.label, m == Model::Ts12 ? "TS-12" : "TS-10") == 0) r = c.r;
+    LogoPixels n;
+    const int x0 = static_cast<int>(r.x * kEdScale), x1 = static_cast<int>((r.x + r.w) * kEdScale);
+    for (int y = static_cast<int>(r.y * kEdScale); y < static_cast<int>((r.y + r.h) * kEdScale); ++y)
+        for (int x = x0; x < x1; ++x) {
+            const auto c = img.getPixelAt(x, y);
+            n.triangle += c.getBlue() > c.getGreen() + 15;
+            if (x < x1 - (x1 - x0) / 4) continue;
+            n.digit.push_back(c.getGreen() > c.getRed() + 20);
+            n.lastDigit += n.digit.back();
+        }
+    return n;
+}
+
+int shapeDifference(const LogoPixels& a, const LogoPixels& b) {
+    int n = 0;
+    for (size_t i = 0; i < a.digit.size() && i < b.digit.size(); ++i) n += a.digit[i] != b.digit[i];
+    return n;
+}
+
 void editorTs12HasKeys(const juce::File& dir) {
     ts12Roms(dir);
     AppSettings().setModel(Model::Ts12);
@@ -1854,7 +1884,29 @@ void editorTs12HasKeys(const juce::File& dir) {
     std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
     const auto k = keysOf(*ed, Model::Ts12);
     CHECK(k.n == 76 && k.lo == 28 && k.hi == 103);
-    CHECK(!paintEditor(*ed, "panel-ts12.png").isNull());
+    const auto img = paintEditor(*ed, "panel-ts12.png");
+    CHECK(!img.isNull());
+    // DECISION A140: the TS-12 logo, and a different last digit from the TS-10's after a switch on the open editor
+    // (A137 rebuilds the board), and back.
+    const auto ts12 = logoPixels(img, Model::Ts12);
+    p.setModel(Model::Ts10);
+    for (int i = 0; i < 50 && keysOf(*ed, Model::Ts10).n != 61; ++i) {
+        juce::Thread::sleep(40);
+        juce::Timer::callPendingTimersSynchronously();
+    }
+    const auto ts10 = logoPixels(paintEditor(*ed, "panel-ts10-switched.png"), Model::Ts10);
+    p.setModel(Model::Ts12);
+    for (int i = 0; i < 50 && keysOf(*ed, Model::Ts12).n != 76; ++i) {
+        juce::Thread::sleep(40);
+        juce::Timer::callPendingTimersSynchronously();
+    }
+    const auto back = logoPixels(paintEditor(*ed, "panel-ts12-back.png"), Model::Ts12);
+    std::printf("  logos: TS-12 %d triangle / %d last digit, TS-10 %d / %d, %d differ; back %d differ\n",
+                ts12.triangle, ts12.lastDigit, ts10.triangle, ts10.lastDigit, shapeDifference(ts12, ts10),
+                shapeDifference(ts12, back));
+    CHECK(ts12.triangle > 50 && ts10.triangle > 50 && ts10.lastDigit > 100);
+    CHECK(shapeDifference(ts12, ts10) * 4 > ts10.lastDigit);
+    CHECK(shapeDifference(ts12, back) == 0);
 }
 
 // One timer tick, as the editor's 30 Hz timer would give it (no message loop runs here).

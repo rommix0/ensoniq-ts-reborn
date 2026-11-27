@@ -30,7 +30,7 @@ Linux x64 (GCC) and macOS arm64/x64 (Apple clang). The 68000, ESP and DUART core
 - **Ensoniq material.** The only Ensoniq files in git are the eight ROMs the app ships (OS v3.10
   `roms/os/ts10_310h.bin` and `ts10_310l.bin`, the TS-12 OS v3.10 pair `ts12_310h.bin` and `ts12_310l.bin`
   (added 2026-11-26, the user's decision), the four `roms/waves/*.bin`) and `roms/README.txt`,
-  plus the two panel logos in `app/resources/` (the TS-10 logo and the Ensoniq badge, A122). Other OS versions, `roms/misc/`, `datasheets/` and `docs/reference/mame/` are ignored on purpose.
+  plus the three panel logos in `app/resources/` (the TS-10 and TS-12 logos and the Ensoniq badge, A122, A140). Other OS versions, `roms/misc/`, `datasheets/` and `docs/reference/mame/` are ignored on purpose.
   Nothing is pushed to a public remote until the user approves publishing those eight ROMs.
 - **The panel layout** follows `datasheets/ts10-photo.webp` for arrangement and proportions and the
   TS-10 Musician's Manual page 3 ("Front Panel Controls") for the left section and the labels (the

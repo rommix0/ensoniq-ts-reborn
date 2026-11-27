@@ -719,10 +719,11 @@ private:
         {
             const auto r = rect(c->r);
             if (c->ink == Ink::Decal) {
-                // DECISION A122: the TS-10 logo and the Ensoniq badge are drawn from their SVGs, kept to
-                // their shapes; the line under the logo is text, tall and narrow, stretched or squeezed to
-                // the photo's width.
+                // DECISION A122: the logo and the Ensoniq badge are drawn from their SVGs, kept to their
+                // shapes; the line under the logo is text, tall and narrow, stretched or squeezed to the
+                // photo's width. DECISION A140: the model's own logo, by the decal's label.
                 juce::Drawable* art = std::strcmp(c->label, "TS-10") == 0     ? ts10_.get()
+                                      : std::strcmp(c->label, "TS-12") == 0   ? ts12_.get()
                                       : std::strcmp(c->label, "ensoniq") == 0 ? ensoniq_.get()
                                                                               : nullptr;
                 if (art != nullptr) {
@@ -784,6 +785,7 @@ private:
     bool keyDrag_ = false;
     DrivePart* drive_ = nullptr;
     std::unique_ptr<juce::Drawable> ts10_ = art(TsArt::ts10_logo_svg, TsArt::ts10_logo_svgSize);
+    std::unique_ptr<juce::Drawable> ts12_ = art(TsArt::ts12_logo_svg, TsArt::ts12_logo_svgSize);
     std::unique_ptr<juce::Drawable> ensoniq_ = art(TsArt::ensoniq_logo_svg, TsArt::ensoniq_logo_svgSize, kBadge);
     std::vector<const Control*> painted_;  // labels: the top's drawn by the board, the strip's by its layer
     juce::Component clip_;  // A139: the strip's window, kTopH down; layer_ moves up inside it
