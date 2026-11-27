@@ -326,6 +326,14 @@ void DiskDrive::showMenu(juce::Component* target) {
     cdMenu.addItem("Eject CD", cd.name().isNotEmpty(), false, [&cd] { cd.ejectAsked(); });
     m.addSeparator();
     m.addSubMenu("CD-ROM (SCSI ID 4)", cdMenu);
+    // DECISION A136: a .syx file into MIDI IN, as a librarian on a cable would send it (the OS takes it with
+    // SYS-EX=ON); while it goes, the item shows how far it is and stops it.
+    m.addSeparator();
+    if (const float p = proc_.sysexProgress(); p >= 0)
+        m.addItem("Stop Sending SysEx (" + juce::String(juce::roundToInt(p * 100)) + "%)",
+                  [this] { proc_.stopSysex(); });
+    else
+        m.addItem("Send SysEx File...", [this] { chooseSysex(); });
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(target));
 }
 
@@ -400,6 +408,20 @@ void DiskDrive::chooseOpen() {
                               const auto f = fc.getResult();
                               juce::String err;
                               if (self != nullptr && f != juce::File() && !self->open(f, err)) showError(err);
+                          });
+}
+
+void DiskDrive::chooseSysex() {
+    chooser_ = std::make_unique<juce::FileChooser>("Send a SysEx file (MIDI Control: SYS-EX=ON)",
+                                                   juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+                                                   "*.syx;*.SYX");
+    chooser_->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [self = juce::WeakReference<DiskDrive>(this)](const juce::FileChooser& fc) {
+                              const auto f = fc.getResult();
+                              juce::String err;
+                              if (self != nullptr && f != juce::File() && !self->proc_.sendSysex(f, err))
+                                  juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                                         "SysEx", err);
                           });
 }
 

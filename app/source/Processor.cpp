@@ -171,6 +171,9 @@ TsProcessor::TsProcessor(MemoryMode mode)
 
 TsProcessor::~TsProcessor() {
     stopTimer();
+    delete sysexIn_.exchange(nullptr);  // audio stopped: whatever a slot holds
+    delete sysexDone_.exchange(nullptr);
+    delete sysex_;
     // DECISION A116: saved on close only once booted; audio has stopped, so the machine is read directly.
     // DECISION A117: File mode only; a plugin instance's memory is in the project.
     if (mode_ == MemoryMode::File && engine_ && engine_->snapshot().booted)
@@ -378,6 +381,10 @@ void TsProcessor::capture(const ens::ts::Disk& d) {
 // DECISION A116: every 60 s, once booted, the audio thread copies the RAM (requestRam) and the next
 // tick that finds the copy (takeRam) saves it; 1800 ticks of the 30 Hz timer make the 60 s.
 void TsProcessor::tick() {
+    if (auto* done = sysexDone_.exchange(nullptr)) {  // DECISION A136: freed on the message thread
+        delete done;
+        sysexBusy_.store(false);
+    }
     if (!engine_) return;
     drive_.poll();  // A119: a removed disk freed, a save's copy written; A129: floppies captured
     {
@@ -443,6 +450,87 @@ void TsProcessor::DcBlock::run(float* x, int n, float r) {
     }
 }
 
+// DECISION A136: a .syx file. A send reads the whole file here (it is small: the TS's largest dump is 474 KB) and
+// hands it over; the audio thread takes it at a block's start.
+bool TsProcessor::sendSysex(const juce::File& f, juce::String& err) {
+    err = {};
+    if (sysexBusy_.load()) {
+        err = "A SysEx file is still being sent.";
+        return false;
+    }
+    if (!engine_ || !prepared()) {
+        err = "The machine is not running.";
+        return false;
+    }
+    juce::MemoryBlock mb;
+    if (f.getSize() > 16 * 1024 * 1024 || !f.loadFileAsData(mb) || mb.getSize() == 0) {
+        err = "Cannot read " + f.getFullPathName();
+        return false;
+    }
+    const auto* b = static_cast<const uint8_t*>(mb.getData());
+    if (b[0] != 0xF0) {
+        err = "Not a SysEx file (it does not start with F0): " + f.getFullPathName();
+        return false;
+    }
+    auto* bytes = new std::vector<uint8_t>(b, b + mb.getSize());
+    sysexSize_.store(bytes->size());
+    sysexSent_.store(0);
+    sysexStop_.store(false);
+    sysexBusy_.store(true);
+    delete sysexIn_.exchange(bytes);  // empty: busy was false, so the last send was taken and freed
+    return true;
+}
+
+float TsProcessor::sysexProgress() const {
+    if (!sysexBusy_.load()) return -1;
+    const size_t size = sysexSize_.load();
+    return size == 0 ? 0.0f : static_cast<float>(sysexSent_.load()) / static_cast<float>(size);
+}
+
+void TsProcessor::stopSysex() { sysexStop_.store(true); }
+
+// DECISION A136: fed while the engine holds less than 1 KB for the wire (A101), so the file goes at the wire's pace
+// and the store keeps room for the host's notes, which queue behind it as on a MIDI cable. One message at a time:
+// after an F7 the next F0 waits until the OS has read every byte, then 100 ms. Back to back, the OS NAKs a 74 KB
+// program dump that follows another (TSD-1000.syx: one NAK, F0 0F 07 00 00 01 00 00 F7); one at a time, none.
+void TsProcessor::feedSysex(int frames) {
+    if (sysex_ == nullptr) {
+        sysex_ = sysexIn_.exchange(nullptr);
+        sysexPos_ = 0;
+        sysexGap_ = 0;
+        if (sysex_ == nullptr) return;
+    }
+    if (sysexGap_ > 0) {  // after a message: the OS reads it all, then the pause
+        if (engine_->midiWaiting() > 0) return;
+        sysexGap_ -= frames;
+        if (sysexGap_ > 0 && !sysexStop_.load()) return;
+        sysexGap_ = 0;
+    }
+    const size_t size = sysex_->size();
+    if (sysexStop_.load() && sysexPos_ < size) {
+        const uint8_t eox = 0xF7;
+        if (sysexPos_ > 0 && (*sysex_)[sysexPos_ - 1] != 0xF7) engine_->midi(0, &eox, 1);
+        sysexPos_ = size;
+    }
+    constexpr size_t kAhead = 1024;
+    const size_t waiting = engine_->midiWaiting();
+    if (sysexPos_ < size && waiting < kAhead) {
+        const uint8_t* from = sysex_->data() + sysexPos_;
+        size_t n = std::min(size - sysexPos_, kAhead - waiting);
+        if (const uint8_t* eox = std::find(from, from + n, uint8_t{0xF7}); eox != from + n) {
+            n = static_cast<size_t>(eox - from) + 1;
+            sysexGap_ = std::max(1, static_cast<int>(rate_ / 10));  // 100 ms of frames
+        }
+        engine_->midi(0, from, static_cast<int>(n));
+        sysexPos_ += n;
+        sysexSent_.store(sysexPos_);
+    }
+    if (sysexPos_ == size && sysexDone_.load() == nullptr) {  // parked for tick() to free
+        sysexDone_.store(sysex_);
+        sysex_ = nullptr;
+    }
+}
+
 // DECISION A133: the firmware's MIDI out goes to the host (the VST3's track, the Standalone's MIDI output) as whole
 // messages at the block's start: the engine drains it once a block (A2), so finer timing is not known.
 void TsProcessor::addMidiOut(void* self, const uint8_t* data, int size) {
@@ -466,6 +554,7 @@ void TsProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         midi.clear();  // DECISION A133: no MIDI out, and the input is not echoed
         return;
     }
+    feedSysex(buffer.getNumSamples());  // DECISION A136: before the host's bytes of this block, which queue behind it
     // DECISION A111: parameter values cross as atomic raw values: no lock, no allocation.
     for (size_t i = 0; i < std::size(kAnalogParams); ++i)
         engine_->setAnalog(kAnalogParams[i].analog,

@@ -123,6 +123,8 @@ public:
     // DECISION A101: MIDI-in bytes held until DUART A's wire has room: 512 KB, more than the largest TS
     // sysex message seen (a 297 543-byte demo sequence dump).
     static constexpr size_t kMidiHeld = size_t{1} << 19;
+    // MIDI-in bytes not yet read by the OS: held here (A101) or on DUART A's wire queue (A1).
+    size_t midiWaiting() const { return midiHeld_.size() + m_->duart().rxQueued(ts::kMidiChannel); }
     // Any frames >= 0, in pieces of maxBlock.
     void render(float* mainL, float* mainR, float* auxL, float* auxR, int frames);
     void setProgram(int n);    // requests a sound 0-127 (A105)
