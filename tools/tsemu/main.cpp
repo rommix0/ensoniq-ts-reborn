@@ -1,6 +1,6 @@
 // tsemu: runs the emulated TS-10 (OS v3.10 on the 68000 with the DUART and the OTTO/ESP board).
 //   tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] [--last <n>]
-//              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]... [--ram <file>] [--sqx70]
+//              [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]... [--ram <file>] [--sqx70] [--simm8]
 //              [--disk <image>] [--save-disk <file>] [--cd <image>]
 // --trace takes a comma list of otto,esp,duart,fdc,iexp,scsi,unmapped,iack; matching bus events are
 // printed as "<cycle> <DEV> <R|W><size> <addr> <value>". --last <n> prints the last n instruction
@@ -19,7 +19,8 @@
 // back when boot or render ends without an error and the run covered at least kBootMs of emulated time (render
 // always does); a shorter boot --ms prints a line and leaves the file alone, so a diagnostic run cannot
 // replace a good settings image with a half-initialised one. --sqx70 fits the SQX-70 sequence expander (SEQEXP);
-// the default is a stock TS-10 (T13). Both use the same image layout.
+// the default is a stock TS-10 (T13). Both use the same image layout. --simm8 fits the 4M x 8 SIMM pair (8 MB of
+// sample RAM, BankSets S8 and S9) in place of the factory 2 MB (T4).
 // --disk <image> puts a disk image (raw .img, GKH or Giebler EDE/EDA, told apart by content, T21) in the drive
 // from power-on; the file is only read. --save-disk <file> writes the disk as it is at the end of the run, in the
 // format the file's extension gives (.gkh GKH, .ede/.eda/.edt Giebler, anything else raw; the --disk file's
@@ -28,7 +29,7 @@
 // --cd <image> fits the SP-4 SCSI board (T25) and puts a CD image (.iso, or .cue with one MODE1/2352 track) in the
 // CD-ROM drive at SCSI ID 4 from power-on; its sectors are read from the file between frames (T29). Only read.
 //   tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] [--analog <name>=<raw>]...
-//                [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>] [--cd <image>]
+//                [--ram <file>] [--sqx70] [--simm8] [--disk <image>] [--save-disk <file>] [--cd <image>]
 // render boots for kBootMs (not written), sends each MIDI file event to MIDI in at its frame and renders
 // until the last event plus --tail (default 2000 ms); it writes Main as a 16-bit stereo WAV at kWavRate
 // (--aux writes Aux the same way) and prints one summary line and "pcm hash <16 hex>", the FNV-1a 64 of
@@ -82,6 +83,7 @@ struct Options {
     uint64_t seconds = 20;                                            // bench --seconds
     std::string ram;                                                  // --ram: the battery RAM image file
     bool sqx70 = false;                                               // --sqx70: SEQEXP fitted
+    bool simm8 = false;                                               // --simm8: 8 MB of sample RAM (T4)
     std::string disk, saveDisk;                                       // --disk, --save-disk
     std::string cd;                                                   // --cd: a CD image at SCSI ID 4
 };
@@ -242,7 +244,7 @@ std::unique_ptr<Machine> makeMachine(const Options& o, DecodedImage* kept = null
     roms.u45 = load(o.roms + "/waves", "901402_u45.bin");
     roms.u46 = load(o.roms + "/waves", "901302_u46.bin");
     std::string err;
-    auto m = Machine::create(roms, err, o.sqx70, !o.cd.empty());
+    auto m = Machine::create(roms, err, o.sqx70, !o.cd.empty(), o.simm8);
     if (!m) fail(err);
     for (const auto& [input, raw] : o.analog) m->setAnalog(input, raw);
     if (!o.ram.empty()) {
@@ -481,9 +483,9 @@ int main(int argc, char** argv) {
         if (cmd != "boot" && cmd != "render" && cmd != "bench")
             fail("usage:\n  tsemu boot [--roms <dir>] [--ms <n>] [--trace <devs>] [--from <cycle>] [--count <n>] "
                  "[--last <n>] [--display-only] [--press <ms>:<name>[+<name>...]]... [--analog <name>=<raw>]...\n"
-                 "             [--ram <file>] [--sqx70] [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
+                 "             [--ram <file>] [--sqx70] [--simm8] [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
                  "  tsemu render <in.mid> <out.wav> [--roms <dir>] [--tail <ms>] [--aux <aux-out.wav>] "
-                 "[--analog <name>=<raw>]... [--ram <file>] [--sqx70]\n"
+                 "[--analog <name>=<raw>]... [--ram <file>] [--sqx70] [--simm8]\n"
                  "               [--disk <image>] [--save-disk <file>] [--cd <image>]\n"
                  "  tsemu bench [--roms <dir>] [--seconds <n>]");
         Options o;
@@ -493,8 +495,8 @@ int main(int argc, char** argv) {
                 o.positional.push_back(a);
                 continue;
             }
-            if (a == "--display-only" || a == "--sqx70") {
-                (a == "--sqx70" ? o.sqx70 : o.displayOnly) = true;
+            if (a == "--display-only" || a == "--sqx70" || a == "--simm8") {
+                (a == "--sqx70" ? o.sqx70 : a == "--simm8" ? o.simm8 : o.displayOnly) = true;
                 continue;
             }
             if (i + 1 >= argc) fail("option " + a + " needs a value");

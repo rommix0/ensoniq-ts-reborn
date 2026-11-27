@@ -266,8 +266,10 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
         img = loadMemoryFile(settings_.memoryFile(), memoryError_);  // wrong size: reported, cold boot
     }
     std::string e;
-    // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4.
-    auto fresh = ens::app::Engine::create(roms_, e, true);
+    // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4. DECISION A135: and the 4M x 8
+    // SIMM pair, 8 MB of sample RAM (BankSets S8 and S9).
+    auto fresh = ens::app::Engine::create(roms_, e, true, true);
+    if (fresh) fresh->setMidiOut(&TsProcessor::addMidiOut, this);
     // DECISION A124: the VST3 answers the power-on auto-load question; the Standalone asks, as the TS does.
     if (fresh) fresh->setAnswerAutoLoad(mode_ == MemoryMode::Project);
     if (fresh && !img.empty() && !fresh->loadRam(img, e)) fresh.reset();
@@ -419,7 +421,27 @@ void TsProcessor::prepareToPlay(double sampleRate, int maximumExpectedSamplesPer
     block_ = std::max(1, maximumExpectedSamplesPerBlock);
     auxL_.assign(static_cast<size_t>(block_), 0.0f);  // DECISION A109: Aux when its bus is off
     auxR_.assign(static_cast<size_t>(block_), 0.0f);
+    // DECISION A134: the outputs' AC coupling, a one-pole high-pass at kDcHz.
+    dcR_ = static_cast<float>(std::exp(-2.0 * juce::MathConstants<double>::pi * kDcHz / rate_));
+    for (auto& d : dc_) d = {};
+    midiOut_.ensureSize(4096);  // DECISION A133: a block's notes without growing; a long sysex reply grows it once
     if (engine_) engine_->prepare(rate_, block_);
+}
+
+// DECISION A134: y = x - x1 + R * y1 per channel.
+void TsProcessor::DcBlock::run(float* x, int n, float r) {
+    for (int i = 0; i < n; ++i) {
+        const float y = x[i] - x1 + r * y1;
+        x1 = x[i];
+        y1 = y;
+        x[i] = y;
+    }
+}
+
+// DECISION A133: the firmware's MIDI out goes to the host (the VST3's track, the Standalone's MIDI output) as whole
+// messages at the block's start: the engine drains it once a block (A2), so finer timing is not known.
+void TsProcessor::addMidiOut(void* self, const uint8_t* data, int size) {
+    static_cast<TsProcessor*>(self)->midiOut_.addEvent(data, size, 0);
 }
 
 // DECISION A109: Main stereo; Aux stereo or disabled.
@@ -436,6 +458,7 @@ void TsProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     auto aux = getBusBuffer(buffer, false, 1);
     if (!engine_ || main.getNumChannels() < 2 || auxL_.empty()) {  // no machine, or not prepared
         buffer.clear();
+        midi.clear();  // DECISION A133: no MIDI out, and the input is not echoed
         return;
     }
     // DECISION A111: parameter values cross as atomic raw values: no lock, no allocation.
@@ -460,6 +483,10 @@ void TsProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         // DECISION A108: every byte of every message, sysex and real-time included, as the MIDI IN jack.
         for (const auto m : midi) engine_->midi(m.samplePosition, m.data, m.numBytes);
         engine_->render(mainL, mainR, aux.getWritePointer(0), aux.getWritePointer(1), n);
+        float* const out[4] = {mainL, mainR, aux.getWritePointer(0), aux.getWritePointer(1)};
+        for (int c = 0; c < 4; ++c) dc_[c].run(out[c], n, dcR_);  // DECISION A134
+        midi.swapWith(midiOut_);  // DECISION A133: the input is consumed; the output replaces it
+        midiOut_.clear();
         return;
     }
     // DECISION A109: Aux off: rendered into the scratch pair and added into Main. A block longer than
@@ -475,6 +502,10 @@ void TsProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         juce::FloatVectorOperations::add(mainL + done, auxL_.data(), k);
         juce::FloatVectorOperations::add(mainR + done, auxR_.data(), k);
     }
+    dc_[0].run(mainL, n, dcR_);  // DECISION A134
+    dc_[1].run(mainR, n, dcR_);
+    midi.swapWith(midiOut_);  // DECISION A133
+    midiOut_.clear();
 }
 
 // DECISION A109: host bypass keeps the machine running and takes MIDI as processBlock does, so a note-off

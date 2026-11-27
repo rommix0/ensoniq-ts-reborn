@@ -19,7 +19,7 @@ juce_add_plugin(TSReborn
   FORMATS Standalone VST3
   IS_SYNTH TRUE
   NEEDS_MIDI_INPUT TRUE
-  NEEDS_MIDI_OUTPUT FALSE
+  NEEDS_MIDI_OUTPUT TRUE
   ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.png")
 
 # DECISION A132: juceaide makes an icns from the 1024 image so the plist names it. On macOS,

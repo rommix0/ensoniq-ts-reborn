@@ -18,12 +18,17 @@ bool buildOsImage(const RomSet&, std::vector<uint16_t>& words, std::string& err)
 
 class WaveMemory : public OttoMemory {  // T3, T4
 public:
+    // DECISION T4: the SIMM pair fitted: two 1M x 8 (2 MB, the factory's) or two 4M x 8 (8 MB). Words index the
+    // host window: bank 3 words 0-0x1FFFFF, then bank 2's.
     static constexpr uint32_t kSampleRamWords = 0x100000;
+    static constexpr uint32_t kExpandedRamWords = 0x400000;
     bool load(const RomSet&, std::string& err);  // err names the file: "u45: expected 2097152 bytes, got ..."
     uint16_t read(int bank, uint32_t addr21) override;
-    // The CPU host window; the word index wraps at kSampleRamWords (the machine bounds it first, T4).
-    uint16_t& sampleRam(uint32_t word) { return ram_[word & (kSampleRamWords - 1)]; }
-    uint16_t sampleRam(uint32_t word) const { return ram_[word & (kSampleRamWords - 1)]; }
+    void setSampleRamWords(uint32_t words) { ram_.assign(words, 0); }  // kSampleRamWords or kExpandedRamWords
+    uint32_t sampleRamWords() const { return static_cast<uint32_t>(ram_.size()); }
+    // The CPU host window; the caller bounds the index by sampleRamWords() (T4).
+    uint16_t& sampleRam(uint32_t word) { return ram_[word]; }
+    uint16_t sampleRam(uint32_t word) const { return ram_[word]; }
 
 private:
     std::vector<uint8_t> u41_, u43_, u45_, u46_;

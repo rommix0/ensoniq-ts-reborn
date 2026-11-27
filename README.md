@@ -4,13 +4,15 @@
 
 This emulator was created by Anthony C. Bartman (@rommix0) with the assistance of Claude Opus 5.5. If you find any issues, please leave an issue or do a pull request.
 
-An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. The TS-12 is out of scope. It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
+An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. TS-12 support is planned. It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
 **Status:** version 1.0.0. The TS-10 machine runs the unmodified OS v3.10 in a Standalone app and a VST3 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64, Linux x64 and macOS; see [docs/tsapp.md](docs/tsapp.md), named `APP-GUIDE.md` in a release folder).
 
 The floppy drive works: the OS reads and writes disk images (raw `.img`, `.gkh`, Giebler `.ede`/`.eda`) of its own and of the ASR-10 and EPS families, from the drive on the panel or `tsemu --disk`. The SP-4 SCSI board adds a CD-ROM drive at ID 4 (`.iso` or `.cue` images, read-only, in the app and `tsemu --cd`). VST3 projects can reload sampled sounds without needing to reload from the original disk images. `tsemu` boots the machine headless, renders a MIDI file to WAV and measures its speed.
 
 The checks only a person can do (sound, the panel, the drives, a DAW) were done by the user for Plans 4 and 5 on 2026-11-15 and for Plan 7 on 2026-11-16 ([docs/verification-plan7.md](docs/verification-plan7.md)). The release scripts build a ready-to-use folder (below). The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).
+
+**Two buttons at once** (the TS's two-finger shortcuts, such as holding a Bank button while pressing a soft button): right-click or Shift-click a panel button to latch it down, press the other button, then click the latched one to release it.
 
 ## The release folder
 

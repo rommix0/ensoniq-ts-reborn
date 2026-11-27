@@ -184,26 +184,37 @@ TEST(engine_buttons_reach_system_page) {
     CHECK(startsWith(s, "SYSTEM  TUNE="));
 }
 
-// DECISION A101: the block's MIDI store keeps 1024 bytes; a sysex the note-on ends.
-TEST(engine_midi_overflow_is_counted) {
+// DECISION A101: a sysex longer than DUART A's wire queue (1024) is held and fed as the wire drains: none is
+// dropped, and a note-on after it plays once the wire has carried it (3000 bytes at 3125 bytes/s, about 1 s).
+TEST(engine_long_sysex_is_not_dropped) {
     auto e = bootedEngine();
     if (!e) return;
-    std::vector<uint8_t> flood(3000, 0x00);
-    flood[0] = 0xF0;
-    flood[1] = 0x7D;
-    e->midi(0, flood.data(), static_cast<int>(flood.size()));
-    renderMs(*e, 10);
-    const uint32_t dropped = e->snapshot().midiDropped;
-    std::printf("  dropped: %u\n", static_cast<unsigned>(dropped));
-    CHECK(dropped >= 1976u);
-    std::vector<float> quiet;
-    renderMs(*e, 200, &quiet);
-    CHECK(firstNonZero(quiet) < 0);
+    std::vector<uint8_t> sx(3000, 0x00);
+    sx[0] = 0xF0;
+    sx[1] = 0x7D;
+    sx.back() = 0xF7;
+    e->midi(0, sx.data(), static_cast<int>(sx.size()));
     const uint8_t on[] = {0x90, 0x3C, 0x64};
     e->midi(0, on, 3);
     std::vector<float> out;
+    renderMs(*e, 800, &out);
+    CHECK(firstNonZero(out) < 0);  // still on the wire
     renderMs(*e, 1000, &out);
+    const uint32_t dropped = e->snapshot().midiDropped;
+    std::printf("  dropped: %u, first sound at %d\n", static_cast<unsigned>(dropped), firstNonZero(out));
+    CHECK_EQ(dropped, 0u);
     CHECK(firstNonZero(out) >= 0);
+}
+
+// DECISION A101: bytes beyond the engine's held store (kMidiHeld) are dropped and counted.
+TEST(engine_midi_overflow_is_counted) {
+    auto e = bootedEngine();
+    if (!e) return;
+    std::vector<uint8_t> flood(Engine::kMidiHeld + 100, 0x00);
+    flood[0] = 0xF0;
+    e->midi(0, flood.data(), static_cast<int>(flood.size()));
+    renderMs(*e, 10);
+    CHECK_EQ(e->snapshot().midiDropped, 100u);
 }
 
 // A full event queue at once: the panel link takes only whole events, and the rest wait.
@@ -482,6 +493,47 @@ TEST(engine_patch_select_reaches_machine) {
     CHECK(b2 >= b1 + 3);
     e->post({Event::Kind::PatchSelect, 0, false, 0});
     renderMs(*e, 100);
+}
+
+// DECISION A133: MIDI out reaches the host as whole messages, in order.
+std::vector<std::vector<uint8_t>> g_out;
+void collectOut(void*, const uint8_t* d, int n) { g_out.emplace_back(d, d + n); }
+
+TEST(engine_midi_out_whole_messages) {
+    auto e = bootedEngine();
+    if (!e) return;
+    e->setMidiOut(collectOut, nullptr);
+    g_out.clear();
+    CHECK(e->post({Event::Kind::Key, 60, true, 100}));
+    renderMs(*e, 100);
+    CHECK(e->post({Event::Kind::Key, 60, false, 100}));
+    renderMs(*e, 100);
+    bool on = false;
+    for (const auto& m : g_out) on |= m.size() == 3 && (m[0] & 0xF0) == 0x90 && m[1] == 60 && m[2] > 0;
+    std::printf("  messages: %zu\n", g_out.size());
+    CHECK(on);
+    // Identity Request (MIDI 1.0 universal sysex): the OS answers with Identity Reply, F0 7E .. 06 02 .. F7,
+    // once SYS-EX=ON (MIDI Control page 3; OFF in a new RAM).
+    for (int i = 0; i < 3; ++i) press(*e, ts::Button::MidiControl);
+    press(*e, ts::Button::Soft1);
+    press(*e, ts::Button::Up);
+    CHECK(shown(e->snapshot().panel).find("SYS-EX=ON") != std::string::npos);
+    g_out.clear();
+    const uint8_t ask[] = {0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7};
+    const uint64_t before = e->snapshot().midiOutBytes;
+    e->midi(0, ask, 6);
+    renderMs(*e, 2000);
+    std::printf("  out bytes after the request: %llu, dropped in: %u\n",
+                static_cast<unsigned long long>(e->snapshot().midiOutBytes - before), e->snapshot().midiDropped);
+    bool reply = false;
+    for (const auto& m : g_out) {
+        std::printf("  out:");
+        for (const uint8_t b : m) std::printf(" %02X", b);
+        std::printf("\n");
+        reply |= m.size() >= 6 && m[0] == 0xF0 && m[1] == 0x7E && m[3] == 0x06 && m[4] == 0x02 && m.back() == 0xF7;
+    }
+    CHECK(reply);
+    e->setMidiOut(nullptr, nullptr);
 }
 
 // DECISION A105: the restore goes out once, at the first block start once booted, and a note shortly

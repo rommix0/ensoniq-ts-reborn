@@ -1917,6 +1917,80 @@ void vst3(const juce::File& dir, const juce::File& bundle, bool ownRoms) {
 
 }  // namespace
 
+// DECISION A133: the firmware's MIDI out leaves processBlock as whole messages; the input is not echoed.
+void midiOut(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    juce::AudioBuffer<float> buf(4, 480);
+    bool on = false, echoed = false;
+    p.engine()->post({ens::app::Event::Kind::Key, 60, true, 100});
+    for (int i = 0; i < 20; ++i) {
+        juce::MidiBuffer m;
+        if (i == 0) m.addEvent(juce::MidiMessage::controllerEvent(1, 0x50, 0x11), 0);  // an undefined CC
+        buf.clear();
+        p.processBlock(buf, m);
+        for (const auto e : m) {
+            const auto msg = e.getMessage();
+            on |= msg.isNoteOn() && msg.getNoteNumber() == 60;
+            echoed |= msg.isController() && msg.getControllerNumber() == 0x50;
+        }
+    }
+    p.engine()->post({ens::app::Event::Kind::Key, 60, false, 100});
+    run(p, 100);
+    CHECK(p.producesMidi() && on && !echoed);
+}
+
+// DECISION A134: the outputs are AC-coupled, as the TS's analog board: after a note dies away the machine's Main
+// sits a few LSB below 0 (OT12, T11 truncation), and the host output does not.
+void dcBlocked(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    juce::MidiBuffer on, off;
+    on.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<uint8_t>(100)), 0);
+    off.addEvent(juce::MidiMessage::noteOff(1, 60), 0);
+    run(p, 500, on);
+    run(p, 10000, off);
+    juce::AudioBuffer<float> buf(4, 480);
+    double sum[2] = {0, 0};
+    for (int b = 0; b < 100; ++b) {
+        juce::MidiBuffer none;
+        buf.clear();
+        p.processBlock(buf, none);
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < 480; ++i) sum[c] += buf.getSample(c, i);
+    }
+    const double lsb[2] = {sum[0] / 48000 * 32768, sum[1] / 48000 * 32768};
+    std::printf("  Main mean after the tail: %.3f %.3f LSB\n", lsb[0], lsb[1]);
+    CHECK(std::abs(lsb[0]) < 0.25 && std::abs(lsb[1]) < 0.25);
+}
+
+// DECISION A135: the app's machine has 8 MB of sample RAM: BankSet + Bank 9 selects S9 in Sounds mode.
+void sampleRam8(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    using ens::ts::Button;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    press(p, Button::Sounds);
+    const auto post = [&](Button b, bool down) {
+        p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), down, 0});
+        run(p, 100);
+    };
+    post(Button::BankSet, true);
+    post(Button::Bank9, true);
+    post(Button::Bank9, false);
+    post(Button::BankSet, false);
+    run(p, 300);
+    CHECK(rowStarts(p, 0, "S9-0"));
+}
+
 int main() {
     juce::ScopedJuceInitialiser_GUI gui;  // the VST3 host and editor need the message manager
     const auto dir =
@@ -1942,7 +2016,10 @@ int main() {
     romsBesideApp(dir.getChildFile("beside"));
     romFolderOrder(dir.getChildFile("order"));
     romFolderInUse(dir.getChildFile("inuse"));
-    auxBusOff(dir.getChildFile("buses"));  // not "aux": a reserved device name on Windows
+    auxBusOff(dir.getChildFile("buses"));
+    midiOut(dir.getChildFile("midi-out"));
+    dcBlocked(dir.getChildFile("dc"));
+    sampleRam8(dir.getChildFile("simm8"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
     cdDrive(dir.getChildFile("cd"));

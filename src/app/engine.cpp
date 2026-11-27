@@ -24,8 +24,8 @@ constexpr uint64_t kPromptAgain = 2'000ull * ts::kCpuHz / 512'000;
 constexpr uint64_t kRestoreCap = 120'000ull * ts::kCpuHz / 512'000;
 }  // namespace
 
-std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err, bool scsi) {
-    auto m = ts::Machine::create(roms, err, false, scsi);
+std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err, bool scsi, bool simm8) {
+    auto m = ts::Machine::create(roms, err, false, scsi, simm8);
     if (!m) return nullptr;
     return std::unique_ptr<Engine>(new Engine(std::move(m)));
 }
@@ -52,7 +52,11 @@ void Engine::prepare(double outRate, int maxBlock) {
 bool Engine::loadRam(const std::vector<uint8_t>& img, std::string& err) {
     if (!m_->loadRamImage(img, err)) return false;
     frames_ = 0;  // a power cycle: the boot starts again
+    midiHeld_.clear();  // and the bytes still on the way are lost with it
+    runHead_ = runCount_ = 0;
     inParse_ = outParse_ = MidiParse{};
+    outSysexLen_ = 0;
+    commonLen_ = commonNeed_ = 0;
     booted_ = false;
     autoLoad_ = answerAutoLoad_ ? AutoLoad::Watch : AutoLoad::Off;
     requested_ = current_ = -1;
@@ -443,17 +447,24 @@ std::pair<uint32_t, uint32_t> Engine::releaseCd() {
 }
 
 // DECISION A101: a byte at offset o enters before machine frame floor(o * kFrameHz / outRate) of the
-// block; the store holds 1024 bytes a block, and the rest are dropped and counted.
+// block, or later, once DUART A's wire queue (A1) has room for it, so a long sysex crosses blocks at the
+// wire's pace as a MIDI cable would carry it. The engine holds kMidiHeld bytes in kMidiRuns runs; the rest
+// are dropped and counted.
 // DECISION A108: every byte goes to MIDI IN unchanged, as the jack would carry it; the OS reads pressure itself.
 void Engine::midi(int offset, const uint8_t* data, int size) {
-    const auto at = offset > 0 ? static_cast<uint64_t>(offset * kFrameHz / outRate_) : 0;
-    for (int i = 0; i < size; ++i) {
-        if (midiCount_ == kMidiStore) {
-            storeDropped_ += static_cast<uint32_t>(size - i);
-            return;
-        }
-        midi_[midiCount_++] = {at, data[i]};
+    if (size <= 0) return;
+    const uint64_t at = frames_ + (offset > 0 ? static_cast<uint64_t>(offset * kFrameHz / outRate_) : 0);
+    MidiRun* last = runCount_ ? &runs_[(runHead_ + runCount_ - 1) % kMidiRuns] : nullptr;
+    if (!(last && last->frame == at) && runCount_ == kMidiRuns) {
+        storeDropped_ += static_cast<uint32_t>(size);
+        return;
     }
+    const auto n = static_cast<uint32_t>(std::min(static_cast<size_t>(size), kMidiHeld - midiHeld_.size()));
+    for (uint32_t i = 0; i < n; ++i) midiHeld_.push(data[i]);
+    storeDropped_ += static_cast<uint32_t>(size) - n;
+    if (n == 0) return;
+    if (last && last->frame == at) last->left += n;
+    else runs_[(runHead_ + runCount_++) % kMidiRuns] = {at, n};
 }
 
 void Engine::apply(const Event& e) {
@@ -478,10 +489,63 @@ void Engine::apply(const Event& e) {
 }
 
 void Engine::feedMidi(uint64_t upTo) {
-    while (midiNext_ < midiCount_ && midi_[midiNext_].frame <= upTo) {
-        const uint8_t b = midi_[midiNext_++].byte;
+    const auto& d = m_->duart();
+    while (runCount_ && runs_[runHead_].frame <= upTo && d.rxQueued(ts::kMidiChannel) < duart::Duart::kRxQueue) {
+        uint8_t b = 0;
+        midiHeld_.pop(b);
         m_->midiIn(b);
         if (inParse_.feed(b)) track(inParse_, true);
+        if (--runs_[runHead_].left == 0) {
+            runHead_ = (runHead_ + 1) % kMidiRuns;
+            --runCount_;
+        }
+    }
+}
+
+// DECISION A133: MIDI out as whole messages. A status byte ends a sysex in progress without F7 (dropped) and
+// a system common message; a sysex longer than kMidiHeld is dropped.
+void Engine::midiOutByte(uint8_t b) {
+    const auto emit = [this](const uint8_t* d, int n) {
+        if (outFn_) outFn_(outCtx_, d, n);
+    };
+    if (b >= 0xF8) {  // real-time: alone, anywhere
+        emit(&b, 1);
+        return;
+    }
+    if (outParse_.feed(b)) {
+        track(outParse_, false);
+        const uint8_t m[3] = {outParse_.status, outParse_.d[0], outParse_.d[1]};
+        emit(m, (outParse_.status & 0xE0) == 0xC0 ? 2 : 3);
+        return;
+    }
+    if (b >= 0x80) {
+        const bool end = b == 0xF7 && outSysexLen_ > 0 && outSysexLen_ < outSysex_.size();
+        if (end) {
+            outSysex_[outSysexLen_++] = b;
+            emit(outSysex_.data(), static_cast<int>(outSysexLen_));
+        }
+        outSysexLen_ = 0;
+        commonLen_ = commonNeed_ = 0;
+        if (b == 0xF0) {
+            outSysex_[0] = b;
+            outSysexLen_ = 1;
+        } else if (b == 0xF1 || b == 0xF3 || b == 0xF2) {
+            common_[0] = b;
+            commonLen_ = 1;
+            commonNeed_ = b == 0xF2 ? 3 : 2;
+        } else if (b == 0xF6) {
+            emit(&b, 1);
+        }
+        return;
+    }
+    if (outSysexLen_ > 0) {  // past the store the length stays at its size and the F7 drops it
+        if (outSysexLen_ < outSysex_.size()) outSysex_[outSysexLen_++] = b;
+    } else if (commonNeed_ > 0) {
+        common_[commonLen_++] = b;
+        if (commonLen_ == commonNeed_) {
+            emit(common_, commonLen_);
+            commonLen_ = commonNeed_ = 0;
+        }
     }
 }
 
@@ -530,19 +594,17 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
         copyState_.store(2, std::memory_order_release);
     }
     blockStart();
-    blockFrame_ = 0;
     for (int done = 0; done < frames;) {
         const int n = std::min(frames - done, maxBlock_);
         float* const piece[kChannels] = {mainL + done, mainR + done, auxL + done, auxR + done};
         renderPiece(piece, n);
         done += n;
     }
-    feedMidi(UINT64_MAX);  // bytes due after the frames this block ran
-    midiCount_ = midiNext_ = 0;
-    // DECISION A2: MIDI out is drained every block and discarded, counted.
+    feedMidi(UINT64_MAX);  // bytes due after the frames this block ran; any the wire has no room for stay held
+    // DECISION A2: MIDI out is drained every block and counted; DECISION A133: and handed out whole.
     for (uint8_t b; m_->popMidiOut(b);) {
         ++midiOut_;
-        if (outParse_.feed(b)) track(outParse_, false);
+        midiOutByte(b);
     }
     // DECISION A103: published under try_lock; the block is skipped when the GUI holds the lock.
     if (snapMu_.try_lock()) {
@@ -578,10 +640,9 @@ void Engine::render(float* mainL, float* mainR, float* auxL, float* auxR, int fr
 void Engine::renderPiece(float* const out[kChannels], int frames) {
     const auto want = kChannels * static_cast<size_t>(frames);
     while (out_.size() < want) {
-        feedMidi(blockFrame_);
+        feedMidi(frames_);
         ts::Audio a;
         m_->runFrame(a);
-        ++blockFrame_;
         ++frames_;
         const int16_t s[kChannels] = {a.mainL, a.mainR, a.auxL, a.auxR};
         rs_->process(s, 1, out_);

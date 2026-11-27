@@ -5,7 +5,7 @@ project is; this file is how to work on it.
 
 ## The project in one paragraph
 
-An emulator of the Ensoniq TS-10 (the TS-12 is out of scope) that runs the instrument's own OS v3.10 from the
+An emulator of the Ensoniq TS-10 (the TS-12 is in scope again since 2026-11-26: its features are added where they fit) that runs the instrument's own OS v3.10 from the
 ROMs in `roms/`. Plain C++17 chip cores (68000, ES5506 OTTO from Plan 2, ES5510 ESP, 68681 DUART)
 make up a TS machine (`src/ts`, from Plan 3), a real-time engine drives it, and a JUCE 8 app wraps
 that engine as a Standalone and VST3 named "TS Reborn" (`app/`, from Plan 4) for Windows x64 (MSVC),

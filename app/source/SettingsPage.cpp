@@ -81,12 +81,12 @@ SettingsPage::SettingsPage(TsProcessor& p)
     }
 
 #if JucePlugin_Build_Standalone
-    // The Standalone wrapper's devices: audio out and MIDI inputs, no MIDI out.
+    // The Standalone wrapper's devices: audio out, MIDI inputs and the MIDI output (A133).
     // In the VST3 the host owns the devices and the section is not shown.
     if (proc_.wrapperType == juce::AudioProcessor::wrapperType_Standalone)
         if (auto* holder = juce::StandalonePluginHolder::getInstance()) {
             devices_ = std::make_unique<juce::AudioDeviceSelectorComponent>(holder->deviceManager, 0, 0, 2, 2, true,
-                                                                            false, true, false);
+                                                                            true, true, false);
             addAndMakeVisible(*devices_);
             devices_->setSize(kWidth - 2 * kPadX, 600);  // it shrinks itself to what it shows
         }

@@ -271,6 +271,25 @@ void chord(Machine& m, Button a, Button b) {
     runMs(m, 300);
 }
 
+}  // namespace
+
+// DECISION T4: with the 4M x 8 SIMM pair the OS's socket probe finds BankSet S9 (bank 2), which BankSet + Bank 9
+// selects in Sounds mode (manual section 1); with the factory pair the press is ignored.
+TEST(ts_simm8_has_bankset_s9) {
+    for (const bool simm8 : {false, true}) {
+        auto m = loadTs(false, false, simm8);
+        if (!m) return;
+        runMs(*m, 5400);
+        tap(*m, Button::Sounds);
+        chord(*m, Button::BankSet, Button::Bank9);
+        const std::string row = rowText(m->panel(), 0);
+        std::printf("  %s: [%s]\n", simm8 ? "8 MB" : "2 MB", row.c_str());
+        CHECK_EQ(row.rfind("S9-0", 0) == 0, simm8);
+    }
+}
+
+namespace {
+
 // Text that must never appear in normal operation: a low-battery warning, a SYSTEM ERROR, an
 // unexpected-event message, a missing keyboard or disk drive that answers wrongly.
 const char* badText(const PanelState& p) {

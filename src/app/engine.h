@@ -58,8 +58,8 @@ struct Snapshot {
 class Engine {
 public:
     ~Engine();
-    // scsi: the SP-4 board with a CD drive at ID 4 (Plan 7).
-    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err, bool scsi = false);
+    // scsi: the SP-4 board with a CD drive at ID 4 (Plan 7); simm8: 8 MB of sample RAM (T4).
+    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err, bool scsi = false, bool simm8 = false);
     // Message thread, audio stopped:
     void prepare(double outRate, int maxBlock);  // allocates the resampler and buffers
     bool loadRam(const std::vector<uint8_t>& img, std::string& err);
@@ -120,13 +120,24 @@ public:
     // when ok is false, and is freed by the caller. The engine's destructor frees what is left in a slot.
     // Audio thread:
     void midi(int offset, const uint8_t* data, int size);  // before render, offsets in this block (A101)
+    // DECISION A101: MIDI-in bytes held until DUART A's wire has room: 512 KB, more than the largest TS
+    // sysex message seen (a 297 543-byte demo sequence dump).
+    static constexpr size_t kMidiHeld = size_t{1} << 19;
     // Any frames >= 0, in pieces of maxBlock.
     void render(float* mainL, float* mainR, float* auxL, float* auxR, int frames);
     void setProgram(int n);    // requests a sound 0-127 (A105)
     void adoptProgram(int n);  // as setProgram, but never sends: a value followed from the snapshot
     void setAnalog(ts::Analog a, uint16_t raw);  // applied at a block start, once booted (A106)
+    // DECISION A133: during render, each whole message the firmware sent on MIDI out (running status expanded,
+    // a sysex from F0 to F7, real-time bytes alone), in order. Set before the audio starts; nullptr drops them.
+    using MidiOut = void (*)(void* ctx, const uint8_t* data, int size);
+    void setMidiOut(MidiOut fn, void* ctx) {
+        outFn_ = fn;
+        outCtx_ = ctx;
+    }
 
 private:
+    void midiOutByte(uint8_t b);
     explicit Engine(std::unique_ptr<ts::Machine> m);
     void apply(const Event& e);
     void renderPiece(float* const out[4], int frames);
@@ -138,9 +149,9 @@ private:
     void endRestore();
     void sendSelect(const uint8_t* b, int n);
 
-    struct MidiByte {
-        uint64_t frame;  // machine frame of the block it enters before (A101)
-        uint8_t byte;
+    struct MidiRun {   // bytes of one midi() call, or of several at the same frame (A101)
+        uint64_t frame;  // machine frame since power-on it enters before
+        uint32_t left;   // its bytes still held
     };
     // A running-status MIDI parser for one stream: feed returns true when a message is complete.
     struct MidiParse {
@@ -151,7 +162,7 @@ private:
     };
     void track(const MidiParse& p, bool fromIn);  // a complete message: program, bank, notes
 
-    static constexpr int kMidiStore = 1024;     // DECISION A101
+    static constexpr size_t kMidiRuns = 1024;   // DECISION A101
     static constexpr size_t kEventQueue = 256;  // DECISION A102
     static constexpr size_t kChannels = 4;      // Main L, Main R, Aux L, Aux R
 
@@ -161,11 +172,17 @@ private:
     double outRate_ = 48000;
     int maxBlock_ = 0;
     uint64_t frames_ = 0;      // machine frames since power-on
-    uint64_t blockFrame_ = 0;  // machine frames run in this block
-    MidiByte midi_[kMidiStore];
-    int midiCount_ = 0, midiNext_ = 0;
+    ByteRing<kMidiHeld> midiHeld_;
+    std::array<MidiRun, kMidiRuns> runs_{};
+    size_t runHead_ = 0, runCount_ = 0;
     uint32_t storeDropped_ = 0;
     uint64_t midiOut_ = 0;
+    MidiOut outFn_ = nullptr;
+    void* outCtx_ = nullptr;
+    std::vector<uint8_t> outSysex_ = std::vector<uint8_t>(kMidiHeld);  // the sysex being sent (A133)
+    size_t outSysexLen_ = 0;  // 0: none in progress
+    uint8_t common_[3] = {0, 0, 0};  // a system common message being sent (F1, F2, F3)
+    int commonLen_ = 0, commonNeed_ = 0;
     SpscRing<Event, kEventQueue> events_;
     Event held_{};  // popped, waiting for room on the panel link
     bool holding_ = false;
