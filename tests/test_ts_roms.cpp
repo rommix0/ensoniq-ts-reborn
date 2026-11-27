@@ -71,6 +71,19 @@ TEST(ts_sample_ram_is_otto_bank3) {
     CHECK_EQ(m.read(2, 7), 0);
 }
 
+// T4: the expansion pair (two 4M x 8 SIMMs, 8 MB): S8 is all of bank 3, S9 all of bank 2; the host index runs
+// through bank 3, then bank 2 (CPU 0x400000, 0x800000).
+TEST(ts_sample_ram_8mb_fills_banks_3_and_2) {
+    WaveMemory m;
+    m.setSampleRamWords(WaveMemory::kExpandedRamWords);
+    CHECK_EQ(m.sampleRamWords(), 0x400000u);
+    m.sampleRam(0x1FFFFF) = 0x1234;
+    m.sampleRam(0x200007) = 0xBEEF;
+    CHECK_EQ(m.read(3, 0x1FFFFF), 0x1234);
+    CHECK_EQ(m.read(2, 7), 0xBEEF);
+    CHECK_EQ(m.read(3, 7), 0);
+}
+
 TEST(ts_roms_wrong_size_named) {
     const char* names[6] = {"osHigh", "osLow", "u41", "u43", "u45", "u46"};
     for (int i = 0; i < 6; ++i) {

@@ -143,6 +143,7 @@ These are OS v3.10's own behaviour. The app does not work around them, except wh
 
 - **The boot takes real time.** The play screen appears at about 3.5 s, on U0-0, and the OS plays notes from then on. At about 5.3 s (A104) the saved sound is restored (A105); that program change mutes the output and makes the OS ignore notes for about 50 ms (next item).
 - **A sound change that loads a new effect mutes the output and makes the OS ignore notes for about 50 ms.** This shows after a program change, including the restore at the end of the boot. A note played within 50 ms of the change is lost. The app does not delay or resend notes.
+- **Sample RAM is 8 MB** (A135), the TS-10's largest fitting (two 4M x 8 SIMMs): BankSets S8 and S9, 20 sampled-sound banks. BankSet + Bank 9 selects S9 in Sounds mode.
 - **VOICE-MUTING** is a setting on the OS's System page. It is the firmware's own and the app passes it through unchanged. Its effect has not been checked here.
 - **The OS sometimes answers a MIDI-in program change on MIDI out.** The cause is unknown (Low confidence). The app counts a program change that changes the sound and ignores the rest.
 

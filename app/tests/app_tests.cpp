@@ -1970,6 +1970,27 @@ void dcBlocked(const juce::File& dir) {
     CHECK(std::abs(lsb[0]) < 0.25 && std::abs(lsb[1]) < 0.25);
 }
 
+// DECISION A135: the app's machine has 8 MB of sample RAM: BankSet + Bank 9 selects S9 in Sounds mode.
+void sampleRam8(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    using ens::ts::Button;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    press(p, Button::Sounds);
+    const auto post = [&](Button b, bool down) {
+        p.engine()->post({ens::app::Event::Kind::Button, static_cast<uint8_t>(b), down, 0});
+        run(p, 100);
+    };
+    post(Button::BankSet, true);
+    post(Button::Bank9, true);
+    post(Button::Bank9, false);
+    post(Button::BankSet, false);
+    run(p, 300);
+    CHECK(rowStarts(p, 0, "S9-0"));
+}
+
 int main() {
     juce::ScopedJuceInitialiser_GUI gui;  // the VST3 host and editor need the message manager
     const auto dir =
@@ -1997,7 +2018,8 @@ int main() {
     romFolderInUse(dir.getChildFile("inuse"));
     auxBusOff(dir.getChildFile("buses"));
     midiOut(dir.getChildFile("midi-out"));
-    dcBlocked(dir.getChildFile("dc"));  // not "aux": a reserved device name on Windows
+    dcBlocked(dir.getChildFile("dc"));
+    sampleRam8(dir.getChildFile("simm8"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
     cdDrive(dir.getChildFile("cd"));

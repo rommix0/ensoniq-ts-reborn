@@ -266,8 +266,9 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
         img = loadMemoryFile(settings_.memoryFile(), memoryError_);  // wrong size: reported, cold boot
     }
     std::string e;
-    // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4.
-    auto fresh = ens::app::Engine::create(roms_, e, true);
+    // DECISION A128: every machine has the SP-4 SCSI board with the CD drive at ID 4. DECISION A135: and the 4M x 8
+    // SIMM pair, 8 MB of sample RAM (BankSets S8 and S9).
+    auto fresh = ens::app::Engine::create(roms_, e, true, true);
     if (fresh) fresh->setMidiOut(&TsProcessor::addMidiOut, this);
     // DECISION A124: the VST3 answers the power-on auto-load question; the Standalone asks, as the TS does.
     if (fresh) fresh->setAnswerAutoLoad(mode_ == MemoryMode::Project);

@@ -58,8 +58,8 @@ struct Snapshot {
 class Engine {
 public:
     ~Engine();
-    // scsi: the SP-4 board with a CD drive at ID 4 (Plan 7).
-    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err, bool scsi = false);
+    // scsi: the SP-4 board with a CD drive at ID 4 (Plan 7); simm8: 8 MB of sample RAM (T4).
+    static std::unique_ptr<Engine> create(const ts::RomSet&, std::string& err, bool scsi = false, bool simm8 = false);
     // Message thread, audio stopped:
     void prepare(double outRate, int maxBlock);  // allocates the resampler and buffers
     bool loadRam(const std::vector<uint8_t>& img, std::string& err);

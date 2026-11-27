@@ -52,8 +52,9 @@ public:
     // nullptr on a wrong ROM size, with err naming the file. DECISION T13: a stock TS-10 (design section 4)
     // unless sqx70: the SQX-70 sequence expander's 256 KB (SEQEXP) fitted. DECISION T25: scsi fits the SP-4 board
     // (a WD33C93 at I/O1 n = 1) with a CD-ROM drive at SCSI ID 4; without it the block reads 0 (T12).
+    // DECISION T4: simm8 fits the 4M x 8 SIMM pair (8 MB, BankSets S8 and S9) in place of the factory 2 MB.
     static std::unique_ptr<Machine> create(const RomSet& roms, std::string& err, bool sqx70 = false,
-                                           bool scsi = false);
+                                           bool scsi = false, bool simm8 = false);
     Machine(const Machine&) = delete;  // cpu_ holds a Bus& to *this
     Machine& operator=(const Machine&) = delete;
     void runFrame(Audio& out);                              // one OTTO frame (ACTV + 1 slots)

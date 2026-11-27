@@ -12,6 +12,8 @@ The floppy drive works: the OS reads and writes disk images (raw `.img`, `.gkh`,
 
 The checks only a person can do (sound, the panel, the drives, a DAW) were done by the user for Plans 4 and 5 on 2026-11-15 and for Plan 7 on 2026-11-16 ([docs/verification-plan7.md](docs/verification-plan7.md)). The release scripts build a ready-to-use folder (below). The design is [docs/design/2026-11-13-ts-emulator-design.md](docs/design/2026-11-13-ts-emulator-design.md).
 
+**Two buttons at once** (the TS's two-finger shortcuts, such as holding a Bank button while pressing a soft button): right-click or Shift-click a panel button to latch it down, press the other button, then click the latched one to release it.
+
 ## The release folder
 
 `tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0` (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README with its panel picture, the license, the app guide, and the six ROMs, beside the program and inside the VST3 package.

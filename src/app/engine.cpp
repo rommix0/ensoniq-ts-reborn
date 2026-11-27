@@ -24,8 +24,8 @@ constexpr uint64_t kPromptAgain = 2'000ull * ts::kCpuHz / 512'000;
 constexpr uint64_t kRestoreCap = 120'000ull * ts::kCpuHz / 512'000;
 }  // namespace
 
-std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err, bool scsi) {
-    auto m = ts::Machine::create(roms, err, false, scsi);
+std::unique_ptr<Engine> Engine::create(const ts::RomSet& roms, std::string& err, bool scsi, bool simm8) {
+    auto m = ts::Machine::create(roms, err, false, scsi, simm8);
     if (!m) return nullptr;
     return std::unique_ptr<Engine>(new Engine(std::move(m)));
 }

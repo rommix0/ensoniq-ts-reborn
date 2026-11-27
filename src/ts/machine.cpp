@@ -33,8 +33,9 @@ Machine::Region Machine::decode(uint32_t a) {
     return Region::None;
 }
 
-std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, bool sqx70, bool scsi) {
+std::unique_ptr<Machine> Machine::create(const RomSet& roms, std::string& err, bool sqx70, bool scsi, bool simm8) {
     std::unique_ptr<Machine> m(new Machine());
+    if (simm8) m->waves_.setSampleRamWords(WaveMemory::kExpandedRamWords);  // DECISION T4
     m->sqx70_ = sqx70;
     m->scsi_ = scsi;
     if (scsi) m->wd_.attach(kCdId, &m->cd_);  // DECISION T25: one CD-ROM drive at ID 4 (the TS is ID 3)
@@ -129,7 +130,7 @@ bool Machine::loadRamImage(const std::vector<uint8_t>& img, std::string& err) {
         return false;
     }
     ram_ = img;
-    for (uint32_t w = 0; w < WaveMemory::kSampleRamWords; ++w) waves_.sampleRam(w) = 0;
+    for (uint32_t w = 0; w < waves_.sampleRamWords(); ++w) waves_.sampleRam(w) = 0;
     board_.clearDram();
     powerOn();
     return true;
@@ -158,11 +159,11 @@ uint8_t Machine::memByte(uint32_t a, bool& mapped) const {
 }
 
 // DECISION T4: the host window is OTTO bank 3 at 0x400000-0x7FFFFF and bank 2 at 0x800000-0xBFFFFF, word
-// A21..A1; only bank 3 words 0-0xFFFFF exist (one 1M x 8 SIMM pair, BankSet S8). Empty sockets read 0 and
-// ignore writes.
+// A21..A1. With the factory pair (1M x 8) only bank 3 words 0-0xFFFFF exist (BankSet S8); with the 4M x 8 pair
+// all of both banks (S8 and S9). Empty sockets read 0 and ignore writes.
 uint16_t Machine::hostWord(uint32_t a) const {
     const uint32_t w = (a - kHostBase) >> 1;
-    return w < WaveMemory::kSampleRamWords ? waves_.sampleRam(w) : 0;
+    return w < waves_.sampleRamWords() ? waves_.sampleRam(w) : 0;
 }
 
 uint16_t Machine::peek16(uint32_t addr) const {
@@ -279,7 +280,7 @@ void Machine::write8(uint32_t a, uint8_t v) {
     if (r == Region::Rom) return;
     if (r == Region::Host) {
         const uint32_t w = (a - kHostBase) >> 1;
-        if (w < WaveMemory::kSampleRamWords) {
+        if (w < waves_.sampleRamWords()) {
             uint16_t& d = waves_.sampleRam(w);
             d = (a & 1) ? static_cast<uint16_t>((d & 0xFF00) | v) : static_cast<uint16_t>((d & 0xFF) | v << 8);
         }

@@ -27,16 +27,16 @@ inline bool readTsRoms(ens::ts::RomSet& r) {
 }
 
 // A fresh machine on the ROMs from ENS_ROM_DIR (a stock TS-10, or with the SQX-70 fitted: T13, or the SP-4 SCSI
-// board: T25); nullptr when a file is missing (prints the skip). Files that exist but are rejected fail the running
-// test, so a bad ROM set never passes as a skip.
-inline std::unique_ptr<ens::ts::Machine> loadTs(bool sqx70 = false, bool scsi = false) {
+// board: T25, or 8 MB of sample RAM: T4); nullptr when a file is missing (prints the skip). Files that exist but are
+// rejected fail the running test, so a bad ROM set never passes as a skip.
+inline std::unique_ptr<ens::ts::Machine> loadTs(bool sqx70 = false, bool scsi = false, bool simm8 = false) {
     ens::ts::RomSet r;
     if (!readTsRoms(r)) {
         std::printf("  skip: ROMs not found\n");
         return nullptr;
     }
     std::string err;
-    auto m = ens::ts::Machine::create(r, err, sqx70, scsi);
+    auto m = ens::ts::Machine::create(r, err, sqx70, scsi, simm8);
     if (!m) {
         std::printf("  FAIL: ROMs present but rejected: %s\n", err.c_str());
         ++ens_test::failures();
