@@ -1,5 +1,7 @@
 #include "ts/fdc.h"
 
+#include <algorithm>
+
 // DECISION T22: the uPD765 command set the OS uses, against a Disk. Details at each point of use; docs/decisions.md.
 
 namespace ens::ts {
@@ -146,7 +148,7 @@ bool Fdc::trackReadable(int cyl, int head) const {
 // have, or N other than 2, is "no data" (ND).
 void Fdc::loadSector() {
     const int head = cmd_[3];
-    if (cmd_[5] != 2 || cmd_[2] >= Disk::kCylinders || head > 1) {
+    if (cmd_[5] != 2 || cmd_[2] >= disk_->cylinders() || head > 1) {
         finishError(0x04, 0);
         return;
     }
@@ -174,8 +176,8 @@ void Fdc::execute() {
     case 0x07: case 0x0F:
         if (disk_) {
             // DECISION T22: no timing: Seek and Recalibrate finish at once and leave ST0 = SE (0x20) + unit
-            // for Sense Interrupt Status, PCN = the new cylinder (clamped to the disk's 80).
-            cyl_ = c == 0x07 ? 0 : (cmd_[2] < Disk::kCylinders ? cmd_[2] : Disk::kCylinders - 1);
+            // for Sense Interrupt Status, PCN = the new cylinder (clamped to the disk's last, T30).
+            cyl_ = c == 0x07 ? 0 : std::min<int>(cmd_[2], disk_->cylinders() - 1);
             intPending_ = true;
             intSt0_ = static_cast<uint8_t>(0x20 | (cmd_[1] & 3));
         }

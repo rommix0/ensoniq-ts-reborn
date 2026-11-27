@@ -85,6 +85,7 @@ private:
     uint32_t swaps_ = 0;  // inserts and ejects this drive made in that engine (Snapshot::diskSwaps)
     bool in_ = false, protect_ = false;
     ens::ts::Density density_ = ens::ts::Density::Double;
+    int cylinders_ = ens::ts::Disk::kCylinders;  // DECISION T30: more on an HFE super disk
     juce::File file_;  // empty for a new disk
     ens::ts::ImageFormat format_ = ens::ts::ImageFormat::Raw;
     std::vector<uint8_t> header_;  // as decoded, kept for saving in the same format

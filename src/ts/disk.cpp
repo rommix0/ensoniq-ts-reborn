@@ -4,27 +4,30 @@
 
 namespace ens::ts {
 
-Disk::Disk(Density d)
+Disk::Disk(Density d, int cylinders)
     : density_(d),
-      data_(size_t(kCylinders) * kHeads * size_t(d == Density::High ? 20 : 10) * kSectorBytes, 0),
-      formatted_(size_t(kCylinders) * kHeads, 0),
+      cylinders_(std::clamp(cylinders, 1, kMaxCylinders)),
+      data_(size_t(cylinders_) * kHeads * size_t(d == Density::High ? 20 : 10) * kSectorBytes, 0),
+      formatted_(size_t(cylinders_) * kHeads, 0),
       read_(data_.size() / kSectorBytes, 0) {}
 
-std::unique_ptr<Disk> Disk::blank(Density d) { return std::unique_ptr<Disk>(new Disk(d)); }
+std::unique_ptr<Disk> Disk::blank(Density d, int cylinders) {
+    return std::unique_ptr<Disk>(new Disk(d, cylinders));
+}
 
-std::unique_ptr<Disk> Disk::formatted(Density d) {
-    auto disk = blank(d);
+std::unique_ptr<Disk> Disk::formatted(Density d, int cylinders) {
+    auto disk = blank(d, cylinders);
     std::fill(disk->formatted_.begin(), disk->formatted_.end(), uint8_t(1));
     return disk;
 }
 
 bool Disk::trackFormatted(int cyl, int head) const {
-    if (cyl < 0 || cyl >= kCylinders || head < 0 || head >= kHeads) return false;
+    if (cyl < 0 || cyl >= cylinders_ || head < 0 || head >= kHeads) return false;
     return formatted_[size_t(cyl * kHeads + head)] != 0;
 }
 
 void Disk::formatTrack(int cyl, int head, uint8_t fill) {
-    if (cyl < 0 || cyl >= kCylinders || head < 0 || head >= kHeads) return;
+    if (cyl < 0 || cyl >= cylinders_ || head < 0 || head >= kHeads) return;
     formatted_[size_t(cyl * kHeads + head)] = 1;
     uint8_t* p = data_.data() + trackOffset(cyl, head);
     std::fill(p, p + size_t(sectorsPerTrack()) * kSectorBytes, fill);
@@ -51,7 +54,7 @@ void Disk::clearReads() {
 }
 
 bool Disk::copyInto(Disk& dst) const {
-    if (dst.density_ != density_) return false;
+    if (dst.density_ != density_ || dst.cylinders_ != cylinders_) return false;
     std::copy(data_.begin(), data_.end(), dst.data_.begin());
     std::copy(formatted_.begin(), formatted_.end(), dst.formatted_.begin());
     std::copy(read_.begin(), read_.end(), dst.read_.begin());

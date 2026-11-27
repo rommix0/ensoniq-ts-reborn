@@ -242,6 +242,25 @@ TEST(media_capture_first_wins) {
     CHECK(rec.media().empty());
 }
 
+// DECISION T30: an HFE super disk (255 cylinders, HD) is recorded with its size in blocks, and its stand-in has the
+// same cylinders, so a block past cylinder 80 goes back where the OS read it.
+TEST(media_super_disk_stand_in) {
+    auto d = ts::Disk::formatted(ts::Density::High, 255);
+    writeId(d->block(1), "SUPER  ");
+    d->block(7835)[0] = 0x5A;
+    d->noteRead(7835);
+    MediaRecord rec;
+    rec.captureFloppy(*d);
+    CHECK_EQ(rec.media().size(), 1u);
+    if (rec.media().size() != 1) return;
+    CHECK_EQ(rec.media()[0].size, 10200u);
+    auto s = app::standInFloppy(rec.media()[0]);
+    CHECK(s != nullptr);
+    if (!s) return;
+    CHECK_EQ(s->cylinders(), 255);
+    CHECK_EQ(s->block(7835)[0], 0x5A);
+}
+
 // CD sectors go to the medium whose sector 0 (blocks 0-3, the ID block at 1) was served last; a volume seen again is
 // the same medium. Sectors before any sector 0 are dropped.
 TEST(media_capture_cd_by_volume) {

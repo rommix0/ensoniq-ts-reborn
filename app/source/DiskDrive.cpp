@@ -10,12 +10,13 @@ using ens::ts::Disk;
 
 namespace {
 
-// The largest image file (a Giebler HD file holding every block is 1 638 913 bytes); a bigger one is not
-// read into memory, and decodeImage refuses its empty stand-in naming the sizes it takes.
-constexpr juce::int64 kMaxImageBytes = 2 * 1024 * 1024;
+// The largest image file (DECISION T30: an HFE super disk, 255 HD cylinders, is 12.8 MB; a Giebler HD file holding
+// every block is 1 638 913 bytes); a bigger one is not read into memory, and decodeImage refuses its empty stand-in
+// naming the sizes it takes.
+constexpr juce::int64 kMaxImageBytes = 16 * 1024 * 1024;
 
 // DECISION A119: the chooser lists the extensions formatForName knows, both cases (Linux matches case).
-const char* const kImageFiles = "*.img;*.IMG;*.gkh;*.GKH;*.ede;*.EDE;*.eda;*.EDA;*.edt;*.EDT";
+const char* const kImageFiles = "*.img;*.IMG;*.gkh;*.GKH;*.ede;*.EDE;*.eda;*.EDA;*.edt;*.EDT;*.hfe;*.HFE";
 
 }  // namespace
 
@@ -45,7 +46,7 @@ void DiskDrive::follow() {
 // One copy request at a time in the engine; copyAsked_ until poll() has taken its answer.
 bool DiskDrive::askCopy(ens::app::Engine* e) {
     if (copyAsked_) return true;  // an earlier request, not served yet (audio stopped), answers this save too
-    copyAsked_ = e->requestDisk(Disk::blank(density_));
+    copyAsked_ = e->requestDisk(Disk::blank(density_, cylinders_));
     return copyAsked_;
 }
 
@@ -108,12 +109,14 @@ bool DiskDrive::open(const juce::File& f, juce::String& err) {
     im.disk->setWriteProtected(protect_);
     const uint32_t writes = im.disk->writes();
     const Density density = im.disk->density();
+    const int cylinders = im.disk->cylinders();
     if (!insert(std::move(im.disk))) {
         err = notNow();
         return false;
     }
     in_ = true;
     density_ = density;
+    cylinders_ = cylinders;
     file_ = f;
     format_ = im.format;
     header_ = std::move(im.header);
@@ -127,6 +130,7 @@ bool DiskDrive::newBlank(Density d) {
     if (!insert(std::move(disk))) return false;
     in_ = true;
     density_ = d;
+    cylinders_ = Disk::kCylinders;
     file_ = juce::File();
     format_ = ens::ts::ImageFormat::Raw;
     header_.clear();
@@ -182,7 +186,7 @@ bool DiskDrive::save(juce::String& err, Done done) {
 }
 
 // DECISION A119: Save As takes the format from the extension typed (formatForName: .gkh GKH, .ede .eda .edt
-// Giebler, anything else raw), keeping the header read only when the format stays the same.
+// Giebler, .hfe HFE, anything else raw), keeping the header read only when the format stays the same.
 bool DiskDrive::saveAs(const juce::File& f, juce::String& err, Done done) {
     err = {};
     if (!in_) {
@@ -250,7 +254,8 @@ void DiskDrive::poll() {
     if (at != save_->swaps || !ok) {
         // A copy of another disk (the one to save still waiting to go in), or a scratch of the density before:
         // ask again while the disk to save is in, else the save fails.
-        if (save_->swaps == swaps_ && at <= swaps_ && (at != save_->swaps || copy->density() != density_) &&
+        if (save_->swaps == swaps_ && at <= swaps_ &&
+            (at != save_->swaps || copy->density() != density_ || copy->cylinders() != cylinders_) &&
             askCopy(e))
             return;
         finish(false, at != save_->swaps ? "The disk changed before it was saved." : "The disk could not be copied.");
@@ -258,7 +263,13 @@ void DiskDrive::poll() {
     }
     // DECISION A119: <file>.tmp, then replace (the memory file's way, A116): a failed save keeps the old file.
     // Giebler files get their bitmap from the disk's contents (encodeImage).
-    if (!saveMemoryFile(save_->file, ens::ts::encodeImage(*copy, save_->format, save_->header))) {
+    const auto bytes = ens::ts::encodeImage(*copy, save_->format, save_->header);
+    if (bytes.empty()) {  // DECISION T30: .img, .gkh and Giebler files hold 80 cylinders
+        finish(false, "This disk has " + juce::String(copy->cylinders()) +
+                          " cylinders: save it as an .hfe file (Save Disk Image As...).");
+        return;
+    }
+    if (!saveMemoryFile(save_->file, bytes)) {
         finish(false, "Disk image not saved: " + save_->file.getFullPathName());
         return;
     }
@@ -396,7 +407,8 @@ void DiskDrive::chooseSaveAs(std::function<void()> then) {
     const auto from = file_ != juce::File()
                           ? file_
                           : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile("Untitled.img");
-    chooser_ = std::make_unique<juce::FileChooser>("Save the disk image (.img, .gkh, .ede or .eda)", from, kImageFiles);
+    chooser_ = std::make_unique<juce::FileChooser>("Save the disk image (.img, .gkh, .ede, .eda or .hfe)", from,
+                                                   kImageFiles);
     chooser_->launchAsync(
         juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles |
             juce::FileBrowserComponent::warnAboutOverwriting,

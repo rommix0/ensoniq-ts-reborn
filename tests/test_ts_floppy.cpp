@@ -151,6 +151,11 @@ TEST(ts_loads_asr10_instrument) { loadsAndPlays(kAd001); }
 // ED-001's first instrument (FLUTE 1, EPS-16 PLUS DD, GKH) the same way.
 TEST(ts_loads_eps_instrument) { loadsAndPlays(kEd001); }
 
+// DECISION T30: an HxC HFE file (EPS orchestral ORCH1, DD, MFM) the same way.
+TEST(ts_loads_hfe_instrument) {
+    loadsAndPlays("/EPS & EPS-16/Factory Sounds/EPS-orchestral/Orchestral/HFE/ORCH1_GKH.hfe");
+}
+
 // DECISION A124: memory that remembers a loaded sampled sound makes the OS ask AUTO-LOAD ALL SAMPLED-SOUNDS
 // at power-on (Musician's Manual, "About the Auto-Load Feature"). An engine told to answer it (the VST3's)
 // presses the soft button under *NO * once, during the boot; one not told (the Standalone's) leaves the

@@ -186,6 +186,7 @@ TEST(image_format_for_name) {
     CHECK(formatForName("x.EDE") == ImageFormat::Giebler);
     CHECK(formatForName("d.img") == ImageFormat::Raw);
     CHECK(formatForName("e") == ImageFormat::Raw);
+    CHECK(formatForName("f.HFE") == ImageFormat::Hfe);
 }
 
 namespace {
@@ -196,10 +197,13 @@ bool readFile(const std::string& path, std::vector<uint8_t>& out) {
     return true;
 }
 bool sameSectors(const Disk& a, const Disk& b) {
-    for (int c = 0; c < Disk::kCylinders; ++c)
-        for (int h = 0; h < Disk::kHeads; ++h)
-            for (int s = 0; s < a.sectorsPerTrack(); ++s)
+    if (a.cylinders() != b.cylinders() || a.density() != b.density()) return false;
+    for (int c = 0; c < a.cylinders(); ++c)
+        for (int h = 0; h < Disk::kHeads; ++h) {
+            if (a.trackFormatted(c, h) != b.trackFormatted(c, h)) return false;
+            for (int s = 0; s < a.sectorsPerTrack() && a.trackFormatted(c, h); ++s)
                 if (std::memcmp(a.sector(c, h, s), b.sector(c, h, s), Disk::kSectorBytes) != 0) return false;
+        }
     return true;
 }
 }  // namespace
@@ -267,4 +271,97 @@ TEST(disk_marks_reads) {
     CHECK_EQ(b->reads(), 0u);
     CHECK(!b->wasRead(5));
     CHECK(a->wasRead(5));
+}
+
+// DECISION T30: a disk may have more cylinders than 80 (an HxC "super disk"); the block order runs on past 80.
+TEST(disk_more_cylinders) {
+    auto d = Disk::formatted(Density::High, 255);
+    CHECK_EQ(d->cylinders(), 255);
+    CHECK_EQ(d->bytes(), size_t(255) * 2 * 20 * 512);
+    CHECK(d->sector(254, 1, 19) != nullptr);
+    CHECK(d->sector(255, 0, 0) == nullptr);
+    CHECK(d->block(10199) == d->sector(254, 1, 19));
+    auto small = Disk::blank(Density::High);
+    CHECK_EQ(small->cylinders(), 80);
+    CHECK(!d->copyInto(*small));  // the cylinders must agree, as the density
+    auto same = Disk::blank(Density::High, 255);
+    CHECK(d->copyInto(*same));
+}
+
+// DECISION T30: HFE (HxC v1, MFM) written and read back: same density, cylinders, formatted tracks and sectors.
+TEST(image_hfe_roundtrip) {
+    for (const auto& [den, cyls] : {std::pair{Density::Double, 80}, std::pair{Density::High, 255}}) {
+        auto d = Disk::formatted(den, cyls);
+        const int blocks = cyls * 2 * d->sectorsPerTrack();
+        for (int n = 0; n < blocks; ++n)
+            for (int i = 0; i < Disk::kSectorBytes; ++i) d->block(n)[i] = uint8_t(n * 7 + i);
+        const auto file = encodeImage(*d, ImageFormat::Hfe, {});
+        CHECK(file.size() > 512 && std::memcmp(file.data(), "HXCPICFE", 8) == 0);
+        DecodedImage back;
+        std::string err;
+        CHECK(decodeImage(file, back, err));
+        CHECK(back.format == ImageFormat::Hfe);
+        CHECK(back.disk && sameSectors(*d, *back.disk));
+        CHECK(encodeImage(*back.disk, ImageFormat::Hfe, back.header) == file);
+    }
+    auto b = Disk::blank(Density::Double);
+    b->formatTrack(0, 0, 0xE5);
+    DecodedImage back;
+    std::string err;
+    CHECK(decodeImage(encodeImage(*b, ImageFormat::Hfe, {}), back, err));
+    CHECK(back.disk && back.disk->trackFormatted(0, 0) && !back.disk->trackFormatted(0, 1));
+    CHECK(back.disk && back.disk->sector(0, 0, 9)[511] == 0xE5);
+}
+
+// DECISION T30: only HFE v1 with MFM is read; others are named in the error.
+TEST(image_hfe_refuses_other_kinds) {
+    auto file = encodeImage(*Disk::formatted(Density::Double), ImageFormat::Hfe, {});
+    DecodedImage out;
+    std::string err;
+    file[11] = 2;  // track encoding: Amiga MFM
+    CHECK(!decodeImage(file, out, err));
+    CHECK(err.find("HFE") != std::string::npos);
+    std::memcpy(file.data(), "HXCHFEV3", 8);
+    CHECK(!decodeImage(file, out, err));
+    CHECK(err.find("HFE") != std::string::npos);
+    file.resize(300);
+    std::memcpy(file.data(), "HXCPICFE", 8);
+    CHECK(!decodeImage(file, out, err));
+}
+
+// DECISION T30: the user's HxC files hold the same sectors as the same disks in GKH and IMG form. 84-track
+// files with blank tracks 80-83 are 80-cylinder disks.
+TEST(image_hfe_user_files) {
+    const std::string dir = ENS_DISK_DIR;
+    std::vector<uint8_t> probe;
+    const std::string eps = dir + "/EPS & EPS-16/Factory Sounds";
+    if (dir.empty() || !readFile(eps + "/EPS-orchestral/Orchestral/ORCH1.GKH", probe)) {
+        std::printf("  skip: disk images not found\n");
+        return;
+    }
+    const std::string ed = "/Ensoniq EPS16 Factory Floppy Archive (15 disks, fixed) [IMG & GKH]/"
+                           "Ensoniq EPS16 Factory Floppy Archive (15 disks) [IMG & GKH]/IMG/ED-001.IMG";
+    struct Pair { std::string hfe, other; };
+    const Pair pairs[] = {
+        {eps + "/EPS-orchestral/Orchestral/HFE/ORCH1_GKH.hfe", eps + "/EPS-orchestral/Orchestral/ORCH1.GKH"},
+        {eps + "/Ensoniq EPS16 Factory Floppy Archive (for ASR10) [HxC type HFE]/ED-001_ASR10.hfe", eps + ed},
+    };
+    for (const Pair& p : pairs) {
+        std::vector<uint8_t> fa, fb;
+        CHECK(readFile(p.hfe, fa));
+        CHECK(readFile(p.other, fb));
+        DecodedImage da, db;
+        std::string err;
+        CHECK(decodeImage(fa, da, err));
+        CHECK(decodeImage(fb, db, err));
+        CHECK(da.format == ImageFormat::Hfe);
+        CHECK(da.disk && db.disk && sameSectors(*da.disk, *db.disk));
+    }
+    std::vector<uint8_t> f84;
+    CHECK(readFile(eps + "/EPS-Percussion/DrumSets/HFE/DRMSET01_GKH.hfe", f84));
+    CHECK(f84.size() > 9 && f84[9] == 84);
+    DecodedImage d84;
+    std::string err;
+    CHECK(decodeImage(f84, d84, err));
+    CHECK(d84.disk && d84.disk->cylinders() == 80 && d84.disk->density() == Density::Double);
 }

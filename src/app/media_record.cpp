@@ -76,7 +76,9 @@ void MediaRecord::setMedia(std::vector<SavedMedium> m) {
 
 std::unique_ptr<ts::Disk> standInFloppy(const SavedMedium& m) {
     if (m.kind == SavedMedium::Kind::Cd) return nullptr;
-    auto d = ts::Disk::formatted(m.kind == SavedMedium::Kind::FloppyHD ? ts::Density::High : ts::Density::Double);
+    const bool hd = m.kind == SavedMedium::Kind::FloppyHD;
+    // DECISION T30: the size in blocks gives the cylinders (80 but for an HFE super disk).
+    auto d = ts::Disk::formatted(hd ? ts::Density::High : ts::Density::Double, int(m.size) / (hd ? 40 : 20));
     for (const auto& [b, bytes] : m.blocks)
         if (uint8_t* p = d->block(int(b)); p && bytes.size() == ts::Disk::kSectorBytes)
             std::copy(bytes.begin(), bytes.end(), p);

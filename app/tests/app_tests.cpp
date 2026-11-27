@@ -27,6 +27,7 @@
 #include "../source/RomFolder.h"
 #include "app/analog_map.h"
 #include "app/panel_layout.h"
+#include "ts/disk_image.h"
 #include "ts/panel.h"
 
 namespace {
@@ -1991,6 +1992,52 @@ void sampleRam8(const juce::File& dir) {
     CHECK(rowStarts(p, 0, "S9-0"));
 }
 
+// DECISION T30: an HFE super disk (255 cylinders) opens in the drive at its size, saves as .hfe, and is refused as
+// .img (80 cylinders) with a message naming .hfe.
+void hfeDrive(const juce::File& dir) {
+    if (!realRoms(dir)) return;
+    TsProcessor p;
+    if (!p.engine()) return;
+    p.prepareToPlay(48000, 480);
+    run(p, kBoot);
+    auto& d = p.drive();
+    const auto step = [&] {
+        run(p, 10);
+        p.tick();
+    };
+    auto disk = ens::ts::Disk::formatted(ens::ts::Density::High, 255);
+    disk->block(7835)[0] = 0x5A;
+    const auto bytes = ens::ts::encodeImage(*disk, ens::ts::ImageFormat::Hfe, {});
+    const auto hfe = dir.getChildFile("super.hfe");
+    dir.createDirectory();
+    CHECK(hfe.replaceWithData(bytes.data(), bytes.size()));
+    juce::String err;
+    CHECK(d.open(hfe, err));
+    step();
+    CHECK(d.slotText() == "super.hfe" && p.engine()->machine().disk() != nullptr &&
+          p.engine()->machine().disk()->cylinders() == 255);
+    bool ok = true;
+    juce::String why;
+    CHECK(d.saveAs(dir.getChildFile("super.img"), err, [&](bool o, const juce::String& e) {
+        ok = o;
+        why = e;
+    }));
+    step();
+    step();
+    CHECK(!ok && why.contains(".hfe") && !dir.getChildFile("super.img").exists());
+    const auto copy = dir.getChildFile("copy.hfe");
+    CHECK(d.saveAs(copy, err));
+    step();
+    step();
+    juce::MemoryBlock back;
+    CHECK(copy.loadFileAsData(back));
+    const std::vector<uint8_t> v(static_cast<const uint8_t*>(back.getData()),
+                                 static_cast<const uint8_t*>(back.getData()) + back.getSize());
+    ens::ts::DecodedImage im;
+    std::string e;
+    CHECK(ens::ts::decodeImage(v, im, e) && im.disk && im.disk->cylinders() == 255 && im.disk->block(7835)[0] == 0x5A);
+}
+
 int main() {
     juce::ScopedJuceInitialiser_GUI gui;  // the VST3 host and editor need the message manager
     const auto dir =
@@ -2022,6 +2069,7 @@ int main() {
     sampleRam8(dir.getChildFile("simm8"));  // not "aux": a reserved device name on Windows
     editor(dir.getChildFile("editor"));
     diskDrive(dir.getChildFile("disk"));
+    hfeDrive(dir.getChildFile("hfe"));
     cdDrive(dir.getChildFile("cd"));
     cdDriveLoads(dir.getChildFile("cd-loads"));
     cdDriveMissingFile(dir.getChildFile("cd-missing"));

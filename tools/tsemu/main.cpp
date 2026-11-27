@@ -21,9 +21,9 @@
 // replace a good settings image with a half-initialised one. --sqx70 fits the SQX-70 sequence expander (SEQEXP);
 // the default is a stock TS-10 (T13). Both use the same image layout. --simm8 fits the 4M x 8 SIMM pair (8 MB of
 // sample RAM, BankSets S8 and S9) in place of the factory 2 MB (T4).
-// --disk <image> puts a disk image (raw .img, GKH or Giebler EDE/EDA, told apart by content, T21) in the drive
-// from power-on; the file is only read. --save-disk <file> writes the disk as it is at the end of the run, in the
-// format the file's extension gives (.gkh GKH, .ede/.eda/.edt Giebler, anything else raw; the --disk file's
+// --disk <image> puts a disk image (raw .img, GKH, Giebler EDE/EDA or HFE, told apart by content, T21, T30) in the
+// drive from power-on; the file is only read. --save-disk <file> writes the disk as it is at the end of the run, in the
+// format the file's extension gives (.gkh GKH, .ede/.eda/.edt Giebler, .hfe HFE, anything else raw; the --disk file's
 // header is kept when the format is the same); it is refused when it names the --disk file, and when the drive
 // is empty.
 // --cd <image> fits the SP-4 SCSI board (T25) and puts a CD image (.iso, or .cue with one MODE1/2352 track) in the
@@ -288,7 +288,9 @@ void saveDisk(const Machine& m, const Options& o, const DecodedImage& kept) {
     const ImageFormat f = formatForName(o.saveDisk);
     std::string err;
     const std::vector<uint8_t> header = f == kept.format ? kept.header : std::vector<uint8_t>{};
-    if (!writeFile(o.saveDisk, encodeImage(*m.disk(), f, header), err)) fail(err + " '" + o.saveDisk + "'");
+    const std::vector<uint8_t> bytes = encodeImage(*m.disk(), f, header);
+    if (bytes.empty()) fail("--save-disk: a disk of more than 80 cylinders is saved as .hfe (T30)");
+    if (!writeFile(o.saveDisk, bytes, err)) fail(err + " '" + o.saveDisk + "'");
 }
 
 int boot(const Options& o) {
