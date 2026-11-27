@@ -122,7 +122,9 @@ private:
     enum class Ram { Keep, File, Start };
     // Both: the caller holds stateMu_.
     // A new engine from roms_; the old one stays if that fails. fromState: a project's RAM (A129).
-    bool restart(Ram ram, bool fromState = false);
+    // clean (Power cycle, A138): the record cleared, and the CD's served sectors dropped, before the audio resumes.
+    bool restart(Ram ram, bool fromState = false, bool clean = false);
+    void dropFileMedia();  // A138: File mode's media after its memory changed (stateMu_ held)
     void applySelect(const std::vector<uint8_t>& sel);  // a state's select without RAM (stateMu_ held)
     void finishRestore(bool clean);  // A129: the restore has ended: the stand-ins into the record, restored_ dropped
     void unserve();        // A129: the CD drive stops serving the stand-in CDs (before restored_ changes)

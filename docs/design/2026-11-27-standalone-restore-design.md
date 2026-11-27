@@ -57,7 +57,7 @@ sound and the controls as they were.
 - **The prompt.** The engine answers the auto-load (`setAnswerAutoLoad`) in File mode only when it has stand-ins
   (A130's *YES*). Without them the Standalone still asks, as the TS does (A124).
 - **When it is saved.** On close only, by JUCE's wrapper (A120's window saves it before quitting). After a crash
-  the memory file (saved every 60 s) may name sounds the state has no blocks for: the OS asks, as now.
+  the memory file (saved every 60 s) may name sounds the state has no blocks for: the restore skips them (they show --NOT LOADED--); Power cycle gives the OS's question back.
 - **Size.** The record grows as Project mode's does, about 1.35 times the bytes read, and it sits base64-encoded
   again in `TS Reborn.settings` (about 1.8 times in all). A full 8 MB of sampled sounds makes that file about
   15 MB, written on close.

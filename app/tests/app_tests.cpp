@@ -2357,6 +2357,24 @@ void standaloneRestoresMedia(const juce::File& dir) {
     restoreFrom(c, s);
     runCd(c, kBoot);
     CHECK(!c.engine()->snapshot().restoring && c.record().media().empty());
+
+    // The state given with no ROMs, then Erase, then the ROMs: the erased memory boots, with no restore and no
+    // AUTO-LOAD question (the memory before Erase names FLUTE 1, so either would show it booted). Review fix: the
+    // restore's cached start image, that memory, used to boot and be saved over the erased file.
+    const auto none = dir.getChildFile("no-roms");
+    CHECK(none.createDirectory());
+    AppSettings().setRomFolder(none);
+    TsProcessor d(MemoryMode::File);
+    CHECK(d.engine() == nullptr);
+    restoreFrom(d, s);
+    d.eraseMemory();
+    juce::String err;
+    CHECK(d.setRomFolder(juce::File(TSR_ROM_DIR), err) && d.engine() != nullptr);
+    if (!d.engine()) return;
+    runCd(d, kBoot);
+    printRows(d);
+    CHECK(!d.engine()->snapshot().restoring && !shows(d, "AUTO-LOAD"));
+    CHECK(d.record().media().empty());
 }
 
 // The built VST3 through JUCE's VST3 host: TSR_SETTINGS_DIR points the plugin at a temp settings file

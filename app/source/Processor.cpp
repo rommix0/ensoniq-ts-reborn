@@ -233,7 +233,23 @@ bool TsProcessor::setMemoryFile(const juce::File& file, juce::String& err) {
     settings_.setMemoryFile(model_, file);
     memoryError_ = {};
     if (file.existsAsFile() && engine_) restart(Ram::File);
+    if (mode_ == MemoryMode::File) dropFileMedia();
     return true;
+}
+
+// DECISION A138: the Standalone's memory changed (a new file, Erase, a model switch): its recorded media belong to the
+// memory left, so they go, and with no machine the start image is read from the file again at the next start (a
+// restore's cached image must not boot over the new memory). Called after any restart; stateMu_ held.
+void TsProcessor::dropFileMedia() {
+    if (!engine_) {
+        unserve();
+        restored_.clear();
+        restoreWanted_ = false;
+        haveStart_ = false;
+        startSelect_.clear();
+    }
+    const std::lock_guard<std::mutex> lock(mediaMu_);
+    record_.clear();
 }
 
 // DECISION A116: erase writes the 512 KB zero image to the memory file at once (an explicit act, not
@@ -257,6 +273,7 @@ void TsProcessor::eraseMemory() {
             haveStart_ = true;
             if (engine_) restart(Ram::Start);
         }
+        if (mode_ == MemoryMode::File) dropFileMedia();
     }
     if (auto* p = params_.getParameter("sound"); p != nullptr && soundNow() != 0) {
         p->beginChangeGesture();
@@ -272,10 +289,7 @@ void TsProcessor::powerCycle() {
     const std::lock_guard<std::mutex> lock(stateMu_);
     if (!engine_) return;
     restoreWanted_ = false;
-    restart(Ram::Keep, true);
-    const std::lock_guard<std::mutex> m(mediaMu_);
-    cd_.poll();  // sectors read before the cycle, so they do not reach the cleared record later
-    record_.clear();
+    restart(Ram::Keep, true, true);
 }
 
 // A failed save is shown on the settings page (memoryError) until a save succeeds.
@@ -288,7 +302,7 @@ bool TsProcessor::saved(bool ok) {
     return ok;
 }
 
-bool TsProcessor::restart(Ram ram, bool fromState) {
+bool TsProcessor::restart(Ram ram, bool fromState, bool clean) {
     suspendProcessing(true);  // from here the audio thread is out of processBlock, and stays out
     const auto snap = engine_ ? engine_->snapshot() : ens::app::Snapshot{};
     // Before tick saw it; not for a state load, which has already replaced restored_ and cleared the record with the
@@ -360,6 +374,11 @@ bool TsProcessor::restart(Ram ram, bool fromState) {
         if (cd.second != 0) fresh->insertCd(cd.first, cd.second);
         engine_.swap(fresh);  // fresh now holds the old engine, freed below after the resume
         cd_.setEngine(engine_.get());  // before the old engine (and its port) is freed
+        if (clean) {  // DECISION A138: Power cycle: what was read before, gone while the audio is suspended
+            const std::lock_guard<std::mutex> m(mediaMu_);
+            cd_.poll();
+            record_.clear();
+        }
         startImage_ = std::move(img);
         startSelect_ = std::move(sel);
         haveStart_ = true;
@@ -432,6 +451,8 @@ void TsProcessor::switchModel(ens::ts::Model m, bool start) {
     const bool booted = engine_ && snap.booted;
     if (mode_ == MemoryMode::File) {
         if (booted) saved(saveMemoryFile(settings_.memoryFile(model_), engine_->machine().ramImage()));
+        const std::lock_guard<std::mutex> lock(mediaMu_);
+        record_.clear();  // DECISION A138: the Standalone's media are the memory left's
     } else {
         modelRam_[slot(model_)] = booted ? engine_->machine().ramImage() : startImage_;
         modelSelect_[slot(model_)] = select(snap);
@@ -820,6 +841,11 @@ void TsProcessor::getStateInformation(juce::MemoryBlock& dest) {
 void TsProcessor::setStateInformation(const void* data, int size) {
     const auto xml = getXmlFromBinary(data, size);
     if (!xml || !xml->hasTagName("TSState")) return;
+    // A model not known leaves the machine as another version does.
+    auto stateModel = ens::ts::Model::Ts10;
+    const bool v1 = xml->getIntAttribute("version") == 1 && modelOf(*xml, stateModel);
+    // DECISION A138: the Standalone takes a state of its running model only (its sound and media are that model's).
+    if (mode_ == MemoryMode::File && stateModel != model_) return;
     juce::ValueTree tree;
     if (const auto* t = xml->getChildByName(params_.state.getType())) tree = juce::ValueTree::fromXml(*t);
 
@@ -841,13 +867,10 @@ void TsProcessor::setStateInformation(const void* data, int size) {
     }
     if (tree.isValid()) params_.replaceState(tree);
 
-    // A model not known leaves the machine as another version does.
-    auto stateModel = ens::ts::Model::Ts10;
-    const bool v1 = xml->getIntAttribute("version") == 1 && modelOf(*xml, stateModel);
     if (mode_ == MemoryMode::File) {
         auto media = v1 ? parseMedia(xml->getChildByName("Media")) : std::vector<SavedMedium>();
         const std::lock_guard<std::mutex> lock(stateMu_);
-        if (stateModel != model_ || media.empty()) {
+        if (stateModel != model_ || media.empty()) {  // a switch since the check above: no media
             applySelect(sel);
             return;
         }
