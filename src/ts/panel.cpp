@@ -131,8 +131,9 @@ void Panel::queue(uint8_t a, uint8_t b) {
 }
 
 // DECISION T16: a press is code | 0x80 then 0x00, a release code then 0x00.
+// DECISION T32: the TS-12 OS reads each button two codes up (0x02-0x41).
 void Panel::button(Button b, bool down) {
-    const auto code = static_cast<uint8_t>(b);
+    const auto code = static_cast<uint8_t>(static_cast<uint8_t>(b) + (model_ == Model::Ts12 ? 2 : 0));
     queue(down ? static_cast<uint8_t>(code | 0x80) : code, 0x00);
 }
 

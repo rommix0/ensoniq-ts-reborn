@@ -902,6 +902,13 @@ Evidence cites the Motorola MC68681 data sheet (MC68681/D, Sep 1985, `datasheets
 - Confidence: High for the key codes, the release byte and Y1; medium for what the release and pressure values are physically.
 - Status: implemented in `keyRange`, `Panel::key`, `Panel::pressure` (`src/ts/panel.*`), `kMuxSelect` and `Machine::create` (`src/ts/machine.*`) (Plan 12 Task 2).
 
+## T32: TS-12 button codes
+- Options: (a) the TS-10's codes (T16) on both models, as Plan 12 did; (b) the codes the TS-12 OS reads.
+- Choice: (b). `Panel::button` adds 2 to the `Button` code on the TS-12: its 62 buttons and the Foot Switch 1 contacts are 0x02-0x41, the press and release forms as T16. `Button` keeps the TS-10's values.
+- Evidence: the T16 sweep repeated on both models, 2026-11-27 (issue #9's follow-up): from the play screen each code 0x00-0x7F pressed with `00` and the display, LEDs and MIDI out compared. Every TS-10 code c gives on the TS-12 what c + 2 gives: 0x0A's SYSTEM page at 0x0C, 0x1A's MIDI page at 0x1C, 0x3D's Compare (LED 14) at 0x3F, 0x00's controller 64 at 0x02, 0x3E's ATCK and 0x3F's XPOS at 0x40 and 0x41. TS-12 0x00, 0x01 and 0x42-0x7F, and TS-10 0x40-0x4F, do nothing. Before, the TS-12's panel opened the page two codes down (Click opened System, MIDI Control a bank page), and the engine's auto-load and prompt answers (A124, A131) pressed the wrong soft buttons.
+- Confidence: High for the codes with a page or MIDI message; medium for the Foot Switch 1 left contact (0x03, nothing on the play screen, as 0x01 on the TS-10).
+- Status: implemented in `Panel::button` (`src/ts/panel.cpp`). Tests: ts_panel_ts12_button_codes, ts12_buttons_open_their_pages.
+
 # App
 
 Plan 4's engine and app (TS Reborn). Where a KS-32 Reborn decision is carried over, the Evidence names it.

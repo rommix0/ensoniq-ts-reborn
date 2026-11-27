@@ -646,6 +646,8 @@ soon as the OS redraws the letter. `D5` with one parameter: the track fields ove
 **Fact.**
 - A press is `code | 0x80`, then `00`; a release is `code`, then `00`. Codes are 0x00-0x3F. A
   single byte does nothing.
+- The TS-12 OS reads every code below two up, 0x02-0x41 (T32): the same sweep on the TS-12 gives each page
+  at its TS-10 code + 2, and 0x00, 0x01 and 0x42-0x7F do nothing.
 - The 62 panel buttons and the two contacts of the Foot Switch 1 jack fill all 64 codes:
 
 | Control | Code | Evidence |
