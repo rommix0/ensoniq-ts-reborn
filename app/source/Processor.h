@@ -86,7 +86,7 @@ public:
 
     const juce::String getName() const override { return JucePlugin_Name; }
     bool acceptsMidi() const override { return true; }
-    bool producesMidi() const override { return false; }
+    bool producesMidi() const override { return true; }  // DECISION A133: the firmware's MIDI out
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
@@ -138,6 +138,16 @@ private:
     bool romStored_ = false;  // ... and whether it is the stored one
     int block_ = 0;
     std::vector<float> auxL_, auxR_;  // Aux when its bus is off, added into Main (A109); block_ frames
+    juce::MidiBuffer midiOut_;        // DECISION A133: the block's MIDI out, swapped into the host's buffer
+    // DECISION A134: the TS's analog outputs are AC-coupled; the chips' digital output carries a few LSB of DC.
+    static constexpr double kDcHz = 5.0;
+    struct DcBlock {
+        float x1 = 0, y1 = 0;
+        void run(float* x, int n, float r);
+    };
+    DcBlock dc_[4];  // Main L R, Aux L R
+    float dcR_ = 0;
+    static void addMidiOut(void* self, const uint8_t* data, int size);
     int ticks_ = 0;            // timer ticks (30 Hz) since the last save request
     bool ramPending_ = false;  // a requestRam is waiting for takeRam
     std::vector<uint8_t> ramBuf_;

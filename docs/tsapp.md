@@ -76,10 +76,11 @@ The paths are Windows'. On Linux, `%APPDATA%\TS Reborn` is `~/.config/TS Reborn`
 
 ## Audio and MIDI
 
-- **Standalone.** The settings page has JUCE's device selector: output device, buffer size and MIDI inputs. The wrapper's own Options menu also stays. The Standalone's default layout has the Aux bus off, so Main and Aux play together on one stereo pair.
-- **VST3.** The host owns the devices. MIDI comes from the host's track, every byte as the MIDI IN jack would receive it, sysex and real-time included (A108). The firmware itself takes Poly-Key and channel pressure from MIDI. One host block carries at most 1024 bytes into the machine (A101): a sysex message over about 1 KB arriving in one block is cut, and the excess is counted (`Snapshot::midiDropped`) but not shown.
+- **Standalone.** The settings page has JUCE's device selector: output device, buffer size, MIDI inputs and the MIDI output. The wrapper's own Options menu also stays. The Standalone's default layout has the Aux bus off, so Main and Aux play together on one stereo pair.
+- **VST3.** The host owns the devices. MIDI comes from the host's track, every byte as the MIDI IN jack would receive it, sysex and real-time included (A108). The firmware itself takes Poly-Key and channel pressure from MIDI. A long sysex is held and enters at the MIDI wire's pace (31 250 baud, about 3 KB a second), so a 300 KB sequence dump takes about 100 s; the engine holds up to 512 KB (A101).
 - **Outputs (A109).** Two stereo buses: Main and Aux. If the host turns Aux off, Aux is added into Main. When the host bypasses the plugin the machine keeps running and takes MIDI (so a note-off sent while bypassed is not lost), and the output is silent. The Aux outputs carry a track only when its Effects Bus Routing (Track Effects page) is `-AUX-`; the default routing sends everything to Main.
-- **MIDI out** from the firmware is counted and not sent anywhere. The app reads it only to know which sound is selected.
+- **MIDI out (A133)** from the firmware goes to the host: the VST3's MIDI output and the Standalone's MIDI output device, as whole messages at the start of each block. Editors and librarians get the OS's replies. The OS receives sysex only with `SYS-EX=ON` (MIDI Control, third page); a new memory has it `OFF`.
+- **DC (A134).** The outputs are AC-coupled, as the TS's analog board is: a 5 Hz one-pole high-pass on each output removes the few LSB of DC the chips' truncating arithmetic leaves after a note (OT12, T11).
 
 ## The VST3: the state in the project
 
@@ -157,6 +158,5 @@ Environment variables read when the app starts. Neither is needed for normal use
 - **SCSI** has a CD-ROM drive at ID 4 only; no SCSI hard disk. Disk images in `.hfe` and `.efe` formats are not read (`docs/verification-plan5.md`).
 - **The TS-12** is not emulated yet. It is in scope again since 2026-11-26 (the user's decision): its features are added where they fit.
 - **The OS's answer to a MIDI-in program change** (above) is unexplained.
-- **Large sysex.** A sysex message over about 1 KB arriving in one host block is cut (A101). The dropped bytes are counted in the engine but shown nowhere.
 - **The small print the photo has** (jack labels, "Bypass", "Replace w/FX") is not drawn.
 - The person-only checks of Plans 4 and 5 were done by the user on 2026-11-15; what is left for a person is in `docs/verification-plan6.md`.
