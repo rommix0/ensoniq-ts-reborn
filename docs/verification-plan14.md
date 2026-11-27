@@ -46,6 +46,8 @@ Windows' resize check; it ended at 2424 x 367 around the hidden panel before the
 
 ## User to run
 
+Done by the user on 2026-11-27 and approved.
+
 - Toggle the keyboard in the Standalone (the window follows the strip) and in a DAW (one resize each way): no band
   around the hidden panel;
   click again mid-slide; resize the window in both states; close and reopen (it opens as left).
