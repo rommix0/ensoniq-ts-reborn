@@ -31,7 +31,8 @@ foreach ($f in $roms.Keys) {
 }
 
 if (-not (Test-Path build-dist\CMakeCache.txt)) {
-    $cfg = @('-S', '.', '-B', 'build-dist', '-G', 'Visual Studio 17 2022', '-A', 'x64', '-DENS_BUILD_APP=ON',
+    # No -G: CMake takes the newest Visual Studio installed (2022 or later), so a newer one works too.
+    $cfg = @('-S', '.', '-B', 'build-dist', '-A', 'x64', '-DENS_BUILD_APP=ON',
              '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded')  # no Visual C++ redistributable needed
     if ($JuceSource) { $cfg += "-DFETCHCONTENT_SOURCE_DIR_JUCE=$JuceSource" }
     & cmake @cfg
