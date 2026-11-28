@@ -319,6 +319,8 @@ void Machine::write16(uint32_t a, uint16_t v) {
 // the next slot (a carry of 16 or more skips the CPU); then the OTTO slot, the DUART by an exact
 // rational X1 accumulator, the ESP idle steps while halted, and the lines. Slot i of an n-slot frame.
 void Machine::slot(int i, int n) {
+    // DECISION T33: the ESP runs the frame's sample at its end; until then the host sees its PC move with the slots.
+    board_.esp().setElapsed(n > 0 ? kEspSlotsPerFrame * std::min(i, n) / n : 0);
     if (carry_ >= kSlotClocks) {
         carry_ -= kSlotClocks;
     } else {

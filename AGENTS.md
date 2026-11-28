@@ -102,10 +102,10 @@ purpose, record the new value here and in the current verification report.
 
 | Hash | Printed by | Value (Plan 3, unless noted) |
 |---|---|---|
-| Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `ba7e34a4cf23d1e0` (OT16 free-running pot A/D, 2026-11-16; Plan 3 `3bfc7336098a6def`) |
-| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `23b6485893beb761` (OT16, 2026-11-16: the OS's analog scale is right from power-on; Plan 5 Task 4's `3374892bfdc150e6`) |
-| Render | `tsemu render tests/data/full_chord.mid` | `0aa23b0ebbdeeec6` (OT16; was `524fcc64af78f175`) |
-| Render | `tsemu render tests/data/filtered_patch.mid` | `e9d27e034e29b527` (OT16; was `01e3c8622cc8c8be`) |
+| Boot trace | `ts_boot_is_deterministic` (`boot trace hash`) | `f1e464f1a074898f` (Plan 17, 2026-11-27: T33 the ESP's PC moves within a frame, E34 host data kept over a pending read; OT16's `ba7e34a4cf23d1e0`) |
+| Render | `ts_render_is_deterministic`; `tsemu render tests/data/player_smoke.mid` | `62ba6a4ce86d4cb4` (T33, E34, Plan 17: the OS's ESP parameter writes; OT16's `23b6485893beb761`) |
+| Render | `tsemu render tests/data/full_chord.mid` | `7e636e9b602ee5db` (T33, E34; OT16's `0aa23b0ebbdeeec6`) |
+| Render | `tsemu render tests/data/filtered_patch.mid` | `2f07609f83dbede1` (T33, E34; OT16's `e9d27e034e29b527`) |
 
 Firmware tests read the ROMs from `ENS_ROM_DIR` (default `roms/`) and print "skip: ROMs not found"
 without them. The disk tests read the user's disk images from `ENS_DISK_DIR` (a CMake cache variable, a

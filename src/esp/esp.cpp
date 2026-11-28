@@ -1,5 +1,7 @@
 #include "esp/esp.h"
 
+#include <algorithm>
+
 #include "esp/esp_isa.h"
 
 namespace ens {
@@ -34,7 +36,7 @@ void Esp::reset() {
     pAlu_ = PendingAlu{};
     pMul_ = PendingMul{};
     pRam_ = PendingRam{};
-    pc_ = 0;
+    pc_ = endPc_ = 0;
     // DECISION E23 (host side): the host registers return to 0 and the ESP is running; the
     // HALT pin is an external level and is kept.
     halted_ = false;
@@ -192,6 +194,7 @@ bool Esp::step() {
     // (9) DECISION E19: END (or E11: word 159) ends the sample after its MUL and RAM fields
     // have been issued; their results and the RAM cycle carry into the next sample.
     if (op == Op::END || pc_ == kProgramSize - 1) {
+        endPc_ = pc_;
         agen_.endOfSample();
         // DECISION E19: at most one pending host GPR/INSTR transfer, then sample HALT.
         hostTransfer();
@@ -282,8 +285,15 @@ void Esp::hostTransfer() {
     if (!req_.valid) return;
     const int a = req_.addr;
     if (req_.read) {
-        hostGpr_ = readReg(a);
-        hostInstr_ = instr(a);
+        // DECISION E34: the bytes the host wrote after the read select stay; the read fills the others.
+        uint32_t gprKeep = 0;
+        uint64_t instrKeep = 0;
+        for (int i = 0; i < 3; ++i)
+            if (req_.kept >> i & 1) gprKeep |= 0xFFu << (16 - 8 * i);
+        for (int i = 3; i < 9; ++i)
+            if (req_.kept >> i & 1) instrKeep |= 0xFFull << (40 - 8 * (i - 3));
+        hostGpr_ = (readReg(a) & ~gprKeep) | (hostGpr_ & gprKeep);
+        hostInstr_ = (instr(a) & ~instrKeep) | (hostInstr_ & instrKeep);
     } else {
         if (req_.wrGpr) writeReg(a, hostGpr_);
         if (req_.wrInstr) setInstr(a, hostInstr_);
@@ -344,7 +354,7 @@ uint8_t Esp::hostRead(uint8_t addr) const {
                                         (clearActive_ ? kCtlClear : 0) |
                                         (refreshDisable_ ? kCtlRefreshOff : 0));
         case kRamCtl: return ramCtl_;
-        case 0x16: return static_cast<uint8_t>(pc_);
+        case 0x16: return static_cast<uint8_t>(halted_ ? pc_ : std::min(elapsed_, endPc_));  // DECISION T33
         // DECISION E29: $17 (refresh counter) and $1F read (frame counter) are test-only and
         // read 0; the serial control register has bits 1:0 hard-wired to 1.
         case 0x18: return static_cast<uint8_t>((serCtl_ & 0xFC) | 0x03);
@@ -357,6 +367,7 @@ uint8_t Esp::hostRead(uint8_t addr) const {
 }
 
 void Esp::hostWrite(uint8_t addr, uint8_t v) {
+    if (addr <= 0x08 && req_.valid && req_.read) req_.kept |= static_cast<uint16_t>(1u << addr);  // E34
     switch (addr) {
         case 0x00: hostGpr_ = (hostGpr_ & 0x00FFFF) | (static_cast<uint32_t>(v) << 16); return;
         case 0x01: hostGpr_ = (hostGpr_ & 0xFF00FF) | (static_cast<uint32_t>(v) << 8); return;
