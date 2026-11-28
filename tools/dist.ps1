@@ -48,6 +48,10 @@ if (-not (Test-Path build-dist\CMakeCache.txt)) {
     & cmake @cfg
     if ($LASTEXITCODE) { throw 'configure failed' }
 }
+# DECISION A142: JUCE does not remake the Windows version resource when the company or copyright change; remove it
+# so the build writes it from app\CMakeLists.txt again.
+$rc = 'build-dist\app\TSReborn_artefacts\JuceLibraryCode\TSReborn_resources.rc'
+if (Test-Path -LiteralPath $rc) { Remove-Item -LiteralPath $rc }
 & cmake --build build-dist --config Release --target TSReborn_Standalone TSReborn_VST3
 if ($LASTEXITCODE) { throw 'build failed' }
 
