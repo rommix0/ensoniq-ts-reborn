@@ -1847,6 +1847,33 @@ KeyCount keysOf(juce::Component& ed, Model m) {
     return k;
 }
 
+// DECISION A141: the display's font is Ensoniq VFD Regular, one glyph advance per cell at any size, and the cursor
+// bar sits where the font's Cursor weight puts it. With the ink centred in its row, the bar's bottom is 0.602 em below
+// the row's centre; on the panel (cell 14.125, row 29: 0.739 em to the row's edge) it stays inside its row.
+void vfdFontCheck() {
+    for (const float cell : {8.48f, 14.125f, 28.25f}) {
+        const auto f = vfdFont(cell);
+        CHECK(f.getTypefaceName() == "Ensoniq VFD");
+        for (const char* s : {"A", "W", "0", "_"})
+            CHECK(std::abs(juce::GlyphArrangement::getStringWidth(f, s) - cell) < cell * 0.01f);
+    }
+    const float em = 14.125f / 0.72f;
+    const auto bar = vfdCursorBar(14.125f, {100.0f, 50.0f});
+    std::printf("  vfd cursor bar: %.2f,%.2f %.2f x %.2f\n", bar.getX(), bar.getY(), bar.getWidth(), bar.getHeight());
+    CHECK(std::abs(bar.getX() - (100 + 0.053f * em)) < 0.01f && std::abs(bar.getRight() - (100 + 0.509f * em)) < 0.01f);
+    CHECK(std::abs(bar.getY() - (50 + 0.086f * em)) < 0.01f && std::abs(bar.getBottom() - (50 + 0.164f * em)) < 0.01f);
+    // The panel's cells (kDisplayText, 2 x 40): the baseline 0.438 em under the row's centre, the bar below it.
+    const auto& t = ens::app::kDisplayText;
+    const float cell = t.w / 40.0f, rowH = t.h / 2.0f, emP = cell / 0.72f;
+    const auto inRow = vfdCursorBar(cell, {0.0f, rowH / 2.0f + 0.438f * emP});
+    std::printf("  vfd cursor bar in a %.2f x %.2f cell: y %.2f-%.2f\n", cell, rowH, inRow.getY(), inRow.getBottom());
+    CHECK(inRow.getBottom() < rowH && inRow.getRight() < cell);
+    // App messages in capitals, row by row; a missing row is empty.
+    CHECK(displayMessageRow("ROM missing:\nos/ts10_310h.bin", 0) == "ROM MISSING:");
+    CHECK(displayMessageRow("ROM missing:\nos/ts10_310h.bin", 1) == "OS/TS10_310H.BIN");
+    CHECK(displayMessageRow("No audio device", 0) == "NO AUDIO DEVICE" && displayMessageRow("No audio device", 1).isEmpty());
+}
+
 // The model's logo (A140) in a painted editor: its triangle's pixels (blue over green, as `editor`) and the letter
 // pixels (green over red) in the rect's right quarter, where the last digit is: a 0 on the TS-10, a 2 on the TS-12.
 // The two digits cover about as many pixels, so they are told apart by shape (`digit`, the letter mask there).
@@ -2976,6 +3003,7 @@ int main() {
     midiOut(dir.getChildFile("midi-out"));
     dcBlocked(dir.getChildFile("dc"));
     sampleRam8(dir.getChildFile("simm8"));  // not "aux": a reserved device name on Windows
+    vfdFontCheck();
     editor(dir.getChildFile("editor"));
     editorKeyboardSlide(dir.getChildFile("ed-keyboard"));
     keyboardToggleMidSlide(dir.getChildFile("ed-keyboard-mid"));

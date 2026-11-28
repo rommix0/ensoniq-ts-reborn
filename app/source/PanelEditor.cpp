@@ -321,14 +321,17 @@ public:
         const auto err = ed_.romError();
         const auto& p = ed_.snap().panel;
         g.setColour(kVfd);
+        // DECISION A141: the glyph's ink (0.058-0.818 em above the baseline) centred in its row; one advance per cell.
+        const auto vfd = vfdFont(cell);
+        const float em = cell / 0.72f, baseDrop = rowH / 2.0f + 0.438f * em;
         for (int row = 0; row < 2; ++row) {
             for (int col = 0; col < ens::ts::kPanelCols; ++col) {
                 const juce::Rectangle<float> r(x0 + col * cell, y0 + row * rowH, cell, rowH);
                 int code = ' ';
                 bool hideChar = false, underline = false;
                 if (err.isNotEmpty()) {
-                    // No engine: the reason, two rows cut to 40 columns.
-                    const auto line = juce::StringArray::fromLines(err)[row];
+                    // No engine: the reason, in capitals (A141), two rows cut to 40 columns.
+                    const auto line = displayMessageRow(err, row);
                     if (col < line.length()) code = static_cast<int>(line[col]) & 0x7F;
                 } else {
                     code = static_cast<unsigned char>(p.text[row][col]);
@@ -345,11 +348,16 @@ public:
                                juce::Justification::centred, false);
                 } else if (!hideChar && code >= 0x20 && code <= 0x7E) {
                     // DECISION A113: 0x20-0x7E as ASCII; 0x00-0x1F and 0x7F blank (the overlay shows them).
-                    g.setFont(monoFont(rowH * 0.8f));
-                    g.drawText(juce::String::charToString(static_cast<juce::juce_wchar>(code)), r,
-                               juce::Justification::centred, false);
+                    // DECISION A141: drawn at its baseline, so a glyph is never dropped for its width.
+                    juce::GlyphArrangement glyph;
+                    glyph.addLineOfText(vfd, juce::String::charToString(static_cast<juce::juce_wchar>(code)),
+                                        r.getX(), r.getY() + baseDrop);
+                    glyph.draw(g);
                 }
-                if (underline) g.fillRect(r.getX() + 1.5f, r.getBottom() - 2.5f, cell - 3.0f, 2.0f);
+                if (underline) {
+                    const auto bar = vfdCursorBar(cell, {r.getX(), r.getY() + baseDrop});
+                    g.fillRoundedRectangle(bar, bar.getHeight() / 2.0f);
+                }
             }
         }
     }
@@ -846,6 +854,29 @@ void KeyPart::mouseDrag(const juce::MouseEvent& e) { findParentComponentOfClass<
 void KeyPart::mouseUp(const juce::MouseEvent&) { findParentComponentOfClass<Board>()->keyUp(); }
 
 }  // namespace
+
+// DECISION A141: Ensoniq VFD Regular (tymcode/ensoniq-vfd-font, SIL OFL 1.1), compiled in unchanged. JUCE sizes a
+// font by its line height, so the height for one advance per cell is measured once at 100.
+juce::Font vfdFont(float cellWidth) {
+    static const juce::Typeface::Ptr face =
+        juce::Typeface::createSystemTypefaceFor(TsArt::EnsoniqVFD_otf, static_cast<size_t>(TsArt::EnsoniqVFD_otfSize));
+    if (face == nullptr) return monoFont(cellWidth / 0.6f);
+    static const float advanceAt100 =
+        juce::GlyphArrangement::getStringWidth(juce::Font(juce::FontOptions(face)).withHeight(100.0f), "A");
+    return juce::Font(juce::FontOptions(face)).withHeight(100.0f * cellWidth / advanceAt100);
+}
+
+// DECISION A141: the cursor bar where the font's Cursor weight draws it under the cell: x 0.053-0.509 em from the
+// cell's left, 0.086-0.164 em below the baseline (one advance, 0.72 em, is the cell's width).
+juce::Rectangle<float> vfdCursorBar(float cellWidth, juce::Point<float> baselineLeft) {
+    const float em = cellWidth / 0.72f;
+    return {baselineLeft.x + 0.053f * em, baselineLeft.y + 0.086f * em, 0.456f * em, 0.078f * em};
+}
+
+// DECISION A141: the display shows capitals only, as the instrument's; the settings page keeps a file's exact name.
+juce::String displayMessageRow(const juce::String& message, int row) {
+    return juce::StringArray::fromLines(message)[row].toUpperCase();
+}
 
 PanelEditor::PanelEditor(TsProcessor& p) : AudioProcessorEditor(p), proc_(p), engine_(p.engine()) {
     if (engine_ != nullptr) snap_ = engine_->snapshot();
