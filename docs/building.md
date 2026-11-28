@@ -49,18 +49,18 @@ powershell -ExecutionPolicy Bypass -File tools\dist.ps1
 
 - The first run downloads JUCE (about 150 MB) and then compiles. It takes a few minutes (up to about 15 on a
   slow PC), and prints a lot of text. Warnings in that text are normal.
-- It is finished when the last line reads `dist: C:\src\ensoniq-ts-reborn\dist\TS Reborn-1.0.0`.
+- It is finished when the last line reads `dist: C:\src\ensoniq-ts-reborn\dist\TS Reborn-1.1.0`.
 
 ### 5. Run it
 
-Open `C:\src\ensoniq-ts-reborn\dist\TS Reborn-1.0.0` in Explorer.
+Open `C:\src\ensoniq-ts-reborn\dist\TS Reborn-1.1.0` in Explorer.
 
 - **The Standalone app:** double-click `TS Reborn.exe`. On the settings page (the gear on the panel) pick your
   audio output and your MIDI keyboard.
 - **The VST3 plugin:** copy the whole `TS Reborn.vst3` folder into `C:\Program Files\Common Files\VST3`, then
   rescan plugins in your DAW. It carries its own ROMs, so it works from there.
 
-The whole `TS Reborn-1.0.0` folder can be moved anywhere. The program finds the ROMs in its `roms` folder.
+The whole `TS Reborn-1.1.0` folder can be moved anywhere. The program finds the ROMs in its `roms` folder.
 
 ### Getting a newer version later
 
@@ -104,7 +104,7 @@ cd ensoniq-ts-reborn
 tools/dist.sh
 ```
 
-The result is `dist/TS Reborn-1.0.0-linux`. Run `TS Reborn` there, or copy `TS Reborn.vst3` to `~/.vst3`.
+The result is `dist/TS Reborn-1.1.0-linux`. Run `TS Reborn` there, or copy `TS Reborn.vst3` to `~/.vst3`.
 
 ## macOS
 

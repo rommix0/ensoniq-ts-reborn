@@ -6,7 +6,7 @@ This emulator was created by Anthony C. Bartman (@rommix0) with the assistance o
 
 An emulator of the Ensoniq TS-10 (1993), the Performance/Composition Synthesizer. The TS-12 runs as a second model (a 76-key keyboard with channel pressure, its own OS v3.10). It runs the instrument's own operating system, OS v3.10, from your ROM files on an emulated machine: a 68000-class CPU, the ES5506 OTTO wave chip, the ES5510 ESP effects chip and the 68681 DUART. Every screen, sound and effect comes from the original firmware, unmodified, played from a MIDI keyboard in a Standalone app or a VST3 instrument named "TS Reborn". It follows the method of [KS-32 Reborn](https://github.com/rommix0/ensoniq-ks32-reborn).
 
-**Status:** version 1.0.0. The TS-10 machine runs the unmodified OS v3.10 in a Standalone app and a VST3 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64, Linux x64 and macOS; see [docs/tsapp.md](docs/tsapp.md), named `APP-GUIDE.md` in a release folder).
+**Status:** version 1.1.0 (see [CHANGELOG.md](CHANGELOG.md)). The TS-10 and TS-12 machines run the unmodified OS v3.10 in a Standalone app and a VST3 instrument, "TS Reborn", with the front panel drawn and playable (Windows x64, Linux x64 and macOS; see [docs/tsapp.md](docs/tsapp.md), named `APP-GUIDE.md` in a release folder).
 
 The floppy drive works: the OS reads and writes disk images (raw `.img`, `.gkh`, Giebler `.ede`/`.eda`, HxC `.hfe` including 255-cylinder super disks) of its own and of the ASR-10 and EPS families, from the drive on the panel or `tsemu --disk`. The SP-4 SCSI board adds a CD-ROM drive at ID 4 (`.iso` or `.cue` images, read-only, in the app and `tsemu --cd`). VST3 projects can reload sampled sounds without needing to reload from the original disk images. `.syx` files (sound, preset and sequence dumps) can be sent from the disk drive's menu or dropped on the panel. `tsemu` boots the machine headless, renders a MIDI file to WAV and measures its speed.
 
@@ -16,7 +16,7 @@ The checks only a person can do (sound, the panel, the drives, a DAW) were done 
 
 ## The release folder
 
-`tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.0.0` (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README with its panel picture, the license, the app guide, and the eight ROMs, beside the program and inside the VST3 package.
+`tools\dist.ps1` (Windows) and `tools/dist.sh` (Linux) build TS Reborn and write `dist/TS Reborn-1.1.0` (Linux: `-linux`): the program, the `TS Reborn.vst3` package, this README with its panel picture, the license, the changelog, the app guide, and the eight ROMs, beside the program and inside the VST3 package.
 
 On Windows it needs nothing installed: run the program, or copy `TS Reborn.vst3` to `C:\Program Files\Common Files\VST3`, and it finds its ROMs.
 

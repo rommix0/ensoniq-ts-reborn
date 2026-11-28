@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Linux counterpart of tools/dist.ps1: builds the TS Reborn Standalone and VST3 (GCC x64, Release, static
 # libstdc++ and libgcc) in build-dist-linux and assembles "dist/TS Reborn-<version>-linux": TS Reborn, the
-# TS Reborn.vst3 package, README.md with panel.png, LICENSE, the display font's OFL-EnsoniqVFD.txt (A141), the app
+# TS Reborn.vst3 package, README.md with panel.png, LICENSE, CHANGELOG.md, the display font's OFL-EnsoniqVFD.txt (A141), the app
 # guide, and the eight ROM files (the app
 # loads six of them per model), in roms/ beside the program and again inside the VST3 package
 # (Contents/Resources/roms). DECISION A126.
@@ -55,7 +55,7 @@ rm -rf "$out"
 mkdir -p "$out"
 cp "$art/Standalone/TS Reborn" "$out/"
 cp -r "$art/VST3/TS Reborn.vst3" "$out/"
-cp README.md panel.png LICENSE "$out/"
+cp README.md panel.png LICENSE CHANGELOG.md "$out/"
 # The display's font (A141) is inside both programs; its license goes with each, the VST3 being installed alone.
 cp app/resources/fonts/OFL.txt "$out/OFL-EnsoniqVFD.txt"
 cp app/resources/fonts/OFL.txt "$out/TS Reborn.vst3/Contents/Resources/OFL-EnsoniqVFD.txt"
