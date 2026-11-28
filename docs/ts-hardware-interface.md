@@ -475,6 +475,12 @@ compared.
 **Tests.** ts_disk_load_page_lists_directory, ts_eject_mid_read_reports_error, ts_reads_both_densities,
 ts_empty_drive_still_reports_no_disk, fdc_control_reset_and_rate, rt_disk_in_the_drive_does_not_allocate.
 
+**Load speed (T34).** A load runs at the speed of the OS's own copy loop (c0f576-c0f5aa): 164 CPU clocks a
+byte (10.8 us), one sector per Read Data command, 5.8 ms a sector, about 170 blocks a second on DD and HD
+alike. LOW STRING (7771 blocks, `DSKA0001_strings.hfe`) takes 45.7 s and AD-001's GRND PIANO (3055 blocks)
+18.1 s. A real HD drive gives a byte every 16 us, so it needs at least 10 ms a sector: the emulator loads about
+twice as fast as a TS-10 would.
+
 ## SCSI: the SP-4 board and a CD-ROM drive (T25-T29)
 
 Found in Plan 7 from the OS v3.10 disassembly, the WD33C93B datasheet (`datasheets/WD_WD33C93B.pdf`) and
@@ -775,6 +781,12 @@ Both now rest elsewhere ("Analog inputs").
   not for later ones; why is not known.
 - A warm boot (the battery RAM kept) keeps the System settings but always starts on U0-0, as a cold
   boot does.
+- The OS marks notes that come in over MIDI: its note handlers (c0209c, c020d8) set bit 15 of the velocity
+  word, and c085f8 sets bit 7 of the key byte in the note's record. Keys played on the keyboard have no mark.
+  The code that reads a key from a record clears the mark, except for the sampled-sound layers' note memory
+  (c13e50-c13ece). So a sampled-sound layer in LEGATO or MINIMODE, played over MIDI, glides to key + 128 when a
+  key is released while another is held: a high sound, then a nearly stopped voice (T35). This is the OS's
+  behaviour and is emulated as it is. The app's on-screen keys go to the keyboard, host MIDI to MIDI IN (A108).
 - Aux output: after the boot, Track Effects shows row 0 `BUS    GENESIS     GENESIS     GENESIS`
   and row 1 `VOICE` for tracks 1-3, track 1's underlined. Up steps track 1's Effects Bus Routing
   through `-FX1-`, `-FX2-`, `-DRY-` to `-AUX-`. Then `90 3C 7F` on channel 1 sounds on Aux (machine
