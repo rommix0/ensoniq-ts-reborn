@@ -242,6 +242,21 @@ it halted at the end of the boot. No error text either way.
 
 **Confidence.** Medium.
 
+## ESP parameter writes while running (T33)
+
+**Fact.** The OS changes an effect's parameters with one routine (c4c916): data into GPR $00-$02, wait for Host
+Access OK, wait while the ESP's PC (host register $16) reads 0x28 or more (c4ca24), write the select, read the
+GPR back (c4c9c6) and, after every transfer, write Read Select = 0xFF (ZERO) as a parking read (c4c9bc). A
+read-back that differs is written again, up to 10 times. The mod wheel on U0-2 WHL-DDL-BEL writes GPR 163 (the
+delay) then GPR 164 (the level, 0x7FFF00) at each step, 410 CPU clocks after the parking read.
+
+**Model.** The machine runs each frame's ESP sample at the frame's end, so the PC is read as the share of the
+frame's 103 instruction periods spent so far, clamped to the last END word. With the PC read as 0 the OS's wait
+did nothing: about half of the wheel's steps had the parking read land after GPR 164's data, 164 went to 0 for 3
+samples and the output clicked twice.
+
+**Confidence.** Medium-high. **MAME.** Not compared.
+
 ## Analog inputs (T8)
 
 **Fact: the path.**

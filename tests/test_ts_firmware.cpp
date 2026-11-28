@@ -875,6 +875,38 @@ TEST(ts_effect_tables_load) {
     CHECK_EQ(zepFail, 0u);
 }
 
+// T33: U0-2 WHL-DDL-BEL (program 74) moves its delay with the mod wheel. For each step the OS writes GPR 163 (the
+// delay) and then GPR 164 (the level, 0x7FFF00, word 3: MUL gpr164 x gpr19 > DOL), each followed by a read-back and
+// a parking read of GPR 0xFF (c4c916, c4c9bc). It waits for the ESP's PC below 0x28 before each select (c4ca24) so
+// the transfers fall early in a sample; with the PC always reading 0 the parking read was sometimes still pending
+// when GPR 164's data went in, the END copied ZERO over it, 164 became 0 for 3 samples and the output clicked twice.
+TEST(ts_mod_wheel_moves_the_delay_without_clicks) {
+    auto m = bootFresh();
+    if (!m) {
+        std::printf("  skip: ROMs not found\n");
+        return;
+    }
+    sendBytes(*m, {0xB0, 0x00, 0x00, 0xB0, 0x20, 0x00, 0xC0, 74});
+    runMs(*m, 800);
+    CHECK(shows(m->panel(), "WHL-DDL-BEL"));
+    sendBytes(*m, {0x90, 60, 100});
+    runMs(*m, 1100);  // past the attack, whose own edges are as sharp as a click
+    const uint64_t frames = msFrames(2000);
+    int levelZero = 0, clicks = 0, prev[2] = {0, 0};
+    Audio a;
+    for (uint64_t f = 0; f < frames; ++f) {
+        m->setAnalog(Analog::ModWheel, static_cast<uint16_t>(f * 1023 / frames));
+        m->runFrame(a);
+        if (m->board().esp().gpr(164) == 0) ++levelZero;
+        if (f >= 2 && std::abs(a.mainL - 2 * prev[1] + prev[0]) > 300) ++clicks;  // second difference
+        prev[0] = prev[1];
+        prev[1] = a.mainL;
+    }
+    std::printf("  frames with the level at 0: %d, clicks: %d\n", levelZero, clicks);
+    CHECK_EQ(levelZero, 0);
+    CHECK_EQ(clicks, 0);
+}
+
 // E33: the same load verification compares CMR's top byte against `written | 0x03`. U0-4 SUITCASE-74
 // (program 24) and U0-5 TRANS-CLAV (program 34) load a CMR value; with bits 17..16 reading 0 the OS
 // retried 10 times and dropped the rest of the effect's parameters. RAM $130 counts the retries of the

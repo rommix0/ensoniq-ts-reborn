@@ -240,6 +240,26 @@ TEST(halt_at_end) {
     CHECK_EQ(e.hostRead(0x16), 0);
 }
 
+// T33: the machine runs a sample at the end of its frame; during the frame the host reads the PC the program would
+// be at by then, clamped to the END word (here word 4). Halted, the PC reads 0.
+TEST(host_pc_follows_the_sample_time) {
+    HostBus bus;
+    Esp e(bus);
+    e.setInstr(4, kEndWord);
+    CHECK_EQ(e.runSample(), 5);
+    e.setElapsed(2);
+    CHECK_EQ(e.hostRead(0x16), 2);
+    e.setElapsed(100);
+    CHECK_EQ(e.hostRead(0x16), 4);
+    e.setElapsed(0);
+    CHECK_EQ(e.hostRead(0x16), 0);
+    e.setHaltPin(true);
+    e.runSample();
+    e.setElapsed(3);
+    CHECK(e.halted());
+    CHECK_EQ(e.hostRead(0x16), 0);
+}
+
 TEST(halt_enable_immediate) {
     for (int pin = 0; pin < 2; pin++) {
         HostBus bus;

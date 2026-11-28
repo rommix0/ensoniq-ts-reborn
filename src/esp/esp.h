@@ -65,6 +65,9 @@ public:
     void idleStep();
     int dolFifoSize() const { return fifo_.size(); }
     uint8_t serialControl() const { return serCtl_; }  // host serial control register as written
+    // DECISION T33: instruction periods of the current sample already spent, set by a caller that runs whole samples
+    // at once (the TS machine, per voice slot); the host's PC register ($16) reads it, clamped to the last END word.
+    void setElapsed(int periods) { elapsed_ = periods; }
 
 private:
     struct PendingAlu {
@@ -112,6 +115,7 @@ private:
     PendingMul pMul_;
     PendingRam pRam_;
     int pc_ = 0;
+    int elapsed_ = 0, endPc_ = 0;  // T33
 
     // Host interface state.
     struct HostRequest {
