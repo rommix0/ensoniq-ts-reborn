@@ -875,11 +875,12 @@ TEST(ts_effect_tables_load) {
     CHECK_EQ(zepFail, 0u);
 }
 
-// T33: U0-2 WHL-DDL-BEL (program 74) moves its delay with the mod wheel. For each step the OS writes GPR 163 (the
+// T33, E34: U0-2 WHL-DDL-BEL (program 74) moves its delay with the mod wheel. For each step the OS writes GPR 163 (the
 // delay) and then GPR 164 (the level, 0x7FFF00, word 3: MUL gpr164 x gpr19 > DOL), each followed by a read-back and
-// a parking read of GPR 0xFF (c4c916, c4c9bc). It waits for the ESP's PC below 0x28 before each select (c4ca24) so
-// the transfers fall early in a sample; with the PC always reading 0 the parking read was sometimes still pending
-// when GPR 164's data went in, the END copied ZERO over it, 164 became 0 for 3 samples and the output clicked twice.
+// a parking read of GPR 0xFF (c4c916, c4c9bc). When the parking read was still pending as GPR 164's data went in, the
+// END copied ZERO over the data, 164 became 0 for 3 samples and the output clicked twice. The OS's wait for the ESP's
+// PC (c4ca24, T33) made that rarer; a timer interrupt before the parking read still left it at any point in a sample,
+// until a pending read kept the bytes the host wrote after it (E34). A held chord, the wheel up and down in 1 s, twice.
 TEST(ts_mod_wheel_moves_the_delay_without_clicks) {
     auto m = bootFresh();
     if (!m) {
@@ -889,13 +890,14 @@ TEST(ts_mod_wheel_moves_the_delay_without_clicks) {
     sendBytes(*m, {0xB0, 0x00, 0x00, 0xB0, 0x20, 0x00, 0xC0, 74});
     runMs(*m, 800);
     CHECK(shows(m->panel(), "WHL-DDL-BEL"));
-    sendBytes(*m, {0x90, 60, 100});
+    sendBytes(*m, {0x90, 60, 100, 0x90, 64, 100});
     runMs(*m, 1100);  // past the attack, whose own edges are as sharp as a click
-    const uint64_t frames = msFrames(2000);
+    const uint64_t second = msFrames(1000);
     int levelZero = 0, clicks = 0, prev[2] = {0, 0};
     Audio a;
-    for (uint64_t f = 0; f < frames; ++f) {
-        m->setAnalog(Analog::ModWheel, static_cast<uint16_t>(f * 1023 / frames));
+    for (uint64_t f = 0; f < 4 * second; ++f) {
+        const uint64_t ph = f % (2 * second), up = ph < second ? ph : 2 * second - ph;
+        m->setAnalog(Analog::ModWheel, static_cast<uint16_t>(up * 1023 / second));
         m->runFrame(a);
         if (m->board().esp().gpr(164) == 0) ++levelZero;
         if (f >= 2 && std::abs(a.mainL - 2 * prev[1] + prev[0]) > 300) ++clicks;  // second difference

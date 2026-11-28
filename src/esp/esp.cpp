@@ -285,8 +285,15 @@ void Esp::hostTransfer() {
     if (!req_.valid) return;
     const int a = req_.addr;
     if (req_.read) {
-        hostGpr_ = readReg(a);
-        hostInstr_ = instr(a);
+        // DECISION E34: the bytes the host wrote after the read select stay; the read fills the others.
+        uint32_t gprKeep = 0;
+        uint64_t instrKeep = 0;
+        for (int i = 0; i < 3; ++i)
+            if (req_.kept >> i & 1) gprKeep |= 0xFFu << (16 - 8 * i);
+        for (int i = 3; i < 9; ++i)
+            if (req_.kept >> i & 1) instrKeep |= 0xFFull << (40 - 8 * (i - 3));
+        hostGpr_ = (readReg(a) & ~gprKeep) | (hostGpr_ & gprKeep);
+        hostInstr_ = (instr(a) & ~instrKeep) | (hostInstr_ & instrKeep);
     } else {
         if (req_.wrGpr) writeReg(a, hostGpr_);
         if (req_.wrInstr) setInstr(a, hostInstr_);
@@ -360,6 +367,7 @@ uint8_t Esp::hostRead(uint8_t addr) const {
 }
 
 void Esp::hostWrite(uint8_t addr, uint8_t v) {
+    if (addr <= 0x08 && req_.valid && req_.read) req_.kept |= static_cast<uint16_t>(1u << addr);  // E34
     switch (addr) {
         case 0x00: hostGpr_ = (hostGpr_ & 0x00FFFF) | (static_cast<uint32_t>(v) << 16); return;
         case 0x01: hostGpr_ = (hostGpr_ & 0xFF00FF) | (static_cast<uint32_t>(v) << 8); return;

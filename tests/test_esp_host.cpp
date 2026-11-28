@@ -260,6 +260,23 @@ TEST(host_pc_follows_the_sample_time) {
     CHECK_EQ(e.hostRead(0x16), 0);
 }
 
+// E34: a byte the host writes into $00-$08 after a read select stays; the read fills only the others. The TS OS
+// parks Read Select on 0xFF after each transfer and may put the next GPR's data in before that read ends.
+TEST(host_write_during_pending_read_is_kept) {
+    HostBus bus;
+    Esp e(bus);
+    e.setInstr(0, kEndWord);
+    e.setGpr(0x10, 0x123456);
+    e.hostWrite(0x80, 0x10);
+    e.hostWrite(0x01, 0xAB);  // only the middle byte
+    e.runSample();
+    CHECK(!busy(e));
+    CHECK_EQ(hr3(e, 0x00), 0x12AB56u);
+    e.hostWrite(0x80, 0x10);  // a new select: every byte is the read's again
+    e.runSample();
+    CHECK_EQ(hr3(e, 0x00), 0x123456u);
+}
+
 TEST(halt_enable_immediate) {
     for (int pin = 0; pin < 2; pin++) {
         HostBus bus;

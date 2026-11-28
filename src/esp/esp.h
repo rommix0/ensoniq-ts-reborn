@@ -122,6 +122,7 @@ private:
         bool valid = false;
         bool read = false, wrGpr = false, wrInstr = false;
         uint8_t addr = 0;
+        uint16_t kept = 0;  // DECISION E34: bit n: host register $0n written while this read was pending
     };
     bool halted_ = false, haltPin_ = false;
     uint32_t hostGpr_ = 0;     // $00-$02
