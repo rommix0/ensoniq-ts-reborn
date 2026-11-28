@@ -228,6 +228,17 @@ void processor(const juce::File& dir) {
     // Either model's memory file: a folder holding the TS-12's is refused while the TS-10 runs (A137).
     CHECK(!p.setRomFolder(dump12, err) && err.contains("m12.bin") && p.settings().romFolder() == roms);
 
+    // DECISION A138 (review fix): a new memory file that does not exist yet keeps the memory, which goes on into it,
+    // so the record of what the OS read stays; an existing file is another memory, and the record goes.
+    const std::vector<uint8_t> sector(2048, 7);
+    p.record().captureCd(1000, 0, sector.data());  // sector 0: the CD enters the record
+    CHECK(!p.record().media().empty());
+    CHECK(p.setMemoryFile(dir.getChildFile("mem-new.bin"), err) && !p.record().media().empty());
+    CHECK(p.setMemoryFile(dir.getChildFile("mem0.bin"), err));
+    CHECK(eraseMemoryFile(dir.getChildFile("mem-other.bin")));
+    CHECK(p.setMemoryFile(dir.getChildFile("mem-other.bin"), err) && p.record().media().empty());
+    CHECK(p.setMemoryFile(dir.getChildFile("mem0.bin"), err));
+
     // A file that cannot be written is refused.
     const auto mem = dir.getChildFile("mem.bin");
     CHECK(eraseMemoryFile(mem) && mem.setReadOnly(true));
@@ -1627,6 +1638,17 @@ void keyboardToggleMidSlide(const juce::File& dir) {
     CHECK(!AppSettings().keyboardShown());
     std::unique_ptr<juce::AudioProcessorEditor> ed(p.createEditor());
     CHECK(ed->getWidth() == 1546 && ed->getHeight() == 234 && stripOut(*ed));
+    // Space held on the toggle: its key repeats toggle once; after the release a press toggles again (review fix).
+    auto& pe = static_cast<PanelEditor&>(*ed);
+    auto& toggle = part(*ed, control(ens::app::ControlKind::Button, ens::app::kKeyboardId));
+    const juce::KeyPress space(juce::KeyPress::spaceKey);
+    toggle.keyPressed(space);
+    toggle.keyPressed(space);  // a repeat (an even count: toggling on each would end where it began)
+    CHECK(pe.keyboardShown());
+    toggle.keyStateChanged(false);  // released (no key is down here)
+    toggle.keyPressed(space);
+    CHECK(!pe.keyboardShown());
+    settle(pe);
     AppSettings().setKeyboardShown(true);
 }
 
