@@ -10,11 +10,15 @@ FetchContent_Declare(juce
   GIT_CONFIG core.longpaths=true)  # JUCE's iOS demo images pass Windows' 260-character limit in a deep folder
 FetchContent_MakeAvailable(juce)
 
+# DECISION A142: the author as the company (a DAW's vendor), the copyright line for the program's own code, and the
+# project's page; the ROMs are separate files, and Ensoniq's names and ROMs are left to their owners. No e-mail.
 juce_add_plugin(TSReborn
   PRODUCT_NAME "TS Reborn"
   VERSION 1.0.0
   BUNDLE_ID com.tsreborn.tsreborn
-  COMPANY_NAME "TS Reborn"
+  COMPANY_NAME "Anthony C. Bartman"
+  COMPANY_COPYRIGHT "Copyright (C) 2026 Anthony C. Bartman. Licensed under AGPL-3.0. Ensoniq, TS-10, TS-12 and the Ensoniq ROMs belong to their owners."
+  COMPANY_WEBSITE "https://github.com/rommix0/ensoniq-ts-reborn"
   PLUGIN_MANUFACTURER_CODE Tsre
   PLUGIN_CODE Tsrb
   FORMATS Standalone VST3
