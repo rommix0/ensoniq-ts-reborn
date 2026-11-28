@@ -186,7 +186,8 @@ public:
     bool keyPressed(const juce::KeyPress& k) override {
         if (k != juce::KeyPress::spaceKey) return false;
         if (local_) {
-            act();
+            if (!byKey_) act();  // once per press: the key's repeats do nothing (review fix)
+            byKey_ = true;       // cleared by keyStateChanged when Space is up
         } else if (!want_) {
             byKey_ = true;
             set(true);

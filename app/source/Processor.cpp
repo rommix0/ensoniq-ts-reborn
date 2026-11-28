@@ -233,11 +233,13 @@ bool TsProcessor::setMemoryFile(const juce::File& file, juce::String& err) {
     settings_.setMemoryFile(model_, file);
     memoryError_ = {};
     if (file.existsAsFile() && engine_) restart(Ram::File);
-    if (mode_ == MemoryMode::File) dropFileMedia();
+    // DECISION A138: an existing file is another memory, so its media go; a new one gets this memory (the running
+    // RAM, or the start image), which the record belongs to (review fix).
+    if (mode_ == MemoryMode::File && file.existsAsFile()) dropFileMedia();
     return true;
 }
 
-// DECISION A138: the Standalone's memory changed (a new file, Erase, a model switch): its recorded media belong to the
+// DECISION A138: the Standalone's memory changed (another existing file, Erase): its recorded media belong to the
 // memory left, so they go, and with no machine the start image is read from the file again at the next start (a
 // restore's cached image must not boot over the new memory). Called after any restart; stateMu_ held.
 void TsProcessor::dropFileMedia() {
